@@ -1,0 +1,16 @@
+[package]
+name = "shpool"
+version = "0.1.0"
+edition = "2021"
+authors = ["Ethan Pailes <pailes@google.com>", "Cloudtop Connectivity Team"]
+description = '''
+shpool is a mechanism for establishing lightweight persistant shell
+sessions to gracefully handle network disconnects
+'''
+
+[dependencies]
+clap = { version = "3", features = ["derive"] } # cli parsing
+anyhow = "1" # dynamic, unstructured errors
+log = "0.4" # logging facade
+fern = "0.6" # logging implementation
+chrono = "0.4" # getting current time and formatting it
