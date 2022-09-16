@@ -14,3 +14,13 @@ anyhow = "1" # dynamic, unstructured errors
 log = "0.4" # logging facade
 fern = "0.6" # logging implementation
 chrono = "0.4" # getting current time and formatting it
+serde = "1" # config parsing, connection header formatting
+serde_derive = "1" # config parsing, connection header formatting
+toml = "0.5" # config parsing
+byteorder = "1" # endianness
+rmp-serde = "1" # MessagePack serde adapter
+crossbeam = "0.8" # concurrency primitives
+nix = { version = "0.25", features = ["poll"] } # rusty wrapper for unix apis
+
+[dev-dependencies]
+tempdir = "0.3" # keeping tests hermetic
