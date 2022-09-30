@@ -335,13 +335,15 @@ fn spawn_subshell(
     let child = process::Command::new(user_info.default_shell)
         .stdin(process::Stdio::piped())
         .stdout(process::Stdio::piped())
-        .current_dir(user_info.home_dir)
+        .current_dir(user_info.home_dir.clone())
         // The env should mostly be set up by the shell sourcing
         // rc files and whatnot, so we will start things off with
         // an environment that is blank except for a little marker
         // environment variable that people can hook into for scripts
         // and whatnot.
-        .env_clear().env("SHPOOL_SESSION_NAME", &header.name)
+        .env_clear()
+        .env("HOME", user_info.home_dir)
+        .env("SHPOOL_SESSION_NAME", &header.name)
         .arg("-i") // TODO(ethan): HACK: find some way to indicate this in a
                    //              shell agnostic way
         .arg("-l") // TODO(ethan): HACK: we should be using a pty rather than forcing
