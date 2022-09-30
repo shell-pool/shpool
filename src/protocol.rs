@@ -10,7 +10,7 @@ use serde_derive::{Serialize, Deserialize};
 /// first connections. It uses an enum to allow different connection types
 /// to be initiated on the same socket. The ConnectHeader is always prefixed
 /// with a 4 byte little endian unsigned word to indicate length.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum ConnectHeader {
     Attach(AttachHeader),
     List,
@@ -19,8 +19,9 @@ pub enum ConnectHeader {
 /// AttachHeader is the blob of metadata that a client transmits when it
 /// first dials into the shpool indicating which shell it wants to attach
 /// to.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct AttachHeader {
+    /// The name of the session to create or attach to.
     pub name: String,
 }
 

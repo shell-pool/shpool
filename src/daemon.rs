@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::{time, thread, process, net};
 
 use anyhow::{anyhow, Context};
@@ -24,7 +24,7 @@ struct Config {
 
 struct ShellSession {
     started_at: time::SystemTime,
-    inner: Box<Mutex<ShellSessionInner>>,
+    inner: Arc<Mutex<ShellSessionInner>>,
 }
 
 /// ShellSessionInner contains values that the pipe thread needs to be
@@ -59,14 +59,9 @@ pub fn run(config_file: String, socket: PathBuf) -> anyhow::Result<()> {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                thread::scope(|s| {
-                    let d = &mut daemon;
-                    s.spawn(move || {
-                        if let Err(err) = d.handle_conn(stream) {
-                            error!("handling attach: {:?}", err)
-                        }
-                    });
-                })
+                if let Err(err) = daemon.handle_conn(stream) {
+                    error!("handling new connection: {:?}", err)
+                }
             }
             Err(err) => {
                 error!("accepting stream: {:?}", err);
@@ -86,6 +81,7 @@ struct Daemon {
 
 impl Daemon {
     fn handle_conn(&mut self, mut stream: UnixStream) -> anyhow::Result<()> {
+        info!("handling inbound connection");
         // We want to avoid timing out while blocking the main thread.
         stream.set_read_timeout(Some(consts::SOCK_STREAM_TIMEOUT))
             .context("setting read timout on inbound session")?;
@@ -106,6 +102,9 @@ impl Daemon {
     }
 
     fn handle_attach(&mut self, mut stream: UnixStream, header: protocol::AttachHeader) -> anyhow::Result<()> {
+        info!("handling attach header={:?}", header);
+
+        let status: protocol::AttachStatus;
         if let Some(session) = self.shells.get(&header.name) {
             if let Ok(mut inner) = session.inner.try_lock() {
                 inner.client_stream = stream;
@@ -114,7 +113,8 @@ impl Daemon {
                     status: protocol::AttachStatus::Attached,
                 })?;
 
-                bidi_stream(&mut inner)?;
+                status = protocol::AttachStatus::Attached;
+                // fallthrough to bidi streaming
             } else {
                 // The stream is busy, so we just inform the client and close the stream.
                 write_reply(&mut stream, protocol::AttachReplyHeader{
@@ -124,28 +124,38 @@ impl Daemon {
                 return Ok(())
             }
         } else {
-            let inner = spawn_subshell(stream)?;
+            let inner = spawn_subshell(stream, &header)?;
 
             self.shells.insert(header.name.clone(), ShellSession {
                 started_at: time::SystemTime::now(),
-                inner: Box::new(Mutex::new(inner)),
+                inner: Arc::new(Mutex::new(inner)),
             });
 
-            // the nested "if let" buisness is to please the borrow checker
-            if let Some(session) = self.shells.get(&header.name) {
-                if let Ok(mut inner) = session.inner.lock() {
-                    write_reply(&mut inner.client_stream, protocol::AttachReplyHeader{
-                        status: protocol::AttachStatus::Created,
-                    })?;
+            status = protocol::AttachStatus::Created;
+            // fallthrough to bidi streaming
+        }
 
-                    bidi_stream(&mut inner)?;
+        // the nested "if let" buisness is to please the borrow checker
+        if let Some(session) = self.shells.get(&header.name) {
+            let inner = Arc::clone(&session.inner);
+            thread::spawn(move || {
+                if let Ok(mut inner) = inner.lock() {
+                    let reply_status = write_reply(&mut inner.client_stream, protocol::AttachReplyHeader{
+                        status,
+                    });
+                    if let Err(e) = reply_status {
+                        error!("error writing reply status: {}", e);
+                    }
+
+                    if let Err(e) = bidi_stream(&mut inner) {
+                        error!("error shuffling bytes: {}", e);
+                    }
                 } else {
                     error!("inernal error: failed to lock just created mutex");
                 }
-            } else {
-                error!("inernal error: failed to fetch just inserted session");
-            }
-
+            });
+        } else {
+            error!("inernal error: failed to fetch just inserted session");
         }
 
         Ok(())
@@ -313,15 +323,29 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<()> {
     Ok(())
 } 
 
-fn spawn_subshell(client_stream: UnixStream) -> anyhow::Result<ShellSessionInner> {
-    let default_shell = user_default_shell()?;
-    info!("selected user default shell: '{}'", default_shell);
+fn spawn_subshell(
+    client_stream: UnixStream,
+    header: &protocol::AttachHeader,
+) -> anyhow::Result<ShellSessionInner> {
+    let user_info = user_info()?;
+    info!("user_info={:?}", user_info);
     // TODO(ethan): what about stderr? I need to pass that back to the client
     //              as well. Maybe I should make a little framing protocol and
     //              have some stdin frames as well as stdout frames.
-    let child = process::Command::new(default_shell)
+    let child = process::Command::new(user_info.default_shell)
         .stdin(process::Stdio::piped())
         .stdout(process::Stdio::piped())
+        .current_dir(user_info.home_dir)
+        // The env should mostly be set up by the shell sourcing
+        // rc files and whatnot, so we will start things off with
+        // an environment that is blank except for a little marker
+        // environment variable that people can hook into for scripts
+        // and whatnot.
+        .env_clear().env("SHPOOL_SESSION_NAME", &header.name)
+        .arg("-i") // TODO(ethan): HACK: find some way to indicate this in a
+                   //              shell agnostic way
+        .arg("-l") // TODO(ethan): HACK: we should be using a pty rather than forcing
+                   //              a login shell with a shell-specific flag.
         .spawn()
         .context("spawning subshell")?;
 
@@ -331,10 +355,16 @@ fn spawn_subshell(client_stream: UnixStream) -> anyhow::Result<ShellSessionInner
     })
 }
 
-fn user_default_shell() -> anyhow::Result<String> {
+#[derive(Debug)]
+struct UserInfo {
+    default_shell: String,
+    home_dir: String,
+}
+
+fn user_info() -> anyhow::Result<UserInfo> {
     let out = process::Command::new("/bin/sh")
         .arg("-c")
-        .arg("echo $SHELL")
+        .arg("cd ; echo \"$SHELL|$PWD\"")
         .output()
         .context("spawning subshell to determine default shell")?;
     if !out.status.success() {
@@ -345,8 +375,17 @@ fn user_default_shell() -> anyhow::Result<String> {
                            String::from_utf8_lossy(&out.stderr)));
     }
 
-    let shell = String::from_utf8(out.stdout).context("parsing default shell as utf8")?;
-    Ok(String::from(shell.trim()))
+    let parts = String::from_utf8(out.stdout.clone())
+        .context("parsing default shell as utf8")?
+        .trim().split("|").map(String::from).collect::<Vec<String>>();
+    if parts.len() != 2 {
+        return Err(anyhow!("could not parse output: '{}'", 
+                           String::from_utf8_lossy(&out.stdout)));
+    }
+    Ok(UserInfo {
+        default_shell: parts[0].clone(),
+        home_dir: parts[1].clone(),
+    })
 }
 
 fn parse_connect_header(stream: &mut UnixStream) -> anyhow::Result<protocol::ConnectHeader> {

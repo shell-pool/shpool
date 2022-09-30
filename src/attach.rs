@@ -13,9 +13,9 @@ use super::protocol;
 pub fn run(name: String, socket: PathBuf) -> anyhow::Result<()> {
     let mut client = protocol::Client::new(socket)?;
 
-    client.write_connect_header(protocol::ConnectHeader::Attach(
-            protocol::AttachHeader { name: name.clone() }))
-        .context("writing attach header")?;
+    client.write_connect_header(protocol::ConnectHeader::Attach(protocol::AttachHeader {
+        name: name.clone(),
+    })).context("writing attach header")?;
 
     let attach_resp: protocol::AttachReplyHeader = client.read_reply()
         .context("reading attach reply")?;
