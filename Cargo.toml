@@ -20,6 +20,7 @@ toml = "0.5" # config parsing
 byteorder = "1" # endianness
 rmp-serde = "1" # MessagePack serde adapter
 crossbeam = "0.8" # concurrency primitives
+ctrlc = { version = "3", features = ["termination"] } # graceful shutdown
 nix = { version = "0.25", features = ["poll"] } # rusty wrapper for unix apis
 
 [dev-dependencies]

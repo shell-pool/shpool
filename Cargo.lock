@@ -188,6 +188,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctrlc"
+version = "3.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d91974fbbe88ec1df0c24a4f00f99583667a7e2e6272b2b92d294d81e462173"
+dependencies = [
+ "nix",
+ "winapi",
+]
+
+[[package]]
 name = "fern"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -479,6 +489,7 @@ dependencies = [
  "chrono",
  "clap",
  "crossbeam",
+ "ctrlc",
  "fern",
  "log",
  "nix",

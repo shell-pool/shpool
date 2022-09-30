@@ -14,8 +14,8 @@ fn start_test() -> anyhow::Result<()> {
 
     let mut child = Command::new(support::shpool_bin())
         .stdout(Stdio::piped())
-        .arg("daemon")
         .arg("--socket").arg(tmp_dir.path().join("shpool.socket"))
+        .arg("daemon")
         .arg("--config-file").arg(support::testdata_file("empty.toml"))
         .spawn()
         .context("spawning daemon process")?;

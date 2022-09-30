@@ -1,8 +1,14 @@
+use std::env;
+use std::path::PathBuf;
+
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use log::error;
 
+mod attach;
+mod consts;
 mod daemon;
+mod list;
 mod protocol;
 
 #[derive(Parser, Debug)]
@@ -13,27 +19,27 @@ struct Args {
     #[clap(short, long, action = clap::ArgAction::Count,
            help = "show more in logs, may be provided multiple times")]
     verbose: u8,
+    #[clap(short, long, action, help = "the path for the unix socket to listen on, default = $XDG_RUNTIME_DIR/shpool.socket")]
+    socket: Option<String>,
     #[clap(subcommand)]
     command: Commands,
 }
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    #[clap(help = "shpool-daemon starts running a daemon that holds a pool of shells")]
+    #[clap(about = "shpool-daemon starts running a daemon that holds a pool of shells")]
     Daemon {
         #[clap(short, long, action, help = "a toml file containing configuration")]
         config_file: String,
-        #[clap(short, long, action, help = "the path for the unix socket to listen on, default = $XDG_RUNTIME_DIR/shpool.socket")]
-        socket: Option<String>,
     },
-    #[clap(help = "shpool-attach creates or attaches to an existing shell session")]
+    #[clap(about = "shpool-attach creates or attaches to an existing shell session")]
     Attach {
-        #[clap(help = "the name of the shell session to create to attach to")]
+        #[clap(help = "the name of the shell session to create or attach to")]
         name: String,
     },
-    #[clap(help = "shpool-list lists all the running shell sessions")]
+    #[clap(about = "shpool-list lists all the running shell sessions")]
     List,
-    #[clap(help = r#"shpool-ssh connects to a remote machine with a pool running on it.
+    #[clap(about = r#"shpool-ssh connects to a remote machine with a pool running on it.
 
 All args are passed directly to ssh with the addition of a shpool-attach
 command to be run on the remote machine. ssh may be invoked multiple times."#)]
@@ -74,17 +80,28 @@ fn main() -> anyhow::Result<()> {
     };
     log_dispatcher.apply().context("creating logger")?;
 
+    let socket = match args.socket {
+        Some(s) => PathBuf::from(s),
+        None => {
+            match env::var("XDG_RUNTIME_DIR").context("getting runtime dir") {
+                Ok(runtime_dir) => PathBuf::from(runtime_dir).join("shpool.socket"),
+                Err(err) => {
+                    error!("{:?}", err);
+                    return Ok(());
+                }
+            }
+        },
+    };
+
     let res: anyhow::Result<()> = match args.command {
-        Commands::Daemon { config_file, socket } => {
+        Commands::Daemon { config_file } => {
             daemon::run(config_file, socket)
         }
         Commands::Attach { name } => {
-            println!("TODO: attach with {}", name);
-            Ok(())
+            attach::run(name, socket)
         }
         Commands::List => {
-            println!("TODO: list shells");
-            Ok(())
+            list::run(socket)
         }
         Commands::Ssh { args } => {
             println!("TODO: ssh with args: {:?}", args);
