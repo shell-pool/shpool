@@ -1,10 +1,15 @@
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
+use std::thread;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use crossbeam::channel;
+use log::trace;
 use serde_derive::{Serialize, Deserialize};
+
+use super::consts;
 
 /// ConnectHeader is the blob of metadata that a client transmits when it
 /// first connections. It uses an enum to allow different connection types
@@ -59,6 +64,102 @@ pub enum AttachStatus {
     /// name, but another `shpool attach` session is currently connected to
     /// it, so the connection attempt was rejected.
     Busy,
+}
+
+/// FrameKind is a tag that indicates what type of frame is being transmitted
+/// through the socket.
+#[derive(Copy, Clone, Debug)]
+pub enum ChunkKind {
+    Stdout = 0,
+    Stderr = 1,
+    NoOp = 2,
+}
+
+impl ChunkKind {
+    fn from_u8(v: u8) -> anyhow::Result<Self> {
+        match v {
+            0 => Ok(ChunkKind::Stdout),
+            1 => Ok(ChunkKind::Stderr),
+            2 => Ok(ChunkKind::NoOp),
+            _ => Err(anyhow!("unknown FrameKind {}", v)),
+        }
+    }
+}
+
+/// Chunk represents of a chunk of data meant for stdout or stderr.
+/// Chunks get interleaved over the unix socket connection that
+/// `shpool attach` uses to talk to `shpool daemon`, with the following
+/// format:
+///
+/// ```
+/// 1 byte: kind tag
+/// little endian 4 byte word: length prefix
+/// N bytes: data
+/// ```
+#[derive(Debug)]
+pub struct Chunk<'data> {
+    pub kind: ChunkKind,
+    pub buf: &'data [u8],
+}
+
+impl<'data> Chunk<'data> {
+    pub fn write_to<W>(&self, w: &mut W, stop_rx: channel::Receiver<()>) -> anyhow::Result<()>
+        where W: std::io::Write
+    {
+        if let Ok(_) = stop_rx.try_recv() {
+            return Ok(())
+        }
+
+        w.write_u8(self.kind as u8)?;
+
+        if let Ok(_) = stop_rx.try_recv() {
+            return Ok(())
+        }
+
+        w.write_u32::<LittleEndian>(self.buf.len() as u32)?;
+
+        if let Ok(_) = stop_rx.try_recv() {
+            return Ok(())
+        }
+
+        let mut to_write = &self.buf[..];
+        while to_write.len() > 0 {
+            if let Ok(_) = stop_rx.try_recv() {
+                return Ok(())
+            }
+
+            let nwritten = match w.write(&to_write) {
+                Ok(n) => n,
+                Err(e) => {
+                    if e.kind() == std::io::ErrorKind::WouldBlock {
+                        trace!("chunk: writing buffer: WouldBlock");
+                        thread::sleep(consts::PIPE_POLL_DURATION);
+                        continue;
+                    }
+                    return Err(e).context("reading stdout chunk");
+                }
+            };
+            to_write = &to_write[nwritten..];
+        }
+
+        Ok(())
+    }
+
+    pub fn read_into<R>(r: &mut R, buf: &'data mut [u8]) -> anyhow::Result<Self>
+        where R: std::io::Read
+    {
+        let kind = r.read_u8()?;
+        let len = r.read_u32::<LittleEndian>()? as usize;
+        if len as usize > buf.len() {
+            return Err(anyhow!("chunk of size {} exceeds size limit of {} bytes", len, buf.len()));
+        }
+        r.read_exact(&mut buf[..len])?;
+
+        Ok(Chunk {
+            kind: ChunkKind::from_u8(kind)?,
+            buf: &buf[..len],
+        })
+    }
 }
 
 pub struct Client {

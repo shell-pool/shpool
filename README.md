@@ -20,9 +20,6 @@ retaining ownership of them in a table. In general, this subcommand will not
 be invoked directly by users, but will instead be called from a systemd unit
 file.
 
-TODO: set a magic variable inside subshells saying what the shpool session
-      name is.
-
 ### `shpool attach`
 
 The `attach` subcommand connects to the `shpool daemon` instance, passing in a
