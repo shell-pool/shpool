@@ -208,14 +208,6 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
     // set timeouts so we can wake up to handle cancelation correctly
     inner.client_stream.set_nonblocking(true).context("setting client stream nonblocking")?;
     
-    // clone the client stream handle so it won't be borrowed in two
-    // closures
-    /* TODO(ethan): clean up
-    let mut client_read_stream = inner.client_stream.try_clone()
-        .context("cloning client read stream")?;
-    let mut heartbeat_write_stream = inner.client_stream.try_clone()
-        .context("cloning heartbeat write stream")?;
-        */
     let client_stream = Mutex::new(inner.client_stream.try_clone()
                                    .context("wrapping a stream handle in mutex")?);
 
