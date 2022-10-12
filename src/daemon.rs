@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Condvar};
 use std::{time, thread, process, net};
 
 use anyhow::{anyhow, Context};
@@ -15,33 +15,30 @@ use crossbeam::channel;
 use super::consts;
 use super::protocol;
 
+// TODO(ethan): make this configurable via toml
+const SSH_EXTENSION_ATTACH_WINDOW: time::Duration = time::Duration::from_secs(30);
+
 #[derive(Deserialize)]
 struct Config {
     // TODO(ethan): implement keepalive support
     // keepalive_secs: Option<usize>,
 }
 
-
-struct ShellSession {
-    started_at: time::SystemTime,
-    inner: Arc<Mutex<ShellSessionInner>>,
-}
-
-/// ShellSessionInner contains values that the pipe thread needs to be
-/// able to mutate and fully control.
-#[derive(Debug)]
-struct ShellSessionInner {
-    shell_proc: process::Child,
-    client_stream: UnixStream,
-}
-
 pub fn run(config_file: String, socket: PathBuf) -> anyhow::Result<()> {
+    info!("\n\n======================== STARTING DAEMON ============================\n\n");
     let config_str = std::fs::read_to_string(config_file).context("reading config toml")?;
     let _config: Config = toml::from_str(&config_str).context("parsing config file")?;
 
-
     let mut daemon = Daemon {
         shells: Arc::new(Mutex::new(HashMap::new())),
+        ssh_extension_parker: Arc::new(SshExtensionParker {
+            inner: Mutex::new(SshExtensionParkerInner {
+                name: None,
+                has_parked_local: false,
+                has_parked_remote: false,
+            }),
+            cond: Condvar::new(),
+        }),
     };
 
     let teardown_socket = socket.clone();
@@ -76,8 +73,56 @@ pub fn run(config_file: String, socket: PathBuf) -> anyhow::Result<()> {
 }
 
 struct Daemon {
-    // a map from shell session names to session descriptors
+    /// A map from shell session names to session descriptors.
     shells: Arc<Mutex<HashMap<String, ShellSession>>>,
+    /// Syncronization primitives allowing us make sure that only
+    /// one thread at a time attaches using the ssh extension mechanism.
+    ssh_extension_parker: Arc<SshExtensionParker>,
+}
+
+struct ShellSession {
+    started_at: time::SystemTime,
+    inner: Arc<Mutex<ShellSessionInner>>,
+}
+
+/// ShellSessionInner contains values that the pipe thread needs to be
+/// able to mutate and fully control.
+#[derive(Debug)]
+struct ShellSessionInner {
+    shell_proc: process::Child,
+    client_stream: UnixStream,
+}
+
+/// SshExtensionParker contains syncronization primitives to allow the
+/// LocalCommand and RemoteCommand ssh extension threads to perform
+/// a little handshake to hand off the name. ssh_config(5) leaves the
+/// relative order in which these commands will execute unspecified,
+/// so they might happen in either order or simultaneously. We must
+/// be able to handle any possibility.
+///
+/// TODO(ethan): write unit tests for the various permutations of handshake
+///              order.
+/// TODO(ethan): Even with syncronization primitives in the daemon, I think
+///              we can still get race conditions where a LocalCommand and
+///              RemoteCommand from two different ssh invocations can
+///              interleave. I think we are going to need some client side
+///              locking in order to work around this, and even then I'm still
+///              worried.
+struct SshExtensionParker {
+    /// The empty string indicates that there is a parked thread waiting for
+    inner: Mutex<SshExtensionParkerInner>,
+    cond: Condvar,
+}
+
+struct SshExtensionParkerInner {
+    /// The name for the session that the thread should used to attach.
+    /// Set by the LocalCommandSetName thread when it wakes up the parked
+    /// RemoteCommand thread.
+    name: Option<String>,
+    /// True when there is a RemoteCommand thread parked.
+    has_parked_remote: bool,
+    /// True when there is a LocalCommand thread parked.
+    has_parked_local: bool,
 }
 
 impl Daemon {
@@ -98,6 +143,8 @@ impl Daemon {
 
         match header {
             protocol::ConnectHeader::Attach(h) => self.handle_attach(stream, h),
+            protocol::ConnectHeader::RemoteCommandLock => self.handle_remote_command_lock(stream),
+            protocol::ConnectHeader::LocalCommandSetName(h) => self.handle_local_command_set_name(stream, h),
             protocol::ConnectHeader::List => self.handle_list(stream),
         }
     }
@@ -179,8 +226,90 @@ impl Daemon {
         Ok(())
     }
 
+    fn handle_remote_command_lock(&self, mut stream: UnixStream) -> anyhow::Result<()> {
+        info!("handle_remote_command_lock: enter");
+        let name = {
+            let mut inner = self.ssh_extension_parker.inner.lock().unwrap();
+            let name = if inner.has_parked_local {
+                assert!(!inner.has_parked_remote, "remote: should never have two threads parked at once");
+
+                info!("handle_remote_command_lock: there is already a parked local waiting for us");
+                inner.name.take().unwrap_or_else(|| String::from(""))
+            } else {
+                if inner.has_parked_remote {
+                    info!("handle_remote_command_lock: remote parking slot full");
+                    write_reply(&mut stream, protocol::AttachReplyHeader{
+                        status: protocol::AttachStatus::SshExtensionParkingSlotFull,
+                    })?;
+                    return Ok(());
+                }
+
+                info!("handle_remote_command_lock: about to park");
+                inner.has_parked_remote = true;
+                let (mut inner, timeout_res) = self.ssh_extension_parker.cond
+                    .wait_timeout_while(inner, SSH_EXTENSION_ATTACH_WINDOW, |inner| inner.name.is_none()).unwrap();
+                if timeout_res.timed_out() {
+                    info!("handle_remote_command_lock: timeout");
+                    write_reply(&mut stream, protocol::AttachReplyHeader{
+                        status: protocol::AttachStatus::Timeout,
+                    })?;
+                    return Ok(())
+                }
+
+                inner.has_parked_remote = false;
+                inner.name.take().unwrap_or_else(|| String::from(""))
+            };
+
+            self.ssh_extension_parker.cond.notify_one();
+            name
+        };
+
+        info!("handle_remote_command_lock: becoming an attach with name '{}'", name);
+        // At this point, we've gotten the name through normal means, so we
+        // can just become a normal attach request.
+        self.handle_attach(stream, protocol::AttachHeader { name })
+    }
+
+    fn handle_local_command_set_name(&self, mut stream: UnixStream, header: protocol::LocalCommandSetNameRequest) -> anyhow::Result<()> {
+        info!("handle_local_command_set_name: header={:?}", header);
+        let status = {
+            let mut inner = self.ssh_extension_parker.inner.lock().unwrap();
+
+            if inner.has_parked_remote {
+                assert!(!inner.has_parked_local, "local: should never have two threads parked at once");
+
+                info!("handle_local_command_set_name: there is a remote thread waiting to be woken");
+                inner.name = Some(header.name.clone());
+                self.ssh_extension_parker.cond.notify_one();
+
+                protocol::LocalCommandSetNameStatus::Ok
+            } else {
+                info!("handle_local_command_set_name: no remote thread, we will have to wait ourselves");
+                inner.name = Some(header.name.clone());
+                inner.has_parked_local = true;
+                let (mut inner, timeout_res) = self.ssh_extension_parker.cond
+                    .wait_timeout_while(inner, SSH_EXTENSION_ATTACH_WINDOW, |inner| inner.name.is_none()).unwrap();
+                inner.has_parked_local = false;
+                if timeout_res.timed_out() {
+                    info!("handle_local_command_set_name: timed out waiting for remote command");
+                    protocol::LocalCommandSetNameStatus::Timeout
+                } else {
+                    info!("handle_local_command_set_name: finished the handshake successfully");
+                    protocol::LocalCommandSetNameStatus::Ok
+                }
+            }
+        };
+
+        // write the reply without the lock held to avoid doin IO with a lock held
+        info!("handle_local_command_set_name: status={:?} name={}", status, header.name);
+        write_reply(&mut stream, protocol::LocalCommandSetNameReply{
+            status: protocol::LocalCommandSetNameStatus::Ok
+        })?;
+        return Ok(())
+    }
+
     fn handle_list(&self, mut stream: UnixStream) -> anyhow::Result<()> {
-        info!("responding to list request");
+        info!("handle_list: enter");
 
         let shells = self.shells.lock().unwrap();
 

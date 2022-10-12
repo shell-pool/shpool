@@ -1,4 +1,29 @@
 
+- Get ssh extension mode to work for reconnect. Currently it only works
+  for the initial connection.
+- Get ssh extension mode to be compatible with ssh multiplexing so
+  it only requires a single gnubby touch.
+```
+Host = ct-shpool
+    Hostname pailes.c.googlers.com
+
+    # enable ssh multiplexing so that we only need one gnubby touch
+    #
+    # TODO(ethan): this seems to cause trouble because the LocalCommand
+    #              does not work when I have multiplexing enabled.
+    #
+    # ControlPath ~/.ssh/sudp-cm-%r@%h:%p
+    # ControlMaster auto
+    # ControlPersist 10m # stay open after the initial conn closes for 10m
+
+    #RemoteCommand echo remote
+    PermitLocalCommand yes
+    LocalCommand ssh -oPermitLocalCommand=no -oRemoteCommand="/usr/local/google/home/pailes/bin/shpool -vv --log-file /tmp/shpool-ssh-local-command-set-name.log plumbing ssh-local-command-set-name '%u@%h:%p$(tty)'" %n
+```
+
+
+
+
 - make sure the inner lock is a correctly released when the client exists
 - forward Ctrl-C to the inner shell correctly
 - come up with some sort of keybinding to exit the shpool shell.
@@ -6,5 +31,5 @@
 - Pass TERM along so that `reset` works
 - make a centralized chunk writing thread so that writes do not
   get interleaved for data coming from the daemon to the client.
-  
+
 

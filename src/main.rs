@@ -10,6 +10,8 @@ mod consts;
 mod daemon;
 mod list;
 mod protocol;
+mod ssh_remote_command;
+mod ssh_local_command_set_name;
 
 #[derive(Parser, Debug)]
 #[clap(version, author, about)]
@@ -27,25 +29,48 @@ struct Args {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    #[clap(about = "shpool-daemon starts running a daemon that holds a pool of shells")]
+    #[clap(about = "starts running a daemon that holds a pool of shells")]
     Daemon {
         #[clap(short, long, action, help = "a toml file containing configuration")]
         config_file: String,
     },
-    #[clap(about = "shpool-attach creates or attaches to an existing shell session")]
+    #[clap(about = "creates or attaches to an existing shell session")]
     Attach {
         #[clap(help = "the name of the shell session to create or attach to")]
         name: String,
     },
-    #[clap(about = "shpool-list lists all the running shell sessions")]
+    #[clap(about = "lists all the running shell sessions")]
     List,
-    #[clap(about = r#"shpool-ssh connects to a remote machine with a pool running on it.
+    #[clap(about = r#"connects to a remote machine with a pool running on it.
 
 All args are passed directly to ssh with the addition of a shpool-attach
 command to be run on the remote machine. ssh may be invoked multiple times."#)]
     Ssh {
         #[clap(multiple = true, help = "arguments to pass to the ssh binary")]
         args: Vec<String>,
+    },
+    #[clap(about = "contains subcommands not meant to be directly invoked")]
+    Plumbing{
+        #[clap(subcommand)]
+        command: PlumbingCommands,
+    },
+}
+
+
+#[derive(Subcommand, Debug)]
+enum PlumbingCommands {
+    #[clap(about = r#"a plumbing command used to extend ssh
+
+See shpool documentation on how to edit your /etc/ssh_config or ~/.ssh/config to take
+advantage of this command.
+"#)]
+    SshRemoteCommand,
+    #[clap(about = r#"a plumbing command used to extend ssh
+
+This command is internal to shpool and you should never have to reference it directly, even in your config.
+"#)]
+    SshLocalCommandSetName {
+        session_name: String,
     },
 }
 
@@ -107,10 +132,20 @@ fn main() -> anyhow::Result<()> {
             println!("TODO: ssh with args: {:?}", args);
             Ok(())
         }
+        Commands::Plumbing { command } => {
+            match command {
+                PlumbingCommands::SshRemoteCommand => {
+                    ssh_remote_command::run(socket)
+                }
+                PlumbingCommands::SshLocalCommandSetName { session_name } => {
+                    ssh_local_command_set_name::run(session_name, socket)
+                }
+            }
+        }
     };
 
     if let Err(err) = res {
-        error!("{:?}", err);
+        error!("shpool: {:?}", err);
     }
 
     Ok(())
