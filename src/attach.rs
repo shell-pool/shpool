@@ -6,6 +6,8 @@ use log::info;
 use super::protocol;
 
 pub fn run(name: String, socket: PathBuf) -> anyhow::Result<()> {
+    info!("\n\n======================== STARTING ATTACH ============================\n\n");
+
     let mut client = protocol::Client::new(socket)?;
 
     client.write_connect_header(protocol::ConnectHeader::Attach(protocol::AttachHeader {

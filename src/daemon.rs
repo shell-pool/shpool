@@ -4,13 +4,13 @@ use std::os::unix::io::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Condvar};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{time, thread, process, net};
 
 use anyhow::{anyhow, Context};
 use log::{info, error, trace, debug};
 use serde_derive::Deserialize;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crossbeam::channel;
 
 use super::consts;
 use super::protocol;
@@ -90,7 +90,7 @@ struct ShellSession {
 #[derive(Debug)]
 struct ShellSessionInner {
     shell_proc: process::Child,
-    client_stream: UnixStream,
+    client_stream: Option<UnixStream>,
 }
 
 /// SshExtensionParker contains syncronization primitives to allow the
@@ -159,7 +159,7 @@ impl Daemon {
         if let Some(session) = shells.get(&header.name) {
             if let Ok(mut inner) = session.inner.try_lock() {
                 info!("handle_attach taking over existing session inner={:?}", inner);
-                inner.client_stream = stream;
+                inner.client_stream = Some(stream);
 
                 status = protocol::AttachStatus::Attached;
                 // fallthrough to bidi streaming
@@ -193,7 +193,15 @@ impl Daemon {
                 let mut child_done = false;
 
                 if let Ok(mut inner) = inner.lock() {
-                    let reply_status = write_reply(&mut inner.client_stream, protocol::AttachReplyHeader{
+                    let client_stream = match inner.client_stream.as_mut() {
+                        Some(s) => s,
+                        None => {
+                            error!("no client stream, should be impossible");
+                            return;
+                        }
+                    };
+
+                    let reply_status = write_reply(client_stream, protocol::AttachReplyHeader{
                         status,
                     });
                     if let Err(e) = reply_status {
@@ -334,15 +342,23 @@ impl Daemon {
 /// bidi_stream shuffles bytes between the subprocess and the client connection.
 /// It returns true if the subprocess has exited, and false if it is still running.
 fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
+    // we take the client stream so that it gets closed when this routine
+    // returns
+    let mut client_stream = match inner.client_stream.take() {
+        Some(s) => s,
+        None => {
+            return Err(anyhow!("no client stream to take for bidi streaming"))
+        }
+    };
+
     // set timeouts so we can wake up to handle cancelation correctly
-    inner.client_stream.set_nonblocking(true).context("setting client stream nonblocking")?;
+    client_stream.set_nonblocking(true).context("setting client stream nonblocking")?;
     
-    let client_stream = Mutex::new(inner.client_stream.try_clone()
+    let client_stream_m = Mutex::new(client_stream.try_clone()
                                    .context("wrapping a stream handle in mutex")?);
 
-    // create a channel so we can make sure both worker threads exit
-    // if one of them does
-    let (stop_tx, stop_rx) = channel::bounded(3);
+    // A flag to indicate that outstanding threads should stop termination
+    let stop = AtomicBool::new(false);
 
     let mut stdin = inner.shell_proc.stdin.take().ok_or(anyhow!("missing stdin"))?;
     let mut stdout = inner.shell_proc.stdout.take().ok_or(anyhow!("missing stdout"))?;
@@ -364,7 +380,8 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
             let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
 
             loop {
-                if let Ok(_) = stop_rx.try_recv() {
+                if stop.load(Ordering::Relaxed) {
+                    info!("bidi_stream: client->shell: recvd stop msg (1)");
                     return Ok(())
                 }
 
@@ -374,7 +391,7 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
                 // to handle coming back the other way.
                 let len;
                 {
-                    let mut s = client_stream.lock().unwrap();
+                    let mut s = client_stream_m.lock().unwrap();
                     len = match s.read(&mut buf) {
                         Ok(l) => l,
                         Err(e) => {
@@ -397,7 +414,8 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
                 trace!("bidi_stream: client->shell: created to_write={:?}", to_write);
 
                 while to_write.len() > 0 {
-                    if let Ok(_) = stop_rx.try_recv() {
+                    if stop.load(Ordering::Relaxed) {
+                        info!("bidi_stream: client->shell: recvd stop msg (1)");
                         return Ok(())
                     }
 
@@ -428,7 +446,8 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
             let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
 
             loop {
-                if let Ok(_) = stop_rx.try_recv() {
+                if stop.load(Ordering::Relaxed) {
+                    info!("bidi_stream: shell->client: recvd stop msg");
                     return Ok(())
                 }
 
@@ -474,8 +493,8 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
                         buf: &buf[..len],
                     };
                     {
-                        let mut s = client_stream.lock().unwrap();
-                        chunk.write_to(&mut *s, stop_rx.clone())
+                        let mut s = client_stream_m.lock().unwrap();
+                        chunk.write_to(&mut *s, &stop)
                             .context("writing stdout chunk to client stream")?;
                     }
                     debug!("bidi_stream: shell->client: wrote {} stdout bytes", chunk.buf.len());
@@ -505,13 +524,16 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
                         kind: protocol::ChunkKind::Stderr,
                         buf: &buf[..len],
                     };
-                    chunk.write_to(&mut inner.client_stream, stop_rx.clone())
-                        .context("writing stderr chunk to client stream")?;
+                    {
+                        let mut s = client_stream_m.lock().unwrap();
+                        chunk.write_to(&mut *s, &stop)
+                            .context("writing stderr chunk to client stream")?;
+                    }
                     debug!("bidi_stream: shell->client: wrote {} stderr bytes", chunk.buf.len());
                 }
 
                 // flush immediately
-                inner.client_stream.flush().context("flushing client stream")?;
+                client_stream.flush().context("flushing client stream")?;
             }
         });
 
@@ -519,7 +541,9 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
         // if the connection unexpectedly goes down, we detect it immediately.
         let heartbeat_h = s.spawn(|| -> anyhow::Result<()> {
             loop {
-                if let Ok(_) = stop_rx.try_recv() {
+                trace!("bidi_stream: heartbeat: checking stop_rx");
+                if stop.load(Ordering::Relaxed) {
+                    info!("bidi_stream: heartbeat: recvd stop msg");
                     return Ok(())
                 }
 
@@ -529,11 +553,12 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
                     buf: &[],
                 };
                 {
-                    let mut s = client_stream.lock().unwrap();
-                    chunk.write_to(&mut *s, stop_rx.clone())
+                    let mut s = client_stream_m.lock().unwrap();
+                    trace!("bidi_stream: heartbeat: about to write heartbeat");
+                    chunk.write_to(&mut *s, &stop)
                         .context("writing heartbeat chunk to client stream")?;
+                    trace!("bidi_stream: heartbeat: wrote heartbeat");
                 }
-                trace!("bidi_stream: heartbeat: wrote heartbeat");
             }
         });
 
@@ -547,10 +572,8 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
                 debug!("bidi_stream: signaling for threads to stop: client_to_shell_finished={} shell_to_client_finished={} heartbeat_finished={} child_done={}",
                     client_to_shell_h.is_finished(), shell_to_client_h.is_finished(),
                     heartbeat_h.is_finished(), child_done,
-               );
-                stop_tx.send(()).context("sending stop msg 1")?;
-                stop_tx.send(()).context("sending stop msg 2")?;
-                stop_tx.send(()).context("sending stop msg 3")?;
+                );
+                stop.store(true, Ordering::Relaxed);
                 break;
             }
             thread::sleep(consts::JOIN_POLL_DURATION);
@@ -584,6 +607,13 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
     // handles.
     thread_result?;
 
+    if child_done {
+        client_stream.shutdown(std::net::Shutdown::Both)
+            .context("shutting down client stream")?;
+    }
+
+    info!("bidi_stream: inner.client_stream={:?}", inner.client_stream);
+
     info!("bidi_stream: done child_done={}", child_done);
     Ok(child_done)
 } 
@@ -616,7 +646,7 @@ fn spawn_subshell(
 
     Ok(ShellSessionInner {
         shell_proc: child,
-        client_stream,
+        client_stream: Some(client_stream),
     })
 }
 

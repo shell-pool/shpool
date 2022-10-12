@@ -2,6 +2,7 @@ use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
 use anyhow::{anyhow, Context};
@@ -148,28 +149,28 @@ pub struct Chunk<'data> {
 }
 
 impl<'data> Chunk<'data> {
-    pub fn write_to<W>(&self, w: &mut W, stop_rx: channel::Receiver<()>) -> anyhow::Result<()>
+    pub fn write_to<W>(&self, w: &mut W, stop: &AtomicBool) -> anyhow::Result<()>
         where W: std::io::Write
     {
-        if let Ok(_) = stop_rx.try_recv() {
+        if stop.load(Ordering::Relaxed) {
             return Ok(())
         }
 
         w.write_u8(self.kind as u8)?;
 
-        if let Ok(_) = stop_rx.try_recv() {
+        if stop.load(Ordering::Relaxed) {
             return Ok(())
         }
 
         w.write_u32::<LittleEndian>(self.buf.len() as u32)?;
 
-        if let Ok(_) = stop_rx.try_recv() {
+        if stop.load(Ordering::Relaxed) {
             return Ok(())
         }
 
         let mut to_write = &self.buf[..];
         while to_write.len() > 0 {
-            if let Ok(_) = stop_rx.try_recv() {
+            if stop.load(Ordering::Relaxed) {
                 return Ok(())
             }
 
@@ -348,7 +349,7 @@ impl Client {
                             debug!("pipe_bytes: socket->std{{out,err}}: flushed stderr");
                         },
                         ChunkKind::Stderr => {
-                            while to_write.len() > 0  {
+                            while to_write.len() > 0 {
                                 if let Ok(_) = stop_rx.try_recv() {
                                     return Ok(())
                                 }

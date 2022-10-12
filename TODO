@@ -1,4 +1,25 @@
 
+- start pinning down behavior by actually writing tests for these various cases
+    - basic attach test
+    - attach, then reconnect
+    - attach, write exit to the shell
+    - test for ssh plugin mode commands
+- forward signals to the inner shell correctly
+- Something is fucky with how eagarly we are reading the input and output
+  from the termianl input/shell. I generally have to mash return a few times
+  to se output for my commands.
+- come up with some sort of keybinding to exit the shpool shell.
+  make it configurable via the daemon's toml file. (Or maybe just
+  make users use commands to do this? That won't work for long running
+  processes though).
+- Pass TERM along so that `reset` works
+- make a centralized chunk writing thread so that writes do not
+  get interleaved for data coming from the daemon to the client.
+- Read input from terminal emulator byte by byte so that zsh autocomplete
+  works.
+- There is a lot of heartbeat overhead. See if we can reduce that.
+
+
 - Get ssh extension mode to work for reconnect. Currently it only works
   for the initial connection.
 - Get ssh extension mode to be compatible with ssh multiplexing so
@@ -20,16 +41,3 @@ Host = ct-shpool
     PermitLocalCommand yes
     LocalCommand ssh -oPermitLocalCommand=no -oRemoteCommand="/usr/local/google/home/pailes/bin/shpool -vv --log-file /tmp/shpool-ssh-local-command-set-name.log plumbing ssh-local-command-set-name '%u@%h:%p$(tty)'" %n
 ```
-
-
-
-
-- make sure the inner lock is a correctly released when the client exists
-- forward Ctrl-C to the inner shell correctly
-- come up with some sort of keybinding to exit the shpool shell.
-  make it configurable via the daemon's toml file.
-- Pass TERM along so that `reset` works
-- make a centralized chunk writing thread so that writes do not
-  get interleaved for data coming from the daemon to the client.
-
-
