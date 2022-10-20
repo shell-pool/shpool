@@ -8,6 +8,10 @@ the whole terminal and provide window splitting and tiling features, `shpool`
 only provides persistent sessions. The biggest advantage of this approach is
 that `shpool` does not break native scrollback.
 
+## Hacking
+
+For information on how to develop shpool, see [HACKING.md](./HACKING.md).
+
 ## Usage
 
 `shpool` has a few different subcommands for its various modes.

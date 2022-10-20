@@ -11,6 +11,7 @@ use anyhow::{anyhow, Context};
 use log::{info, error, trace, debug};
 use serde_derive::Deserialize;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use pty_process::Command as _;
 
 use super::consts;
 use super::protocol;
@@ -22,14 +23,23 @@ const SSH_EXTENSION_ATTACH_WINDOW: time::Duration = time::Duration::from_secs(30
 struct Config {
     // TODO(ethan): implement keepalive support
     // keepalive_secs: Option<usize>,
+    
+    /// norc makes it so that new shells do not load rc files when they
+    /// spawn. Only works with bash.
+    norc: bool,
+    /// shell overrides the user's default shell
+    shell: Option<String>,
+    /// a table of environment variables to inject into the initial shell
+    env: HashMap<String, String>,
 }
 
 pub fn run(config_file: String, socket: PathBuf) -> anyhow::Result<()> {
     info!("\n\n======================== STARTING DAEMON ============================\n\n");
     let config_str = std::fs::read_to_string(config_file).context("reading config toml")?;
-    let _config: Config = toml::from_str(&config_str).context("parsing config file")?;
+    let config: Config = toml::from_str(&config_str).context("parsing config file")?;
 
     let mut daemon = Daemon {
+        config,
         shells: Arc::new(Mutex::new(HashMap::new())),
         ssh_extension_parker: Arc::new(SshExtensionParker {
             inner: Mutex::new(SshExtensionParkerInner {
@@ -73,6 +83,7 @@ pub fn run(config_file: String, socket: PathBuf) -> anyhow::Result<()> {
 }
 
 struct Daemon {
+    config: Config,
     /// A map from shell session names to session descriptors.
     shells: Arc<Mutex<HashMap<String, ShellSession>>>,
     /// Syncronization primitives allowing us make sure that only
@@ -87,10 +98,18 @@ struct ShellSession {
 
 /// ShellSessionInner contains values that the pipe thread needs to be
 /// able to mutate and fully control.
-#[derive(Debug)]
 struct ShellSessionInner {
-    shell_proc: process::Child,
+    shell_proc: pty_process::std::Child,
     client_stream: Option<UnixStream>,
+}
+
+impl std::fmt::Debug for ShellSessionInner {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct("ShellSessionInner")
+         .field("shell_proc", &"...")
+         .field("client_stream", &self.client_stream)
+         .finish()
+    }
 }
 
 /// SshExtensionParker contains syncronization primitives to allow the
@@ -174,7 +193,7 @@ impl Daemon {
             }
         } else {
             info!("handle_attach: creating new subshell");
-            let inner = spawn_subshell(stream, &header)?;
+            let inner = self.spawn_subshell(stream, &header)?;
 
             shells.insert(header.name.clone(), ShellSession {
                 started_at: time::SystemTime::now(),
@@ -337,6 +356,53 @@ impl Daemon {
 
         Ok(())
     }
+
+    fn spawn_subshell(
+        &self,
+        client_stream: UnixStream,
+        header: &protocol::AttachHeader,
+    ) -> anyhow::Result<ShellSessionInner> {
+        let user_info = user_info()?;
+        let default_shell = if let Some(s) = &self.config.shell {
+            s.clone()
+        } else {
+            user_info.default_shell.clone()
+        };
+        info!("user_info={:?}", user_info);
+        let mut cmd = process::Command::new(default_shell);
+        cmd.stdin(process::Stdio::piped())
+            .stdout(process::Stdio::piped())
+            .stderr(process::Stdio::piped())
+            .current_dir(user_info.home_dir.clone())
+            // The env should mostly be set up by the shell sourcing
+            // rc files and whatnot, so we will start things off with
+            // an environment that is blank except for a little marker
+            // environment variable that people can hook into for scripts
+            // and whatnot.
+            .env_clear()
+            .env("HOME", user_info.home_dir)
+            .env("SHPOOL_SESSION_NAME", &header.name);
+        if self.config.norc && self.config.shell.as_ref().map_or(false, |s| s == "/bin/bash") {
+            cmd.arg("--norc").arg("--noprofile");
+        }
+        if self.config.env.len() > 0 {
+            cmd.envs(&self.config.env);
+        }
+
+        /*
+        cmd.arg("-i") // TODO(ethan): HACK: find some way to indicate this in a
+                      //              shell agnostic way
+           .arg("-l"); // TODO(ethan): HACK: we should be using a pty rather than forcing
+                       //              a login shell with a shell-specific flag.
+        */
+        // TODO(ethan): plumb terminal size from the attach process down here
+        let child = cmd.spawn_pty(None).context("spawning subshell")?;
+
+        Ok(ShellSessionInner {
+            shell_proc: child,
+            client_stream: Some(client_stream),
+        })
+    }
 }
 
 /// bidi_stream shuffles bytes between the subprocess and the client connection.
@@ -354,6 +420,7 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
     // set timeouts so we can wake up to handle cancelation correctly
     client_stream.set_nonblocking(true).context("setting client stream nonblocking")?;
     
+    let mut reader_client_stream = client_stream.try_clone().context("creating reader client stream")?;
     let client_stream_m = Mutex::new(client_stream.try_clone()
                                    .context("wrapping a stream handle in mutex")?);
 
@@ -389,29 +456,28 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
                 // in this direction, because there is only one input stream
                 // to the shell subprocess, vs the two output streams we need
                 // to handle coming back the other way.
-                let len;
-                {
-                    let mut s = client_stream_m.lock().unwrap();
-                    len = match s.read(&mut buf) {
-                        Ok(l) => l,
-                        Err(e) => {
-                            if e.kind() == std::io::ErrorKind::WouldBlock {
-                                trace!("bidi_stream: client->shell: read: WouldBlock");
-                                thread::sleep(consts::PIPE_POLL_DURATION);
-                                continue;
-                            }
-                            return Err(e).context("reading client chunk");
+                //
+                // Also, not that we don't access through the mutex because reads
+                // don't need to be excluded from trampling on writes.
+                let len = match reader_client_stream.read(&mut buf) {
+                    Ok(l) => l,
+                    Err(e) => {
+                        if e.kind() == std::io::ErrorKind::WouldBlock {
+                            trace!("bidi_stream: client->shell: read: WouldBlock");
+                            thread::sleep(consts::PIPE_POLL_DURATION);
+                            continue;
                         }
-                    };
-                    if len == 0 {
-                        continue;
+                        return Err(e).context("reading client chunk");
                     }
+                };
+                if len == 0 {
+                    continue;
                 }
 
                 debug!("bidi_stream: client->shell: read {} bytes", len);
                 
                 let mut to_write = &buf[0..len];
-                trace!("bidi_stream: client->shell: created to_write={:?}", to_write);
+                debug!("bidi_stream: client->shell: created to_write='{}'", String::from_utf8_lossy(to_write));
 
                 while to_write.len() > 0 {
                     if stop.load(Ordering::Relaxed) {
@@ -432,10 +498,12 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
                     };
                     debug!("bidi_stream: client->shell: wrote {} bytes", nwritten);
                     to_write = &to_write[nwritten..];
-                    trace!("bidi_stream: client->shell: to_write={:?}", to_write);
+                    trace!("bidi_stream: client->shell: to_write='{}'", String::from_utf8_lossy(to_write));
                 }
 
                 stdin.flush().context("flushing stdin")?;
+
+                debug!("bidi_stream: client->shell: flushed chunk of len {}", len);
             }
         });
 
@@ -486,12 +554,12 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
                         continue;
                     }
 
-                    debug!("bidi_stream: shell->client: read {} stdout bytes", len);
 
                     let chunk = protocol::Chunk {
                         kind: protocol::ChunkKind::Stdout,
                         buf: &buf[..len],
                     };
+                    debug!("bidi_stream: shell->client: read stdout len={} '{}'", len, String::from_utf8_lossy(chunk.buf));
                     {
                         let mut s = client_stream_m.lock().unwrap();
                         chunk.write_to(&mut *s, &stop)
@@ -518,12 +586,12 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
                         continue;
                     }
 
-                    debug!("bidi_stream: shell->client: read {} stderr bytes", len);
 
                     let chunk = protocol::Chunk {
                         kind: protocol::ChunkKind::Stderr,
                         buf: &buf[..len],
                     };
+                    debug!("bidi_stream: shell->client: read stderr len={} '{}'", len, String::from_utf8_lossy(chunk.buf));
                     {
                         let mut s = client_stream_m.lock().unwrap();
                         chunk.write_to(&mut *s, &stop)
@@ -554,7 +622,6 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
                 };
                 {
                     let mut s = client_stream_m.lock().unwrap();
-                    trace!("bidi_stream: heartbeat: about to write heartbeat");
                     chunk.write_to(&mut *s, &stop)
                         .context("writing heartbeat chunk to client stream")?;
                     trace!("bidi_stream: heartbeat: wrote heartbeat");
@@ -618,37 +685,6 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
     Ok(child_done)
 } 
 
-fn spawn_subshell(
-    client_stream: UnixStream,
-    header: &protocol::AttachHeader,
-) -> anyhow::Result<ShellSessionInner> {
-    let user_info = user_info()?;
-    info!("user_info={:?}", user_info);
-    let child = process::Command::new(user_info.default_shell)
-        .stdin(process::Stdio::piped())
-        .stdout(process::Stdio::piped())
-        .stderr(process::Stdio::piped())
-        .current_dir(user_info.home_dir.clone())
-        // The env should mostly be set up by the shell sourcing
-        // rc files and whatnot, so we will start things off with
-        // an environment that is blank except for a little marker
-        // environment variable that people can hook into for scripts
-        // and whatnot.
-        .env_clear()
-        .env("HOME", user_info.home_dir)
-        .env("SHPOOL_SESSION_NAME", &header.name)
-        .arg("-i") // TODO(ethan): HACK: find some way to indicate this in a
-                   //              shell agnostic way
-        .arg("-l") // TODO(ethan): HACK: we should be using a pty rather than forcing
-                   //              a login shell with a shell-specific flag.
-        .spawn()
-        .context("spawning subshell")?;
-
-    Ok(ShellSessionInner {
-        shell_proc: child,
-        client_stream: Some(client_stream),
-    })
-}
 
 #[derive(Debug)]
 struct UserInfo {

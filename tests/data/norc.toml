@@ -1,0 +1,5 @@
+norc = true
+shell = "/bin/bash"
+
+[env]
+PS1 = "prompt> "

@@ -278,7 +278,7 @@ impl Client {
                     debug!("pipe_bytes: stdin->socket: read {} bytes", nread);
 
                     let mut to_write = &buf[..nread];
-                    trace!("pipe_bytes: stdin->socket: created to_write={:?}", to_write);
+                    debug!("pipe_bytes: stdin->socket: created to_write='{}'", String::from_utf8_lossy(to_write));
                     while to_write.len() > 0 {
                         if let Ok(_) = stop_rx.try_recv() {
                             return Ok(())
@@ -286,7 +286,7 @@ impl Client {
 
                         let nwritten = write_client_stream.write(to_write).context("writing chunk to server")?;
                         to_write = &to_write[nwritten..];
-                        trace!("pipe_bytes: stdin->socket: to_write={:?}", to_write);
+                        trace!("pipe_bytes: stdin->socket: to_write={}", String::from_utf8_lossy(to_write));
                     }
 
                     write_client_stream.flush().context("flushing client")?;
@@ -309,9 +309,10 @@ impl Client {
                     let chunk = Chunk::read_into(&mut read_client_stream, &mut buf)
                         .context("reading output chunk from daemon")?;
 
-                    debug!("pipe_bytes: socket->std{{out,err}}: read chunk kind={:?} len={}",
-                       chunk.kind, chunk.buf.len());
-                    trace!("pipe_bytes: socket->std{{out,err}}: chunk={:?}", chunk);
+                    if chunk.buf.len() > 0 {
+                        debug!("pipe_bytes: socket->std{{out,err}}: chunk='{}' kind={:?} len={}",
+                               String::from_utf8_lossy(chunk.buf), chunk.kind, chunk.buf.len());
+                    }
 
                     let mut to_write = &chunk.buf[..];
                     match chunk.kind {
