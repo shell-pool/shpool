@@ -11,7 +11,6 @@ use anyhow::{anyhow, Context};
 use log::{info, error, trace, debug};
 use serde_derive::Deserialize;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use pty_process::Command as _;
 
 use super::consts;
 use super::protocol;
@@ -99,7 +98,7 @@ struct ShellSession {
 /// ShellSessionInner contains values that the pipe thread needs to be
 /// able to mutate and fully control.
 struct ShellSessionInner {
-    shell_proc: pty_process::std::Child,
+    shell_proc: process::Child,
     client_stream: Option<UnixStream>,
 }
 
@@ -389,14 +388,12 @@ impl Daemon {
             cmd.envs(&self.config.env);
         }
 
-        /*
         cmd.arg("-i") // TODO(ethan): HACK: find some way to indicate this in a
                       //              shell agnostic way
            .arg("-l"); // TODO(ethan): HACK: we should be using a pty rather than forcing
                        //              a login shell with a shell-specific flag.
-        */
         // TODO(ethan): plumb terminal size from the attach process down here
-        let child = cmd.spawn_pty(None).context("spawning subshell")?;
+        let child = cmd.spawn().context("spawning subshell")?;
 
         Ok(ShellSessionInner {
             shell_proc: child,

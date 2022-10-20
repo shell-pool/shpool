@@ -13,7 +13,7 @@ fn attach_test() -> anyhow::Result<()> {
         .context("starting attach proc")?;
 
     let echo_res = attach_proc.run_cmd("echo hi", ExpectedOutput::STDOUT)?;
-    assert!(echo_res.stdout_re_match("hi")?);
+    echo_res.stdout_re_match("(?m)^hi$")?;
 
     Ok(())
 }

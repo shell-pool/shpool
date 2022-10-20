@@ -57,6 +57,7 @@ impl DaemonProc {
         let socket_path = tmp_dir.path().join("shpool.socket");
 
         let log_file = tmp_dir.path().join("daemon.log");
+        eprintln!("spawning daemon proc with log {:?}", &log_file);
 
         let proc = Command::new(shpool_bin())
             .stdout(Stdio::piped())
@@ -92,6 +93,7 @@ impl DaemonProc {
     pub fn attach(&mut self, name: &str) -> anyhow::Result<AttachProc> {
         let tmp_dir =  self.tmp_dir.as_ref().ok_or(anyhow!("missing tmp_dir"))?;
         let log_file = tmp_dir.path().join(format!("attach_{}_{}.log", name, self.subproc_counter));
+        eprintln!("spawning attach proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
         let proc = Command::new(shpool_bin())
@@ -168,7 +170,6 @@ impl AttachProc {
         stdin.flush().context("flushing cmd")?;
 
         let mut buf: [u8; 1024*4] = [0; 1024*4];
-
 
         let nbytes = match read_chunk(stdout, &mut buf[..], expected_outputs.contains(ExpectedOutput::STDOUT)) {
             Ok(n) => n,
@@ -267,11 +268,19 @@ pub struct CmdResult {
 }
 
 impl CmdResult {
-    pub fn stdout_re_match(&self, pat: &str) -> anyhow::Result<bool> {
-        Ok(Regex::new(pat)?.is_match(&self.stdout_str))
+    pub fn stdout_re_match(&self, pat: &str) -> anyhow::Result<()> {
+        if Regex::new(pat)?.is_match(&self.stdout_str) {
+            Ok(())
+        } else {
+            Err(anyhow!("expected /{}/ to match '{}'", pat, &self.stdout_str))
+        }
     }
 
-    pub fn stderr_re_match(&self, pat: &str) -> anyhow::Result<bool> {
-        Ok(Regex::new(pat)?.is_match(&self.stderr_str))
+    pub fn stderr_re_match(&self, pat: &str) -> anyhow::Result<()> {
+        if Regex::new(pat)?.is_match(&self.stderr_str) {
+            Ok(())
+        } else {
+            Err(anyhow!("expected /{}/ to match '{}'", pat, &self.stderr_str))
+        }
     }
 }
