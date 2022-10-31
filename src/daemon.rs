@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Condvar};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{time, thread, process, net};
+use std::os::unix::process::CommandExt;
 
 use anyhow::{anyhow, Context};
 use log::{info, error, trace, debug};
@@ -18,6 +19,8 @@ use super::protocol;
 // TODO(ethan): make this configurable via toml
 const SSH_EXTENSION_ATTACH_WINDOW: time::Duration = time::Duration::from_secs(30);
 
+const SUPERVISOR_POLL_DUR: time::Duration = time::Duration::from_millis(300);
+
 #[derive(Deserialize)]
 struct Config {
     // TODO(ethan): implement keepalive support
@@ -25,11 +28,11 @@ struct Config {
     
     /// norc makes it so that new shells do not load rc files when they
     /// spawn. Only works with bash.
-    norc: bool,
+    norc: Option<bool>,
     /// shell overrides the user's default shell
     shell: Option<String>,
     /// a table of environment variables to inject into the initial shell
-    env: HashMap<String, String>,
+    env: Option<HashMap<String, String>>,
 }
 
 pub fn run(config_file: String, socket: PathBuf) -> anyhow::Result<()> {
@@ -97,18 +100,10 @@ struct ShellSession {
 
 /// ShellSessionInner contains values that the pipe thread needs to be
 /// able to mutate and fully control.
+#[derive(Debug)]
 struct ShellSessionInner {
-    shell_proc: process::Child,
+    pty_master: pty::fork::Fork,
     client_stream: Option<UnixStream>,
-}
-
-impl std::fmt::Debug for ShellSessionInner {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.debug_struct("ShellSessionInner")
-         .field("shell_proc", &"...")
-         .field("client_stream", &self.client_stream)
-         .finish()
-    }
 }
 
 /// SshExtensionParker contains syncronization primitives to allow the
@@ -362,17 +357,22 @@ impl Daemon {
         header: &protocol::AttachHeader,
     ) -> anyhow::Result<ShellSessionInner> {
         let user_info = user_info()?;
-        let default_shell = if let Some(s) = &self.config.shell {
+        let shell = if let Some(s) = &self.config.shell {
             s.clone()
         } else {
             user_info.default_shell.clone()
         };
-        info!("user_info={:?}", user_info);
-        let mut cmd = process::Command::new(default_shell);
-        cmd.stdin(process::Stdio::piped())
-            .stdout(process::Stdio::piped())
-            .stderr(process::Stdio::piped())
-            .current_dir(user_info.home_dir.clone())
+        info!("spawn_subshell: user_info={:?}", user_info);
+
+        // Build up the command we will exec while allocation is still chill.
+        // We will exec this command after a fork, so we want to just inherit
+        // stdout/stderr/stdin. The pty crate automatically `dup2`s the file
+        // descriptors for us.
+        let mut cmd = process::Command::new(&shell);
+        cmd.current_dir(user_info.home_dir.clone())
+            .stdin(process::Stdio::inherit())
+            .stdout(process::Stdio::inherit())
+            .stderr(process::Stdio::inherit())
             // The env should mostly be set up by the shell sourcing
             // rc files and whatnot, so we will start things off with
             // an environment that is blank except for a little marker
@@ -381,22 +381,24 @@ impl Daemon {
             .env_clear()
             .env("HOME", user_info.home_dir)
             .env("SHPOOL_SESSION_NAME", &header.name);
-        if self.config.norc && self.config.shell.as_ref().map_or(false, |s| s == "/bin/bash") {
+        if self.config.norc.unwrap_or(false) && shell == "/bin/bash" {
             cmd.arg("--norc").arg("--noprofile");
         }
-        if self.config.env.len() > 0 {
-            cmd.envs(&self.config.env);
+        if let Some(env) = self.config.env.as_ref() {
+            if env.len() > 0 {
+                cmd.envs(env);
+            }
         }
 
-        cmd.arg("-i") // TODO(ethan): HACK: find some way to indicate this in a
-                      //              shell agnostic way
-           .arg("-l"); // TODO(ethan): HACK: we should be using a pty rather than forcing
-                       //              a login shell with a shell-specific flag.
-        // TODO(ethan): plumb terminal size from the attach process down here
-        let child = cmd.spawn().context("spawning subshell")?;
+        let fork = pty::fork::Fork::from_ptmx().context("forking pty")?;
+        if fork.is_child().is_ok() {
+            let err = cmd.exec();
+            eprintln!("shell exec err: {:?}", err);
+            std::process::exit(1);
+        }
 
         Ok(ShellSessionInner {
-            shell_proc: child,
+            pty_master: fork,
             client_stream: Some(client_stream),
         })
     }
@@ -421,24 +423,19 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
     let client_stream_m = Mutex::new(client_stream.try_clone()
                                    .context("wrapping a stream handle in mutex")?);
 
-    // A flag to indicate that outstanding threads should stop termination
+    let pty_master = inner.pty_master.is_parent()
+        .context("internal error: executing in child fork")?;
+
+    // A flag to indicate that outstanding threads should stop
     let stop = AtomicBool::new(false);
+    // A flag to indicate if the child shell has exited
+    let child_done = AtomicBool::new(false);
 
-    let mut stdin = inner.shell_proc.stdin.take().ok_or(anyhow!("missing stdin"))?;
-    let mut stdout = inner.shell_proc.stdout.take().ok_or(anyhow!("missing stdout"))?;
-    let mut stderr = inner.shell_proc.stderr.take().ok_or(anyhow!("missing stderr"))?;
-
-    for fd in vec![stdin.as_raw_fd(), stdout.as_raw_fd(), stderr.as_raw_fd()].iter() {
-        nix::fcntl::fcntl(
-            *fd,
-            nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
-        ).context("setting stdin nonblocking")?;
-    }
-
-    let mut child_done = false;
-    let thread_result = thread::scope(|s| -> anyhow::Result<()> {
+    thread::scope(|s| -> anyhow::Result<()> {
         // client -> shell
         let client_to_shell_h = s.spawn(|| -> anyhow::Result<()> {
+            let mut master_writer = pty_master.clone();
+
             info!("bidi_stream: spawned client->shell thread");
 
             let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
@@ -482,7 +479,10 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
                         return Ok(())
                     }
 
-                    let nwritten = match stdin.write(&to_write) {
+                    // TODO(ethan): will we even get an EWOULDBLOCK return code anymore?
+                    //              the pty master file descriptor does not allow us to
+                    //              mark it nonblocking.
+                    let nwritten = match master_writer.write(&to_write) {
                         Ok(n) => n,
                         Err(e) => {
                             if e.kind() == std::io::ErrorKind::WouldBlock {
@@ -498,7 +498,7 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
                     trace!("bidi_stream: client->shell: to_write='{}'", String::from_utf8_lossy(to_write));
                 }
 
-                stdin.flush().context("flushing stdin")?;
+                master_writer.flush().context("flushing input from client to shell")?;
 
                 debug!("bidi_stream: client->shell: flushed chunk of len {}", len);
             }
@@ -507,6 +507,8 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
         // shell -> client
         let shell_to_client_h = s.spawn(|| -> anyhow::Result<()> {
             info!("bidi_stream: spawned shell->client thread");
+
+            let mut master_reader = pty_master.clone();
 
             let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
 
@@ -518,31 +520,30 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
 
                 // select so we know which stream to read from, and
                 // know to wake up immediately when bytes are available.
-                let mut shell_out_set = nix::sys::select::FdSet::new();
-                shell_out_set.insert(stdout.as_raw_fd());
-                shell_out_set.insert(stderr.as_raw_fd());
+                let mut fdset = nix::sys::select::FdSet::new();
+                fdset.insert(master_reader.as_raw_fd());
                 let mut poll_dur = consts::PIPE_POLL_DURATION_TIMEVAL.clone();
                 let nready = nix::sys::select::select(
                     None,
-                    Some(&mut shell_out_set),
+                    Some(&mut fdset),
                     None,
                     None,
                     Some(&mut poll_dur),
-                ).context("selecting on stdout")?;
+                ).context("selecting on pty master")?;
                 if nready == 0 {
                     continue;
                 }
 
-                if shell_out_set.contains(stdout.as_raw_fd()) {
-                    let len = match stdout.read(&mut buf) {
+                if fdset.contains(master_reader.as_raw_fd()) {
+                    let len = match master_reader.read(&mut buf) {
                         Ok(n) => n,
                         Err(e) => {
                             if e.kind() == std::io::ErrorKind::WouldBlock {
-                                trace!("bidi_stream: shell->client: stdout read: WouldBlock");
+                                trace!("bidi_stream: shell->client: pty master read: WouldBlock");
                                 thread::sleep(consts::PIPE_POLL_DURATION);
                                 continue;
                             }
-                            return Err(e).context("reading stdout chunk");
+                            return Err(e).context("reading pty master chunk");
                         }
                     };
                     if len == 0 {
@@ -551,50 +552,17 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
                         continue;
                     }
 
-
                     let chunk = protocol::Chunk {
-                        kind: protocol::ChunkKind::Stdout,
+                        kind: protocol::ChunkKind::Data,
                         buf: &buf[..len],
                     };
-                    debug!("bidi_stream: shell->client: read stdout len={} '{}'", len, String::from_utf8_lossy(chunk.buf));
+                    debug!("bidi_stream: shell->client: read pty master len={} '{}'", len, String::from_utf8_lossy(chunk.buf));
                     {
                         let mut s = client_stream_m.lock().unwrap();
                         chunk.write_to(&mut *s, &stop)
                             .context("writing stdout chunk to client stream")?;
                     }
-                    debug!("bidi_stream: shell->client: wrote {} stdout bytes", chunk.buf.len());
-                }
-
-                if shell_out_set.contains(stderr.as_raw_fd()) {
-                    let len = match stderr.read(&mut buf) {
-                        Ok(n) => n,
-                        Err(e) => {
-                            if e.kind() == std::io::ErrorKind::WouldBlock {
-                                trace!("bidi_stream: shell->client: stderr read: WouldBlock");
-                                thread::sleep(consts::PIPE_POLL_DURATION);
-                                continue;
-                            }
-                            return Err(e).context("reading stderr chunk");
-                        }
-                    };
-                    if len == 0 {
-                        trace!("bidi_stream: shell->client: 0 stderr bytes, waiting");
-                        thread::sleep(consts::PIPE_POLL_DURATION);
-                        continue;
-                    }
-
-
-                    let chunk = protocol::Chunk {
-                        kind: protocol::ChunkKind::Stderr,
-                        buf: &buf[..len],
-                    };
-                    debug!("bidi_stream: shell->client: read stderr len={} '{}'", len, String::from_utf8_lossy(chunk.buf));
-                    {
-                        let mut s = client_stream_m.lock().unwrap();
-                        chunk.write_to(&mut *s, &stop)
-                            .context("writing stderr chunk to client stream")?;
-                    }
-                    debug!("bidi_stream: shell->client: wrote {} stderr bytes", chunk.buf.len());
+                    debug!("bidi_stream: shell->client: wrote {} pty master bytes", chunk.buf.len());
                 }
 
                 // flush immediately
@@ -614,7 +582,7 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
 
                 thread::sleep(consts::HEARTBEAT_DURATION);
                 let chunk = protocol::Chunk {
-                    kind: protocol::ChunkKind::NoOp,
+                    kind: protocol::ChunkKind::Heartbeat,
                     buf: &[],
                 };
                 {
@@ -626,16 +594,41 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
             }
         });
 
-        loop {
-            if let Some(status) = inner.shell_proc.try_wait().context("checking on child proc")? {
-                child_done = true;
-                info!("bidi_stream: shell process exited with status {}", status);
+        // poll the pty master fd to see if the child shell has exited.
+        let supervisor_h = s.spawn(|| -> anyhow::Result<()> {
+            loop {
+                trace!("bidi_stream: supervisor: checking stop_rx");
+                if stop.load(Ordering::Relaxed) {
+                    info!("bidi_stream: supervisor: recvd stop msg");
+                    return Ok(())
+                }
+
+                let mut master_fd = [
+                    nix::poll::PollFd::new(
+                        pty_master.as_raw_fd(),
+                        nix::poll::PollFlags::empty()
+                    ),
+                ];
+                let nready = nix::poll::poll(&mut master_fd, SUPERVISOR_POLL_DUR.as_millis() as i32)
+                    .context("polling master fd for POLLHUP")?;
+                if nready == 0 {
+                    trace!("bidi_stream: supervisor: poll timeout");
+                }
+                if master_fd[0].revents().map(|e| e.contains(nix::poll::PollFlags::POLLHUP)).unwrap_or(false) {
+                    info!("bidi_stream: supervisor: child shell exited");
+                    child_done.store(true, Ordering::Release);
+                    return Ok(());
+                }
             }
+        });
+
+        loop {
+            let c_done = child_done.load(Ordering::Acquire);
             if client_to_shell_h.is_finished() || shell_to_client_h.is_finished()
-                || heartbeat_h.is_finished() || child_done {
-                debug!("bidi_stream: signaling for threads to stop: client_to_shell_finished={} shell_to_client_finished={} heartbeat_finished={} child_done={}",
+                || heartbeat_h.is_finished() || supervisor_h.is_finished() || c_done {
+                debug!("bidi_stream: signaling for threads to stop: client_to_shell_finished={} shell_to_client_finished={} heartbeat_finished={} supervisor_finished={} child_done={}",
                     client_to_shell_h.is_finished(), shell_to_client_h.is_finished(),
-                    heartbeat_h.is_finished(), child_done,
+                    heartbeat_h.is_finished(), supervisor_h.is_finished(), c_done,
                 );
                 stop.store(true, Ordering::Relaxed);
                 break;
@@ -657,29 +650,25 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
             Ok(v) => v.context("joining heartbeat_h")?,
             Err(panic_err) => std::panic::resume_unwind(panic_err),
         }
+        debug!("bidi_stream: joining supervisor_h");
+        match supervisor_h.join() {
+            Ok(v) => v.context("joining supervisor_h")?,
+            Err(panic_err) => std::panic::resume_unwind(panic_err),
+        }
 
         Ok(())
-    }).context("outer thread scope");
+    }).context("outer thread scope")?;
 
-    // Replace the I/O handles for the subprocess so that they can be picked up
-    // when the user dials in to attach again.
-    inner.shell_proc.stdin = Some(stdin);
-    inner.shell_proc.stdout = Some(stdout);
-    inner.shell_proc.stderr = Some(stderr);
-
-    // Delay error propigation until after we have replaced the I/O
-    // handles.
-    thread_result?;
-
-    if child_done {
+    let c_done = child_done.load(Ordering::Acquire);
+    if c_done {
         client_stream.shutdown(std::net::Shutdown::Both)
             .context("shutting down client stream")?;
     }
 
     info!("bidi_stream: inner.client_stream={:?}", inner.client_stream);
 
-    info!("bidi_stream: done child_done={}", child_done);
-    Ok(child_done)
+    info!("bidi_stream: done child_done={}", c_done);
+    Ok(c_done)
 } 
 
 

@@ -8,9 +8,6 @@
     - transmit resize signals to the pty whenever an attach process gets a
       SIGWINCH
     - Forward SIGINT (^C), SIGTSTP (^Z)
-- Something is fucky with how eagarly we are reading the input and output
-  from the termianl input/shell. I generally have to mash return a few times
-  to se output for my commands.
 - come up with some sort of keybinding to exit the shpool shell.
   make it configurable via the daemon's toml file. (Or maybe just
   make users use commands to do this? That won't work for long running

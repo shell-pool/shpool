@@ -3,7 +3,7 @@
 // stuff here.
 #![allow(dead_code)]
 
-use std::io::{Read, Write};
+use std::io::{BufRead, Write};
 use std::path::{PathBuf, Path};
 use std::process::{Command, Stdio};
 use std::{env, process, time, io};
@@ -11,7 +11,6 @@ use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixStream;
 
 use anyhow::{anyhow, Context};
-use bitflags::bitflags;
 use tempfile::TempDir;
 use regex::Regex;
 
@@ -108,16 +107,6 @@ impl DaemonProc {
             .spawn()
             .context(format!("spawning attach proc for {}", name))?;
 
-        let stdout = self.proc.stdout.as_ref().ok_or(anyhow!("missing stdout"))?;
-        let stderr = self.proc.stderr.as_mut().ok_or(anyhow!("missing stderr"))?;
-
-        for fd in vec![stdout.as_raw_fd(), stderr.as_raw_fd()].iter() {
-            nix::fcntl::fcntl(
-                *fd,
-                nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
-            ).context("setting stdin nonblocking")?;
-        }
-
         Ok(AttachProc {
             proc,
             log_file,
@@ -142,111 +131,67 @@ pub struct AttachProc {
     log_file: PathBuf,
 }
 
-const CMD_READ_LONG_TIMEOUT: time::Duration = time::Duration::from_secs(1);
-const CMD_READ_SHORT_TIMEOUT: time::Duration = time::Duration::from_millis(200);
+const CMD_READ_TIMEOUT: time::Duration = time::Duration::from_secs(1);
 const CMD_READ_SLEEP_DUR: time::Duration = time::Duration::from_millis(20);
 
-bitflags! {
-    pub struct ExpectedOutput: u32 {
-        const STDOUT = 0b00000001;
-        const STDERR = 0b00000010;
-    }
-}
-
 impl AttachProc {
-    // TODO(ethan): have caller specify the channels they expect output on
-    // (stdin/stdout/none) and block with a long timeout for those channels
     pub fn run_cmd(
         &mut self,
         cmd: &str,
-        expected_outputs: ExpectedOutput,
-    ) -> anyhow::Result<CmdResult> {
+    ) -> anyhow::Result<()> {
         let stdin = self.proc.stdin.as_mut().ok_or(anyhow!("missing stdin"))?;
-        let stdout = self.proc.stdout.as_mut().ok_or(anyhow!("missing stdout"))?;
-        let stderr = self.proc.stderr.as_mut().ok_or(anyhow!("missing stderr"))?;
 
         let full_cmd = format!("{}\n", cmd);
         stdin.write_all(full_cmd.as_bytes()).context("writing cmd into attach proc")?;
         stdin.flush().context("flushing cmd")?;
 
-        let mut buf: [u8; 1024*4] = [0; 1024*4];
+        Ok(())
+    }
 
-        let nbytes = match read_chunk(stdout, &mut buf[..], expected_outputs.contains(ExpectedOutput::STDOUT)) {
-            Ok(n) => n,
-            Err(e) => {
-                if let Some(io_err) = e.downcast_ref::<io::Error>() {
-                    if io_err.kind() == io::ErrorKind::TimedOut {
-                        0 // we will just move on with the empty string
-                    } else {
-                        Err(e).context("reading stdout chunk")?
-                    }
-                } else {
-                    Err(e).context("reading stdout chunk")?
-                }
-            },
-        };
-        let stdout_str = String::from(String::from_utf8_lossy(&buf[..nbytes]));
+    /// Create a handle for asserting about output lines.
+    ///
+    /// For some reason we can't just create the Lines iterator as soon
+    /// as we spawn the subcommand. Attempts to do so result in
+    /// `Resource temporarily unavailable` (EAGAIN) errors.
+    pub fn line_matcher(&mut self) -> anyhow::Result<LineMatcher> {
+        let r = self.proc.stdout.take().ok_or(anyhow!("missing stdout"))?;
 
-        let nbytes = match read_chunk(stderr, &mut buf[..], expected_outputs.contains(ExpectedOutput::STDERR)) {
-            Ok(n) => n,
-            Err(e) => {
-                if let Some(io_err) = e.downcast_ref::<io::Error>() {
-                    if io_err.kind() == io::ErrorKind::TimedOut {
-                        0 // we will just move on with the empty string
-                    } else {
-                        Err(e).context("reading stderr chunk")?
-                    }
-                } else {
-                    Err(e).context("reading stderr chunk")?
-                }
-            },
-        };
-        let stderr_str = String::from(String::from_utf8_lossy(&buf[..nbytes]));
+        nix::fcntl::fcntl(
+            r.as_raw_fd(),
+            nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
+        ).context("setting stdin nonblocking")?;
 
-        Ok(CmdResult {
-            stdout_str,
-            stderr_str,
-        })
+        let lines = io::BufReader::new(r).lines();
+        Ok(LineMatcher{ out_lines: lines })
     }
 }
 
-fn read_chunk<R>(r: &mut R, into: &mut [u8], expect_output: bool) -> anyhow::Result<usize>
-    where R: Read + AsRawFd
-{
-    let timeout = if expect_output {
-        CMD_READ_LONG_TIMEOUT
-    } else {
-        CMD_READ_SHORT_TIMEOUT
-    };
+pub struct LineMatcher {
+    out_lines: io::Lines<io::BufReader<process::ChildStdout>>,
+}
+impl LineMatcher {
+    pub fn match_re(&mut self, re: &str) -> anyhow::Result<()> {
+        let start = time::Instant::now();
+        loop {
+            let line = self.out_lines.next().ok_or(anyhow!("no line"))?;
+            if let Err(e) = &line {
+                if e.kind() == io::ErrorKind::WouldBlock {
+                    if start.elapsed() > CMD_READ_TIMEOUT {
+                        return Err(io::Error::new(io::ErrorKind::TimedOut, "timed out reading line"))?;
+                    }
 
-    let start = time::Instant::now();
-    loop {
-        let mut timeout_tv = nix::sys::time::TimeVal::new(
-            0, 1000 * (timeout.as_millis() as nix::sys::time::suseconds_t));
-
-        let mut fdset = nix::sys::select::FdSet::new();
-        fdset.insert(r.as_raw_fd());
-        let nready = nix::sys::select::select(
-            None,
-            Some(&mut fdset),
-            None,
-            None,
-            Some(&mut timeout_tv),
-        ).context("selecting on stdout")?;
-
-        if nready == 0 || !fdset.contains(r.as_raw_fd()) {
-            return Err(io::Error::new(io::ErrorKind::TimedOut, "timed out reading chunk"))?;
-        }
-
-        let nbytes = r.read(into)?;
-        if nbytes == 0 {
-            if start.elapsed() > timeout {
-                return Err(io::Error::new(io::ErrorKind::TimedOut, "timed out reading chunk"))?;
-            } else {
-                std::thread::sleep(CMD_READ_SLEEP_DUR);
+                    std::thread::sleep(CMD_READ_SLEEP_DUR);
+                    continue;
+                }
             }
-        } else {
-            return Ok(nbytes);
+            let line = line?;
+
+            eprintln!("testing /{}/ against '{}'", re, &line);
+            return if Regex::new(re)?.is_match(&line) {
+                Ok(())
+            } else {
+                Err(anyhow!("expected /{}/ to match '{}'", re, &line))
+            };
         }
     }
 }
@@ -255,32 +200,6 @@ impl std::ops::Drop for AttachProc {
     fn drop(&mut self) {
         if let Err(e) = self.proc.kill() {
             eprintln!("err killing attach proc: {:?}", e);
-        }
-    }
-}
-
-/// CmdResult represents a command that has been run as part of a subshell. All the
-/// output is slurped ahead of time and there are some helper routines for making
-/// assertions about it.
-pub struct CmdResult {
-    stdout_str: String,
-    stderr_str: String,
-}
-
-impl CmdResult {
-    pub fn stdout_re_match(&self, pat: &str) -> anyhow::Result<()> {
-        if Regex::new(pat)?.is_match(&self.stdout_str) {
-            Ok(())
-        } else {
-            Err(anyhow!("expected /{}/ to match '{}'", pat, &self.stdout_str))
-        }
-    }
-
-    pub fn stderr_re_match(&self, pat: &str) -> anyhow::Result<()> {
-        if Regex::new(pat)?.is_match(&self.stderr_str) {
-            Ok(())
-        } else {
-            Err(anyhow!("expected /{}/ to match '{}'", pat, &self.stderr_str))
         }
     }
 }

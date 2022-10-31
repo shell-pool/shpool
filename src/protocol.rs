@@ -7,7 +7,6 @@ use std::thread;
 
 use anyhow::{anyhow, Context};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crossbeam::channel;
 use log::{info, debug, trace};
 use serde_derive::{Serialize, Deserialize};
 
@@ -116,17 +115,15 @@ pub enum AttachStatus {
 /// through the socket.
 #[derive(Copy, Clone, Debug)]
 pub enum ChunkKind {
-    Stdout = 0,
-    Stderr = 1,
-    NoOp = 2,
+    Data = 0,
+    Heartbeat = 1,
 }
 
 impl ChunkKind {
     fn from_u8(v: u8) -> anyhow::Result<Self> {
         match v {
-            0 => Ok(ChunkKind::Stdout),
-            1 => Ok(ChunkKind::Stderr),
-            2 => Ok(ChunkKind::NoOp),
+            0 => Ok(ChunkKind::Data),
+            1 => Ok(ChunkKind::Heartbeat),
             _ => Err(anyhow!("unknown FrameKind {}", v)),
         }
     }
@@ -213,8 +210,8 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(socket: PathBuf) -> anyhow::Result<Self> {
-        let stream = UnixStream::connect(socket).context("connecting to shpool")?;
+    pub fn new(sock: PathBuf) -> anyhow::Result<Self> {
+        let stream = UnixStream::connect(sock).context("connecting to shpool")?;
         Ok(Client { stream })
     }
 
@@ -240,15 +237,15 @@ impl Client {
     }
 
     pub fn pipe_bytes(self) -> anyhow::Result<()> {
-        let (stop_tx, stop_rx) = channel::bounded(1);
+        let stop = AtomicBool::new(false);
 
         let mut read_client_stream = self.stream.try_clone().context("cloning read stream")?;
         let mut write_client_stream = self.stream.try_clone().context("cloning read stream")?;
 
         thread::scope(|s| {
-            // stdin -> socket
-            let stdin_to_socket_h = s.spawn(|| -> anyhow::Result<()> {
-                info!("pipe_bytes: stdin->socket thread spawned");
+            // stdin -> sock
+            let stdin_to_sock_h = s.spawn(|| -> anyhow::Result<()> {
+                info!("pipe_bytes: stdin->sock thread spawned");
 
                 let mut stdin = std::io::stdin().lock();
                 let mut buf = vec![0; consts::BUF_SIZE];
@@ -259,7 +256,8 @@ impl Client {
                 ).context("setting stdin nonblocking")?;
 
                 loop {
-                    if let Ok(_) = stop_rx.try_recv() {
+                    if stop.load(Ordering::Relaxed) {
+                        info!("pipe_bytes: stdin->sock: recvd stop msg (1)");
                         return Ok(())
                     }
 
@@ -267,7 +265,7 @@ impl Client {
                         Ok(n) => n,
                         Err(e) => {
                             if e.kind() == std::io::ErrorKind::WouldBlock {
-                                trace!("pipe_bytes: stdin->socket: read: WouldBlock");
+                                trace!("pipe_bytes: stdin->sock: read: WouldBlock");
                                 thread::sleep(consts::PIPE_POLL_DURATION);
                                 continue;
                             }
@@ -275,34 +273,35 @@ impl Client {
                         }
                     };
 
-                    debug!("pipe_bytes: stdin->socket: read {} bytes", nread);
+                    debug!("pipe_bytes: stdin->sock: read {} bytes", nread);
 
                     let mut to_write = &buf[..nread];
-                    debug!("pipe_bytes: stdin->socket: created to_write='{}'", String::from_utf8_lossy(to_write));
+                    debug!("pipe_bytes: stdin->sock: created to_write='{}'", String::from_utf8_lossy(to_write));
                     while to_write.len() > 0 {
-                        if let Ok(_) = stop_rx.try_recv() {
+                        if stop.load(Ordering::Relaxed) {
+                            info!("pipe_bytes: stdin->sock: recvd stop msg (2)");
                             return Ok(())
                         }
 
                         let nwritten = write_client_stream.write(to_write).context("writing chunk to server")?;
                         to_write = &to_write[nwritten..];
-                        trace!("pipe_bytes: stdin->socket: to_write={}", String::from_utf8_lossy(to_write));
+                        trace!("pipe_bytes: stdin->sock: to_write={}", String::from_utf8_lossy(to_write));
                     }
 
                     write_client_stream.flush().context("flushing client")?;
                 }
             });
 
-            // socket -> std{out,err}
-            let socket_to_stdout_h = s.spawn(|| -> anyhow::Result<()> {
-                info!("pipe_bytes: socket->std{{out,err}} thread spawned");
+            // sock -> stdout
+            let sock_to_stdout_h = s.spawn(|| -> anyhow::Result<()> {
+                info!("pipe_bytes: sock->stdout thread spawned");
 
                 let mut stdout = std::io::stdout().lock();
-                let mut stderr = std::io::stderr().lock();
                 let mut buf = vec![0; consts::BUF_SIZE];
 
                 loop {
-                    if let Ok(_) = stop_rx.try_recv() {
+                    if stop.load(Ordering::Relaxed) {
+                        info!("pipe_bytes: sock->stdout: recvd stop msg (1)");
                         return Ok(())
                     }
 
@@ -310,22 +309,23 @@ impl Client {
                         .context("reading output chunk from daemon")?;
 
                     if chunk.buf.len() > 0 {
-                        debug!("pipe_bytes: socket->std{{out,err}}: chunk='{}' kind={:?} len={}",
+                        debug!("pipe_bytes: sock->stdout: chunk='{}' kind={:?} len={}",
                                String::from_utf8_lossy(chunk.buf), chunk.kind, chunk.buf.len());
                     }
 
                     let mut to_write = &chunk.buf[..];
                     match chunk.kind {
-                        ChunkKind::NoOp => {
-                            trace!("pipe_bytes: got noop chunk");
+                        ChunkKind::Heartbeat => {
+                            trace!("pipe_bytes: got heartbeat chunk");
                         },
-                        ChunkKind::Stdout => {
+                        ChunkKind::Data => {
                             while to_write.len() > 0  {
-                                if let Ok(_) = stop_rx.try_recv() {
+                                if stop.load(Ordering::Relaxed) {
+                                    info!("pipe_bytes: sock->stdout: recvd stop msg (2)");
                                     return Ok(())
                                 }
 
-                                debug!("pipe_bytes: socket->std{{out,err}}: about to select on stdout");
+                                debug!("pipe_bytes: sock->stdout: about to select on stdout");
                                 let mut stdout_set = nix::sys::select::FdSet::new();
                                 stdout_set.insert(stdout.as_raw_fd());
                                 let mut poll_dur = consts::PIPE_POLL_DURATION_TIMEVAL.clone();
@@ -341,60 +341,30 @@ impl Client {
                                 }
 
                                 let nwritten = stdout.write(to_write).context("writing chunk to stdout")?;
-                                debug!("pipe_bytes: socket->std{{out,err}}: wrote {} stdout bytes",
+                                debug!("pipe_bytes: sock->stdout: wrote {} stdout bytes",
                                     nwritten);
                                 to_write = &to_write[nwritten..];
                             }
 
                             stdout.flush().context("flushing stdout")?;
-                            debug!("pipe_bytes: socket->std{{out,err}}: flushed stderr");
-                        },
-                        ChunkKind::Stderr => {
-                            while to_write.len() > 0 {
-                                if let Ok(_) = stop_rx.try_recv() {
-                                    return Ok(())
-                                }
-
-                                debug!("pipe_bytes: socket->std{{out,err}}: about to select on stderr");
-                                let mut stderr_set = nix::sys::select::FdSet::new();
-                                stderr_set.insert(stderr.as_raw_fd());
-                                let mut poll_dur = consts::PIPE_POLL_DURATION_TIMEVAL.clone();
-                                let nready = nix::sys::select::select(
-                                    None,
-                                    None,
-                                    Some(&mut stderr_set),
-                                    None,
-                                    Some(&mut poll_dur),
-                                ).context("selecting on stdout")?;
-                                if nready == 0 || !stderr_set.contains(stderr.as_raw_fd()) {
-                                    continue;
-                                }
-
-                                let nwritten = stderr.write(to_write).context("writing chunk to stdout")?;
-                                debug!("pipe_bytes: socket->std{{out,err}}: wrote {} stderr bytes",
-                                    nwritten);
-                                to_write = &to_write[nwritten..];
-                            }
-
-                            stderr.flush().context("flushing stdout")?;
-                            debug!("pipe_bytes: socket->std{{out,err}}: flushed stderr");
+                            debug!("pipe_bytes: sock->stdout: flushed stdout");
                         },
                     }
                 }
             });
 
             loop {
-                if stdin_to_socket_h.is_finished() || socket_to_stdout_h.is_finished() {
-                    stop_tx.send(true).context("sending stop msg")?;
+                if stdin_to_sock_h.is_finished() || sock_to_stdout_h.is_finished() {
+                    stop.store(true, Ordering::Relaxed);
                     break;
                 }
                 thread::sleep(consts::JOIN_POLL_DURATION);
             }
-            match stdin_to_socket_h.join() {
+            match stdin_to_sock_h.join() {
                 Ok(v) => v?,
                 Err(panic_err) => std::panic::resume_unwind(panic_err),
             }
-            match socket_to_stdout_h.join() {
+            match sock_to_stdout_h.join() {
                 Ok(v) => v?,
                 Err(panic_err) => std::panic::resume_unwind(panic_err),
             }
