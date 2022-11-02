@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{RawFd, AsRawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Condvar};
@@ -391,7 +391,8 @@ impl Daemon {
         }
 
         let fork = pty::fork::Fork::from_ptmx().context("forking pty")?;
-        if fork.is_child().is_ok() {
+        if let Ok(slave) = fork.is_child() {
+            set_term_flags(slave.as_raw_fd()).unwrap();
             let err = cmd.exec();
             eprintln!("shell exec err: {:?}", err);
             std::process::exit(1);
@@ -402,6 +403,19 @@ impl Daemon {
             client_stream: Some(client_stream),
         })
     }
+}
+
+fn set_term_flags(fd: RawFd) -> std::io::Result<()> {
+    use termios::*;
+
+    // TODO(ethan): I think to correctly support zsh I may need to disable
+    // ICANON mode so we send chars in one at a time. zsh may do this automatically
+    // for us though.
+
+    let mut term = Termios::from_fd(fd)?;
+    term.c_lflag &= !ECHO;
+
+    tcsetattr(fd, TCSANOW, &term)
 }
 
 /// bidi_stream shuffles bytes between the subprocess and the client connection.
@@ -664,8 +678,6 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
         client_stream.shutdown(std::net::Shutdown::Both)
             .context("shutting down client stream")?;
     }
-
-    info!("bidi_stream: inner.client_stream={:?}", inner.client_stream);
 
     info!("bidi_stream: done child_done={}", c_done);
     Ok(c_done)

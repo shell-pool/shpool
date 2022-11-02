@@ -13,8 +13,6 @@
   make users use commands to do this? That won't work for long running
   processes though).
 - Pass TERM along so that `reset` works
-- make a centralized chunk writing thread so that writes do not
-  get interleaved for data coming from the daemon to the client.
 - Read input from terminal emulator byte by byte so that zsh autocomplete
   works.
 - There is a lot of heartbeat overhead. See if we can reduce that.
