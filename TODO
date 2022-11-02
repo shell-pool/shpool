@@ -1,7 +1,5 @@
 
 - start pinning down behavior by actually writing tests for these various cases
-    - basic attach test
-    - attach, then reconnect
     - attach, write exit to the shell
     - test for ssh plugin mode commands
 - forward signals to the inner shell correctly

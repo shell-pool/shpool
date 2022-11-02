@@ -10,7 +10,7 @@ For example to run `attach_test` and leave log files in place
 you might run
 
 ```
-$ SHPOOL_LEAVE_TEST_LOGS=true cargo test attach_test -- --nocapture
+$ SHPOOL_LEAVE_TEST_LOGS=true cargo test --test attach happy_path -- --nocapture
 ```
 
 
