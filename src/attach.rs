@@ -4,9 +4,11 @@ use anyhow::{Context, anyhow};
 use log::info;
 
 use super::protocol;
+use super::test_hooks;
 
 pub fn run(name: String, socket: PathBuf) -> anyhow::Result<()> {
     info!("\n\n======================== STARTING ATTACH ============================\n\n");
+    test_hooks::emit_event("attach-startup");
 
     let mut client = protocol::Client::new(socket)?;
 

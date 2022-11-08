@@ -10,8 +10,12 @@ fn happy_path() -> anyhow::Result<()> {
         .context("starting daemon proc")?;
     let mut attach_proc = daemon_proc.attach("sh1")
         .context("starting attach proc")?;
+    attach_proc.events.await_event("attach-startup")?;
 
     let mut line_matcher = attach_proc.line_matcher()?;
+
+    // not really needed, just here to test the events system
+    daemon_proc.events.await_event("daemon-about-to-listen")?;
 
     attach_proc.run_cmd("echo hi")?;
     line_matcher.match_re("hi$")?;
