@@ -28,3 +28,4 @@ lazy_static = "1" # globals
 [dev-dependencies]
 tempfile = { git = "https://github.com/ethanpailes/tempfile", branch = "disown" } # keeping tests hermetic
 regex = "1" # test assertions
+crossbeam-channel = "0.5" # channels

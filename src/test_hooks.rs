@@ -11,8 +11,28 @@ use std::time;
 use anyhow::{anyhow, Context};
 use log::{info, error};
 
+/// ScopedEvent emits an event when it goes out of scope
+pub struct ScopedEvent<'a> {
+    event: &'a str,
+}
+impl<'a> ScopedEvent<'a> {
+    pub fn new(event: &'a str) -> Self {
+        ScopedEvent {
+            event,
+        }
+    }
+}
+impl<'a> std::ops::Drop for ScopedEvent<'a> {
+    fn drop(&mut self) {
+        emit_event(self.event);
+    }
+}
+
 pub fn emit_event(event: &str) {
-    TEST_HOOK_SERVER.emit_event(event);
+    let sock_path = TEST_HOOK_SERVER.sock_path.lock().unwrap();
+    if sock_path.is_some() {
+        TEST_HOOK_SERVER.emit_event(event);
+    }
 }
 
 lazy_static::lazy_static! {

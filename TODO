@@ -1,6 +1,5 @@
 
 - start pinning down behavior by actually writing tests for these various cases
-    - attach, write exit to the shell
     - test for ssh plugin mode commands
 - forward signals to the inner shell correctly
     - transmit resize signals to the pty whenever an attach process gets a

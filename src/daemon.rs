@@ -423,6 +423,8 @@ fn set_term_flags(fd: RawFd) -> std::io::Result<()> {
 /// bidi_stream shuffles bytes between the subprocess and the client connection.
 /// It returns true if the subprocess has exited, and false if it is still running.
 fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
+    let _bidi_stream_test_guard = test_hooks::ScopedEvent::new("daemon-bidi-stream-done");
+
     // we take the client stream so that it gets closed when this routine
     // returns
     let mut client_stream = match inner.client_stream.take() {
@@ -515,6 +517,7 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
                 }
 
                 master_writer.flush().context("flushing input from client to shell")?;
+                test_hooks::emit_event("daemon-wrote-client-chunk");
 
                 debug!("bidi_stream: client->shell: flushed chunk of len {}", len);
             }
