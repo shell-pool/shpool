@@ -1,4 +1,29 @@
 
+Handle full screen applications (vim/less):
+    - We need to track the current state of the termianl
+      by parsing stateful terminal control codes and being
+      able to put the terminal back in that state.
+      - Terminal color codes are stateful (there is both text and
+        background color).
+      - There are cooked/raw/cbreak modes that control how the terminal
+        handles input. The main one to worry about is cbreak mode, which
+        vim places the terminal in in order to get one char at a time.
+      - It seems like control codes are terminal dependent and
+        you need to use the terminfo database (see `man terminfo`).
+        I notice that tmux has its own terminfo entry in `/lib/terminfo`
+        on my cloudtop, so maybe I need to make a shpool terminfo entry.
+        Basing stuff off the terminfo db is a little fraught because
+        the terminal lives on the client, while the server has its own
+        terminfo db, so there could be skew. There is a fairly nice looking
+        terminfo crate I can use to parse the terminfo.
+    - Hopefully we can (ab)use the resize signal to force
+      curses applications to redraw the screen on reconnect
+      if we are in a terminal mode that indicates that a
+      full screen aplication is open. If not we probably need
+      to emulate a termianl in a buffer and be able to blit that
+      to the screen on reconnect.
+
+
 - start pinning down behavior by actually writing tests for these various cases
     - test for ssh plugin mode commands
 - forward signals to the inner shell correctly
