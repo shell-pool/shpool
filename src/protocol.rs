@@ -3,7 +3,7 @@ use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
+use std::{io, thread};
 
 use anyhow::{anyhow, Context};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -89,7 +89,7 @@ pub enum LocalCommandSetNameStatus {
 }
 
 /// AttachStatus indicates what happened during an attach attempt.
-#[derive(Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Serialize, Deserialize)]
 pub enum AttachStatus {
     /// Attached indicates that there was an existing shell session with
     /// the given name, and `shpool attach` successfully connected to it.
@@ -146,7 +146,7 @@ pub struct Chunk<'data> {
 }
 
 impl<'data> Chunk<'data> {
-    pub fn write_to<W>(&self, w: &mut W, stop: &AtomicBool) -> anyhow::Result<()>
+    pub fn write_to<W>(&self, w: &mut W, stop: &AtomicBool) -> io::Result<()>
         where W: std::io::Write
     {
         if stop.load(Ordering::Relaxed) {
@@ -179,7 +179,7 @@ impl<'data> Chunk<'data> {
                         thread::sleep(consts::PIPE_POLL_DURATION);
                         continue;
                     }
-                    return Err(e).context("reading stdout chunk");
+                    return Err(e);
                 }
             };
             to_write = &to_write[nwritten..];

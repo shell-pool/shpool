@@ -5,13 +5,14 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Condvar};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::{time, thread, process, net};
+use std::{time, thread, process, net, io};
 use std::os::unix::process::CommandExt;
 
 use anyhow::{anyhow, Context};
 use log::{info, error, trace, debug};
 use serde_derive::Deserialize;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use crossbeam_channel::{TryRecvError, RecvTimeoutError};
 
 use super::consts;
 use super::protocol;
@@ -104,6 +105,7 @@ struct ShellSession {
 /// able to mutate and fully control.
 #[derive(Debug)]
 struct ShellSessionInner {
+    child_exited: crossbeam_channel::Receiver<()>,
     pty_master: pty::fork::Fork,
     client_stream: Option<UnixStream>,
 }
@@ -170,13 +172,32 @@ impl Daemon {
         // we unwrap to propigate the poison as an unwind
         let mut shells = self.shells.lock().unwrap();
 
-        let status: protocol::AttachStatus;
+        let mut status = protocol::AttachStatus::Attached;
         if let Some(session) = shells.get(&header.name) {
             if let Ok(mut inner) = session.inner.try_lock() {
-                info!("handle_attach taking over existing session inner={:?}", inner);
-                inner.client_stream = Some(stream);
+                // We have an existing session in our table, but the subshell
+                // proc might have exited in the mean time, for example if the
+                // user typed `exit` right before the connection dropped there
+                // could be a zombie entry in our session table. We need to
+                // re-check whether the subshell has exited before taking this over.
+                match inner.child_exited.try_recv() {
+                    Ok(_) => {
+                        return Err(anyhow!("unexpected send on child_exected chan"));
+                    }
+                    Err(TryRecvError::Empty) => {
+                        // the channel is still open so the subshell is still running
+                        info!("handle_attach: taking over existing session inner={:?}", inner);
+                        inner.client_stream = Some(stream.try_clone()?);
 
-                status = protocol::AttachStatus::Attached;
+                        // status is already attached
+                    }
+                    Err(TryRecvError::Disconnected) => {
+                        // the channel is closed so we know the subshell exited
+                        info!("handle_attach: stale inner={:?}, clobbering with new subshell", inner);
+                        status = protocol::AttachStatus::Created;
+                    }
+                }
+
                 // fallthrough to bidi streaming
             } else {
                 info!("handle_attach: busy shell session, doing nothing");
@@ -188,6 +209,10 @@ impl Daemon {
                 return Ok(())
             }
         } else {
+            status = protocol::AttachStatus::Created;
+        }
+
+        if status == protocol::AttachStatus::Created {
             info!("handle_attach: creating new subshell");
             let inner = self.spawn_subshell(stream, &header)?;
 
@@ -195,8 +220,6 @@ impl Daemon {
                 started_at: time::SystemTime::now(),
                 inner: Arc::new(Mutex::new(inner)),
             });
-
-            status = protocol::AttachStatus::Created;
             // fallthrough to bidi streaming
         }
 
@@ -400,7 +423,27 @@ impl Daemon {
             std::process::exit(1);
         }
 
+        // spawn a background thread to reap the shell when it exits
+        // and notify about the exit by closing a channel.
+        let (tx, rx) = crossbeam_channel::bounded(0);
+        let waitable_child = fork.clone();
+        thread::spawn(move || {
+            // Take ownership of the sender so it gets dropped when
+            // this thread exits, closing the channel.
+            let _tx = tx;
+
+            match waitable_child.wait() {
+                Ok(_) => {} // fallthrough
+                Err(e) => {
+                    error!("waiting to reap child shell: {:?}", e);
+                }
+            }
+
+            info!("reaped child shell: {:?}", waitable_child);
+        });
+
         Ok(ShellSessionInner {
+            child_exited: rx,
             pty_master: fork,
             client_stream: Some(client_stream),
         })
@@ -542,13 +585,20 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
                 let mut fdset = nix::sys::select::FdSet::new();
                 fdset.insert(master_reader.as_raw_fd());
                 let mut poll_dur = consts::PIPE_POLL_DURATION_TIMEVAL.clone();
-                let nready = nix::sys::select::select(
+                let nready = match nix::sys::select::select(
                     None,
                     Some(&mut fdset),
                     None,
                     None,
                     Some(&mut poll_dur),
-                ).context("selecting on pty master")?;
+                ) {
+                    Ok(n) => n,
+                    Err(nix::errno::Errno::EBADF) => {
+                        info!("bidi_stream: shell->client: shell went down");
+                        return Ok(());
+                    }
+                    Err(e) => return Err(e).context("selecting on pty master"),
+                };
                 if nready == 0 {
                     continue;
                 }
@@ -606,9 +656,18 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
                 };
                 {
                     let mut s = client_stream_m.lock().unwrap();
-                    chunk.write_to(&mut *s, &stop)
-                        .context("writing heartbeat chunk to client stream")?;
-                    trace!("bidi_stream: heartbeat: wrote heartbeat");
+                    match chunk.write_to(&mut *s, &stop) {
+                        Ok(_) => {
+                            trace!("bidi_stream: heartbeat: wrote heartbeat");
+                        }
+                        Err(e) => {
+                            if e.kind() == io::ErrorKind::BrokenPipe {
+                                trace!("bidi_stream: heartbeat: client hangup");
+                                return Ok(());
+                            }
+                            return Err(e).context("writing heartbeat")?;
+                        }
+                    }
                 }
             }
         });
@@ -616,27 +675,26 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
         // poll the pty master fd to see if the child shell has exited.
         let supervisor_h = s.spawn(|| -> anyhow::Result<()> {
             loop {
-                trace!("bidi_stream: supervisor: checking stop_rx");
+                trace!("bidi_stream: supervisor: checking stop_rx (pty_master={})",
+                       pty_master.as_raw_fd());
                 if stop.load(Ordering::Relaxed) {
                     info!("bidi_stream: supervisor: recvd stop msg");
                     return Ok(())
                 }
 
-                let mut master_fd = [
-                    nix::poll::PollFd::new(
-                        pty_master.as_raw_fd(),
-                        nix::poll::PollFlags::empty()
-                    ),
-                ];
-                let nready = nix::poll::poll(&mut master_fd, SUPERVISOR_POLL_DUR.as_millis() as i32)
-                    .context("polling master fd for POLLHUP")?;
-                if nready == 0 {
-                    trace!("bidi_stream: supervisor: poll timeout");
-                }
-                if master_fd[0].revents().map(|e| e.contains(nix::poll::PollFlags::POLLHUP)).unwrap_or(false) {
-                    info!("bidi_stream: supervisor: child shell exited");
-                    child_done.store(true, Ordering::Release);
-                    return Ok(());
+                match inner.child_exited.recv_timeout(SUPERVISOR_POLL_DUR) {
+                    Ok(_) => {
+                        error!("internal error: unexpected send on child_exited chan");
+                    },
+                    Err(RecvTimeoutError::Timeout) => {
+                        // shell is still running, do nothing
+                        trace!("bidi_stream: supervisor: poll timeout");
+                    },
+                    Err(RecvTimeoutError::Disconnected) => {
+                        info!("bidi_stream: supervisor: child shell exited");
+                        child_done.store(true, Ordering::Release);
+                        return Ok(());
+                    }
                 }
             }
         });
@@ -687,7 +745,6 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
     info!("bidi_stream: done child_done={}", c_done);
     Ok(c_done)
 } 
-
 
 #[derive(Debug)]
 struct UserInfo {

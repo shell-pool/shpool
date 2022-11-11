@@ -106,14 +106,12 @@ fn explicit_exit() -> anyhow::Result<()> {
 // same shell session.
 #[test]
 fn exit_immediate_drop() -> anyhow::Result<()> {
+    // use nix::sys::wait::*;
     let mut daemon_proc = support::DaemonProc::new("norc.toml")
         .context("starting daemon proc")?;
 
-    let mut bidi_done_w = daemon_proc.events.take().unwrap()
-        .waiter(["daemon-wrote-client-chunk",
-                "daemon-wrote-client-chunk",
-                "daemon-wrote-client-chunk",
-                "daemon-bidi-stream-done"]);
+    let reap_w = daemon_proc.events.take().unwrap()
+        .waiter(["daemon-bidi-stream-done"]);
 
     {
         let mut attach_proc = daemon_proc.attach("sh1")
@@ -122,20 +120,18 @@ fn exit_immediate_drop() -> anyhow::Result<()> {
         let mut line_matcher = attach_proc.line_matcher()?;
 
         attach_proc.run_cmd("export MYVAR=first")?;
-        bidi_done_w.wait_event("daemon-wrote-client-chunk")?;
+
         attach_proc.run_cmd("echo $MYVAR")?;
-        bidi_done_w.wait_event("daemon-wrote-client-chunk")?;
         line_matcher.match_re("first$")?;
 
         attach_proc.run_cmd("exit")?;
-        bidi_done_w.wait_event("daemon-wrote-client-chunk")?;
+        line_matcher.match_re("exit$")?;
 
         // Immediately kill the attach proc after we've written exit
-        // so the daemon does not have time to detect the exit normally.
-        // We need to be checking for it on reconnect.
+        // to bring the connection down.
     }
 
-    daemon_proc.events = Some(bidi_done_w.wait_final_event("daemon-bidi-stream-done")?);
+    daemon_proc.events = Some(reap_w.wait_final_event("daemon-bidi-stream-done")?);
 
     {
         let mut attach_proc = daemon_proc.attach("sh1")

@@ -63,7 +63,7 @@ impl DaemonProc {
         let proc = Command::new(shpool_bin())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .arg("-v")
+            .arg("-vv")
             .arg("--log-file").arg(&log_file)
             .arg("--socket").arg(&socket_path)
             .arg("daemon")
@@ -182,8 +182,7 @@ impl AttachProc {
             nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
         ).context("setting stdin nonblocking")?;
 
-        let lines = io::BufReader::new(r).lines();
-        Ok(LineMatcher{ out_lines: lines })
+        Ok(LineMatcher{ out: io::BufReader::new(r) })
     }
 
     pub fn await_event(&mut self, event: &str) -> anyhow::Result<()> {
@@ -196,30 +195,54 @@ impl AttachProc {
 }
 
 pub struct LineMatcher {
-    out_lines: io::Lines<io::BufReader<process::ChildStdout>>,
+    out: io::BufReader<process::ChildStdout>,
 }
 impl LineMatcher {
     pub fn match_re(&mut self, re: &str) -> anyhow::Result<()> {
+        match self.capture_re(re) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn capture_re(&mut self, re: &str) -> anyhow::Result<Vec<Option<String>>> {
         let start = time::Instant::now();
         loop {
-            let line = self.out_lines.next().ok_or(anyhow!("no line"))?;
-            if let Err(e) = &line {
-                if e.kind() == io::ErrorKind::WouldBlock {
-                    if start.elapsed() > CMD_READ_TIMEOUT {
-                        return Err(io::Error::new(io::ErrorKind::TimedOut, "timed out reading line"))?;
+            let mut line = String::new();
+            match self.out.read_line(&mut line) {
+                Ok(0) => {
+                    return Err(anyhow!("LineMatcher: EOF"));
+                }
+                Err(e) => {
+                    if e.kind() == io::ErrorKind::WouldBlock {
+                        if start.elapsed() > CMD_READ_TIMEOUT {
+                            return Err(io::Error::new(io::ErrorKind::TimedOut, "timed out reading line"))?;
+                        }
+
+                        std::thread::sleep(CMD_READ_SLEEP_DUR);
+                        continue;
                     }
 
-                    std::thread::sleep(CMD_READ_SLEEP_DUR);
-                    continue;
+                    return Err(e).context("reading line from shell output")?;
                 }
+                Ok(_) => {
+                    if line.ends_with('\n') {
+                        line.pop();
+                        if line.ends_with('\r') {
+                            line.pop();
+                        }
+                    }
+                },
             }
-            let line = line?;
 
             eprintln!("testing /{}/ against '{}'", re, &line);
-            return if Regex::new(re)?.is_match(&line) {
-                Ok(())
-            } else {
-                Err(anyhow!("expected /{}/ to match '{}'", re, &line))
+            return match Regex::new(re)?.captures(&line) {
+                Some(caps) => {
+                    Ok(caps.iter().map(|maybe_match| maybe_match.map(|m| String::from(m.as_str()))).collect())
+                }
+                None => {
+                    Err(anyhow!("expected /{}/ to match '{}'", re, &line))
+                }
             };
         }
     }
