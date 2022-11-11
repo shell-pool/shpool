@@ -106,7 +106,6 @@ fn explicit_exit() -> anyhow::Result<()> {
 // same shell session.
 #[test]
 fn exit_immediate_drop() -> anyhow::Result<()> {
-    // use nix::sys::wait::*;
     let mut daemon_proc = support::DaemonProc::new("norc.toml")
         .context("starting daemon proc")?;
 
