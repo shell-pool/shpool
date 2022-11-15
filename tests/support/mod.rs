@@ -156,6 +156,19 @@ const CMD_READ_TIMEOUT: time::Duration = time::Duration::from_secs(3);
 const CMD_READ_SLEEP_DUR: time::Duration = time::Duration::from_millis(20);
 
 impl AttachProc {
+    pub fn run_raw_cmd(
+        &mut self,
+        mut cmd: Vec<u8>,
+    ) -> anyhow::Result<()> {
+        let stdin = self.proc.stdin.as_mut().ok_or(anyhow!("missing stdin"))?;
+
+        cmd.push("\n".as_bytes()[0]);
+        stdin.write_all(&cmd).context("writing cmd into attach proc")?;
+        stdin.flush().context("flushing cmd")?;
+
+        Ok(())
+    }
+
     pub fn run_cmd(
         &mut self,
         cmd: &str,

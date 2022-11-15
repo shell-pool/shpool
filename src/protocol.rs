@@ -39,10 +39,14 @@ pub enum ConnectHeader {
 /// AttachHeader is the blob of metadata that a client transmits when it
 /// first dials into the shpool indicating which shell it wants to attach
 /// to.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct AttachHeader {
     /// The name of the session to create or attach to.
     pub name: String,
+    /// The value of the TERM environment variable in the client's
+    /// shell. This needs to be forwarded so that the remote shell
+    /// can interpret and emit control codes correctly.
+    pub term: String,
 }
 
 /// LocalCommandSetNameRequest releases the lock created by a ConnectHeader::RemoteCommandLock
@@ -51,6 +55,8 @@ pub struct AttachHeader {
 pub struct LocalCommandSetNameRequest {
     /// The name of the session to create or attach to.
     pub name: String,
+    /// The value of the local TERM environment variable.
+    pub term: String,
 }
 
 /// AttachReplyHeader is the blob of metadata that the shpool service prefixes

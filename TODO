@@ -34,12 +34,12 @@ Handle full screen applications (vim/less):
   make it configurable via the daemon's toml file. (Or maybe just
   make users use commands to do this? That won't work for long running
   processes though).
-- Pass TERM along so that `reset` works
 - Read input from terminal emulator byte by byte so that zsh autocomplete
   works.
 - There is a lot of heartbeat overhead. See if we can reduce that.
 - Get ssh extension mode to be compatible with ssh multiplexing so
   it only requires a single gnubby touch.
+- Reset TERM if someone attaches from a new terminal type.
 
 
 There is a cool pair of signals that might be useful for dealing with IO

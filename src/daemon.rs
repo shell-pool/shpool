@@ -51,7 +51,7 @@ pub fn run(config_file: Option<String>, socket: PathBuf) -> anyhow::Result<()> {
         shells: Arc::new(Mutex::new(HashMap::new())),
         ssh_extension_parker: Arc::new(SshExtensionParker {
             inner: Mutex::new(SshExtensionParkerInner {
-                name: None,
+                attach_header: None,
                 has_parked_local: false,
                 has_parked_remote: false,
             }),
@@ -139,7 +139,7 @@ struct SshExtensionParkerInner {
     /// The name for the session that the thread should used to attach.
     /// Set by the LocalCommandSetName thread when it wakes up the parked
     /// RemoteCommand thread.
-    name: Option<String>,
+    attach_header: Option<protocol::AttachHeader>,
     /// True when there is a RemoteCommand thread parked.
     has_parked_remote: bool,
     /// True when there is a LocalCommand thread parked.
@@ -278,13 +278,13 @@ impl Daemon {
 
     fn handle_remote_command_lock(&self, mut stream: UnixStream) -> anyhow::Result<()> {
         info!("handle_remote_command_lock: enter");
-        let name = {
+        let attach_header = {
             let mut inner = self.ssh_extension_parker.inner.lock().unwrap();
-            let name = if inner.has_parked_local {
+            let attach_header = if inner.has_parked_local {
                 assert!(!inner.has_parked_remote, "remote: should never have two threads parked at once");
 
                 info!("handle_remote_command_lock: there is already a parked local waiting for us");
-                inner.name.take().unwrap_or_else(|| String::from(""))
+                inner.attach_header.take().unwrap_or_else(|| protocol::AttachHeader::default())
             } else {
                 if inner.has_parked_remote {
                     info!("handle_remote_command_lock: remote parking slot full");
@@ -297,7 +297,7 @@ impl Daemon {
                 info!("handle_remote_command_lock: about to park");
                 inner.has_parked_remote = true;
                 let (mut inner, timeout_res) = self.ssh_extension_parker.cond
-                    .wait_timeout_while(inner, SSH_EXTENSION_ATTACH_WINDOW, |inner| inner.name.is_none()).unwrap();
+                    .wait_timeout_while(inner, SSH_EXTENSION_ATTACH_WINDOW, |inner| inner.attach_header.is_none()).unwrap();
                 if timeout_res.timed_out() {
                     info!("handle_remote_command_lock: timeout");
                     write_reply(&mut stream, protocol::AttachReplyHeader{
@@ -307,17 +307,17 @@ impl Daemon {
                 }
 
                 inner.has_parked_remote = false;
-                inner.name.take().unwrap_or_else(|| String::from(""))
+                inner.attach_header.take().unwrap_or_else(|| protocol::AttachHeader::default())
             };
 
             self.ssh_extension_parker.cond.notify_one();
-            name
+            attach_header
         };
 
-        info!("handle_remote_command_lock: becoming an attach with name '{}'", name);
+        info!("handle_remote_command_lock: becoming an attach with {:?}", attach_header);
         // At this point, we've gotten the name through normal means, so we
         // can just become a normal attach request.
-        self.handle_attach(stream, protocol::AttachHeader { name })
+        self.handle_attach(stream, attach_header)
     }
 
     fn handle_local_command_set_name(&self, mut stream: UnixStream, header: protocol::LocalCommandSetNameRequest) -> anyhow::Result<()> {
@@ -329,16 +329,22 @@ impl Daemon {
                 assert!(!inner.has_parked_local, "local: should never have two threads parked at once");
 
                 info!("handle_local_command_set_name: there is a remote thread waiting to be woken");
-                inner.name = Some(header.name.clone());
+                inner.attach_header = Some(protocol::AttachHeader {
+                    name: header.name.clone(),
+                    term: header.term.clone(),
+                });
                 self.ssh_extension_parker.cond.notify_one();
 
                 protocol::LocalCommandSetNameStatus::Ok
             } else {
                 info!("handle_local_command_set_name: no remote thread, we will have to wait ourselves");
-                inner.name = Some(header.name.clone());
+                inner.attach_header = Some(protocol::AttachHeader {
+                    name: header.name.clone(),
+                    term: header.term.clone(),
+                });
                 inner.has_parked_local = true;
                 let (mut inner, timeout_res) = self.ssh_extension_parker.cond
-                    .wait_timeout_while(inner, SSH_EXTENSION_ATTACH_WINDOW, |inner| inner.name.is_none()).unwrap();
+                    .wait_timeout_while(inner, SSH_EXTENSION_ATTACH_WINDOW, |inner| inner.attach_header.is_none()).unwrap();
                 inner.has_parked_local = false;
                 if timeout_res.timed_out() {
                     info!("handle_local_command_set_name: timed out waiting for remote command");
@@ -413,10 +419,28 @@ impl Daemon {
         if self.config.norc.unwrap_or(false) && shell == "/bin/bash" {
             cmd.arg("--norc").arg("--noprofile");
         }
+        let mut term = header.term.to_string();
         if let Some(env) = self.config.env.as_ref() {
+            if let Some(t) = env.get("TERM") {
+                term = t.to_string();
+            }
+
+            let filtered_env_pin;
+            let env = if term == "" {
+                let mut e = env.clone();
+                e.remove("TERM");
+                filtered_env_pin = Some(e);
+                filtered_env_pin.as_ref().unwrap()
+            } else {
+                env
+            };
+
             if env.len() > 0 {
                 cmd.envs(env);
             }
+        }
+        if term != "" {
+            cmd.env("TERM", term);
         }
 
         let fork = pty::fork::Fork::from_ptmx().context("forking pty")?;

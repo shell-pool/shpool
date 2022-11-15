@@ -1,3 +1,4 @@
+use std::env;
 use std::path::PathBuf;
 
 use anyhow::{Context, anyhow};
@@ -14,6 +15,7 @@ pub fn run(name: String, socket: PathBuf) -> anyhow::Result<()> {
 
     client.write_connect_header(protocol::ConnectHeader::Attach(protocol::AttachHeader {
         name: name.clone(),
+        term: env::var("TERM").context("resolving local $TERM")?,
     })).context("writing attach header")?;
 
     let attach_resp: protocol::AttachReplyHeader = client.read_reply()

@@ -404,11 +404,12 @@ dependencies = [
 
 [[package]]
 name = "pty"
-version = "0.2.4"
-source = "git+https://github.com/ethanpailes/pty-rs#ef08614fcd9232aa5c3306bddba3d67770bb360b"
+version = "0.2.5"
+source = "git+https://github.com/ethanpailes/pty-rs#85e1ffc577fc92de0fc6ce491b43e2e780f7d7f7"
 dependencies = [
  "errno",
  "libc",
+ "log",
 ]
 
 [[package]]

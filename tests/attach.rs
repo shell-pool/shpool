@@ -144,3 +144,23 @@ fn exit_immediate_drop() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+/*
+#[test]
+fn up_arrow_no_crash() -> anyhow::Result<()> {
+    let mut daemon_proc = support::DaemonProc::new("norc.toml")
+        .context("starting daemon proc")?;
+    let mut attach_proc = daemon_proc.attach("sh1")
+        .context("starting attach proc")?;
+
+    let mut line_matcher = attach_proc.line_matcher()?;
+
+    // For some reason this makes bash crash. No idea why.
+    attach_proc.run_raw_cmd(vec![27, 91, 65, 10])?; // up arrow
+
+    attach_proc.run_cmd("echo ping")?;
+    line_matcher.match_re("ping$")?;
+
+    Ok(())
+}
+*/
