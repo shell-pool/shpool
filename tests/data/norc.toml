@@ -1,4 +1,5 @@
 norc = true
+noecho = true
 shell = "/bin/bash"
 
 [env]

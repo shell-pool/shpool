@@ -4,8 +4,7 @@ use std::path::PathBuf;
 use anyhow::{Context, anyhow};
 use log::info;
 
-use super::protocol;
-use super::test_hooks;
+use super::{protocol, test_hooks, tty};
 
 pub fn run(name: String, socket: PathBuf) -> anyhow::Result<()> {
     info!("\n\n======================== STARTING ATTACH ============================\n\n");
@@ -41,6 +40,8 @@ pub fn run(name: String, socket: PathBuf) -> anyhow::Result<()> {
             return Err(anyhow!("BUG: unexpected error attaching to '{}': {}", name, err))
         }
     }
+
+    let _tty_guard = tty::set_attach_flags();
 
     client.pipe_bytes()
 }

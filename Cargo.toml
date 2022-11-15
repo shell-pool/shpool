@@ -25,6 +25,7 @@ pty = { git = "https://github.com/ethanpailes/pty-rs", version = "0.2.5"} # spaw
 termios = "0.3" # configuring terminal flags
 lazy_static = "1" # globals
 crossbeam-channel = "0.5" # channels
+atty = "0.2" # checking if we are connected to a terminal
 
 [dev-dependencies]
 tempfile = { git = "https://github.com/ethanpailes/tempfile", branch = "disown" } # keeping tests hermetic

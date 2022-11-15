@@ -514,6 +514,7 @@ name = "shpool"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "atty",
  "byteorder",
  "chrono",
  "clap",

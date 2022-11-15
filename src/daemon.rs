@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::os::unix::io::{RawFd, AsRawFd};
+use std::os::unix::io::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Condvar};
@@ -14,9 +14,7 @@ use serde_derive::Deserialize;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crossbeam_channel::{TryRecvError, RecvTimeoutError};
 
-use super::consts;
-use super::protocol;
-use super::test_hooks;
+use super::{consts, protocol, test_hooks, tty};
 
 // TODO(ethan): make this configurable via toml
 const SSH_EXTENSION_ATTACH_WINDOW: time::Duration = time::Duration::from_secs(30);
@@ -35,6 +33,10 @@ struct Config {
     shell: Option<String>,
     /// a table of environment variables to inject into the initial shell
     env: Option<HashMap<String, String>>,
+    /// Disable the tty echo flag for spawned subshells. You likely don't
+    /// want to set this, but if you plan on interacting programatically
+    /// with the shells it can make the output easier to parse.
+    noecho: Option<bool>,
 }
 
 pub fn run(config_file: Option<String>, socket: PathBuf) -> anyhow::Result<()> {
@@ -445,7 +447,9 @@ impl Daemon {
 
         let fork = pty::fork::Fork::from_ptmx().context("forking pty")?;
         if let Ok(slave) = fork.is_child() {
-            set_term_flags(slave.as_raw_fd()).unwrap();
+            if self.config.noecho.unwrap_or(false) {
+                tty::disable_echo(slave.as_raw_fd()).unwrap();
+            }
             let err = cmd.exec();
             eprintln!("shell exec err: {:?}", err);
             std::process::exit(1);
@@ -476,19 +480,6 @@ impl Daemon {
             client_stream: Some(client_stream),
         })
     }
-}
-
-fn set_term_flags(fd: RawFd) -> std::io::Result<()> {
-    use termios::*;
-
-    // TODO(ethan): I think to correctly support zsh I may need to disable
-    // ICANON mode so we send chars in one at a time. zsh may do this automatically
-    // for us though.
-
-    let mut term = Termios::from_fd(fd)?;
-    term.c_lflag &= !ECHO;
-
-    tcsetattr(fd, TCSANOW, &term)
 }
 
 /// bidi_stream shuffles bytes between the subprocess and the client connection.

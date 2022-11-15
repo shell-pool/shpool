@@ -10,9 +10,10 @@ mod consts;
 mod daemon;
 mod list;
 mod protocol;
-mod ssh_remote_command;
 mod ssh_local_command_set_name;
+mod ssh_remote_command;
 mod test_hooks;
+mod tty;
 
 #[derive(Parser, Debug)]
 #[clap(version, author, about)]
