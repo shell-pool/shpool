@@ -5,7 +5,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Condvar};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::{time, thread, process, net, io};
+use std::{time, thread, process, net, io, fs};
 use std::os::unix::process::CommandExt;
 
 use anyhow::{anyhow, Context};
@@ -23,7 +23,7 @@ const SSH_EXTENSION_ATTACH_WINDOW: time::Duration = time::Duration::from_secs(30
 
 const SUPERVISOR_POLL_DUR: time::Duration = time::Duration::from_millis(300);
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct Config {
     // TODO(ethan): implement keepalive support
     // keepalive_secs: Option<usize>,
@@ -37,10 +37,14 @@ struct Config {
     env: Option<HashMap<String, String>>,
 }
 
-pub fn run(config_file: String, socket: PathBuf) -> anyhow::Result<()> {
+pub fn run(config_file: Option<String>, socket: PathBuf) -> anyhow::Result<()> {
     info!("\n\n======================== STARTING DAEMON ============================\n\n");
-    let config_str = std::fs::read_to_string(config_file).context("reading config toml")?;
-    let config: Config = toml::from_str(&config_str).context("parsing config file")?;
+
+    let mut config = Config::default();
+    if let Some(config_path) = config_file {
+        let config_str = fs::read_to_string(config_path).context("reading config toml")?;
+        config = toml::from_str(&config_str).context("parsing config file")?;
+    }
 
     let mut daemon = Daemon {
         config,

@@ -33,7 +33,7 @@ enum Commands {
     #[clap(about = "starts running a daemon that holds a pool of shells")]
     Daemon {
         #[clap(short, long, action, help = "a toml file containing configuration")]
-        config_file: String,
+        config_file: Option<String>,
     },
     #[clap(about = "creates or attaches to an existing shell session")]
     Attach {
