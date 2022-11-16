@@ -10,7 +10,7 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use log::{info, debug, trace};
 use serde_derive::{Serialize, Deserialize};
 
-use super::consts;
+use super::{consts, tty};
 
 /// ConnectHeader is the blob of metadata that a client transmits when it
 /// first connections. It uses an enum to allow different connection types
@@ -47,6 +47,10 @@ pub struct AttachHeader {
     /// shell. This needs to be forwarded so that the remote shell
     /// can interpret and emit control codes correctly.
     pub term: String,
+    /// The size of the local tty. Passed along so that the remote
+    /// pty can be kept in sync (important so curses applications look
+    /// right).
+    pub local_tty_size: tty::Size,
 }
 
 /// LocalCommandSetNameRequest releases the lock created by a ConnectHeader::RemoteCommandLock
@@ -57,6 +61,8 @@ pub struct LocalCommandSetNameRequest {
     pub name: String,
     /// The value of the local TERM environment variable.
     pub term: String,
+    /// The size of the local tty.
+    pub local_tty_size: tty::Size,
 }
 
 /// AttachReplyHeader is the blob of metadata that the shpool service prefixes

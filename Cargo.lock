@@ -522,6 +522,7 @@ dependencies = [
  "ctrlc",
  "fern",
  "lazy_static",
+ "libc",
  "log",
  "nix",
  "pty",

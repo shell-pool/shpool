@@ -115,6 +115,13 @@ struct ShellSessionInner {
     pty_master: pty::fork::Fork,
     client_stream: Option<UnixStream>,
 }
+impl ShellSessionInner {
+    fn set_pty_size(&self, size: &tty::Size) -> anyhow::Result<()> {
+        let pty_master = self.pty_master.is_parent()
+            .context("internal error: executing in child fork")?;
+        size.set_fd(pty_master.as_raw_fd())
+    }
+}
 
 /// SshExtensionParker contains syncronization primitives to allow the
 /// LocalCommand and RemoteCommand ssh extension threads to perform
@@ -193,6 +200,8 @@ impl Daemon {
                     Err(TryRecvError::Empty) => {
                         // the channel is still open so the subshell is still running
                         info!("handle_attach: taking over existing session inner={:?}", inner);
+                        inner.set_pty_size(&header.local_tty_size)
+                            .context("resetting pty size on reattach")?;
                         inner.client_stream = Some(stream.try_clone()?);
 
                         // status is already attached
@@ -334,6 +343,7 @@ impl Daemon {
                 inner.attach_header = Some(protocol::AttachHeader {
                     name: header.name.clone(),
                     term: header.term.clone(),
+                    local_tty_size: header.local_tty_size.clone(),
                 });
                 self.ssh_extension_parker.cond.notify_one();
 
@@ -343,6 +353,7 @@ impl Daemon {
                 inner.attach_header = Some(protocol::AttachHeader {
                     name: header.name.clone(),
                     term: header.term.clone(),
+                    local_tty_size: header.local_tty_size.clone(),
                 });
                 inner.has_parked_local = true;
                 let (mut inner, timeout_res) = self.ssh_extension_parker.cond
@@ -474,11 +485,13 @@ impl Daemon {
             info!("reaped child shell: {:?}", waitable_child);
         });
 
-        Ok(ShellSessionInner {
+        let session = ShellSessionInner {
             child_exited: rx,
             pty_master: fork,
             client_stream: Some(client_stream),
-        })
+        };
+        session.set_pty_size(&header.local_tty_size).context("setting initial pty size")?;
+        Ok(session)
     }
 }
 

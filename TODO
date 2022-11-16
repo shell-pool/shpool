@@ -23,23 +23,19 @@ Handle full screen applications (vim/less):
       to emulate a termianl in a buffer and be able to blit that
       to the screen on reconnect.
 
-
+- create login shells for the spawned subshells so that .profile gets read.
+  (tmux does this).
 - start pinning down behavior by actually writing tests for these various cases
     - test for ssh plugin mode commands
-- forward signals to the inner shell correctly
-    - transmit resize signals to the pty whenever an attach process gets a
-      SIGWINCH
-    - Forward SIGINT (^C), SIGTSTP (^Z)
 - come up with some sort of keybinding to exit the shpool shell.
   make it configurable via the daemon's toml file. (Or maybe just
   make users use commands to do this? That won't work for long running
   processes though).
-- Read input from terminal emulator byte by byte so that zsh autocomplete
-  works.
 - There is a lot of heartbeat overhead. See if we can reduce that.
 - Get ssh extension mode to be compatible with ssh multiplexing so
   it only requires a single gnubby touch.
-- Reset TERM if someone attaches from a new terminal type.
+- Forward resize signals (SIGWINCH), start the pty with the correct size.
+- Reset TERM if someone reattaches from a new terminal type.
 
 
 There is a cool pair of signals that might be useful for dealing with IO
