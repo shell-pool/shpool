@@ -23,8 +23,6 @@ Handle full screen applications (vim/less):
       to emulate a termianl in a buffer and be able to blit that
       to the screen on reconnect.
 
-- create login shells for the spawned subshells so that .profile gets read.
-  (tmux does this).
 - start pinning down behavior by actually writing tests for these various cases
     - test for ssh plugin mode commands
 - come up with some sort of keybinding to exit the shpool shell.
@@ -43,3 +41,7 @@ from the shell after a network drop. SIGTIN/SIGTOUT suspend a background
 process if they try to read or write to the termianl. It causes them
 to pause and wait for a SIGCONT just like ^Z does. This might present an
 alternative approach instead of spooling the output.
+
+
+Potential Alpha Testers:
+Alex King

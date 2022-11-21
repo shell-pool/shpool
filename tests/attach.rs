@@ -124,7 +124,7 @@ fn exit_immediate_drop() -> anyhow::Result<()> {
         line_matcher.match_re("first$")?;
 
         attach_proc.run_cmd("exit")?;
-        line_matcher.match_re("exit$")?;
+        line_matcher.match_re("logout$")?;
 
         // Immediately kill the attach proc after we've written exit
         // to bring the connection down.

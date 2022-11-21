@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Condvar};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{time, thread, process, net, io, fs};
@@ -271,7 +271,7 @@ impl Daemon {
                         },
                     }
                 } else {
-                    error!("inernal error: failed to lock just created mutex");
+                    error!("internal error: failed to lock just created mutex");
                 }
 
                 if child_done {
@@ -455,6 +455,17 @@ impl Daemon {
         if term != "" {
             cmd.env("TERM", term);
         }
+
+        // spawn the shell as a login shell by setting
+        // arg0 to be the basename of the shell path
+        // proceeded with a "-". You can see sshd doing the
+        // same thing if you look in the session.c file of
+        // openssh.
+        let shell_basename =
+            Path::new(&shell).file_name()
+                .ok_or(anyhow!("error building login shell indicator"))?
+                .to_str().ok_or(anyhow!("error parsing shell name as utf8"))?;
+        cmd.arg0(format!("-{}", shell_basename));
 
         let fork = pty::fork::Fork::from_ptmx().context("forking pty")?;
         if let Ok(slave) = fork.is_child() {
