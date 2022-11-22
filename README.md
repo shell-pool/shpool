@@ -14,6 +14,8 @@ that `shpool` does not break native scrollback.
 to mangle your session if your connection drops while you are
 using a curses based app like vim or less. It is ready for people
 to kick the tires, but we probably should not be rolling it out.
+The `ssh` plugin mode is not currently working, so stick to using
+`shpool attach` for now.
 
 ## Installation
 
@@ -102,10 +104,14 @@ following:
 Host = your-ssh-target-name
     Hostname your.ssh.host.example.com
 
-    RemoteCommand /usr/bin/shpool plumbing ssh-remote-command
+    RemoteCommand $HOME/.cargo/bin/shpool plumbing ssh-remote-command
     PermitLocalCommand yes
-    LocalCommand ssh -oPermitLocalCommand=no -oRemoteCommand="/usr/bin/shpool plumbing ssh-local-command-set-name '%u@%h:%p$(tty)'" %n
+    LocalCommand ssh -oPermitLocalCommand=no -oRemoteCommand="$HOME/.cargo/bin/shpool plumbing ssh-local-command-set-name '%u@%h:%p$(tty)'" %n
 ```
+
+Note that due to limitations in the hooks that ssh exposes to us,
+you will need to gnubby touch twice in order to use `shpool` in
+this mode.
 
 ## Usage
 
