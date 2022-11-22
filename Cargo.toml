@@ -29,6 +29,5 @@ atty = "0.2" # checking if we are connected to a terminal
 libc = "0.2"
 
 [dev-dependencies]
-#tempfile = { git = "https://github.com/ethanpailes/tempfile", branch = "disown" } # keeping tests hermetic
 tempfile = "3" # keeping tests hermetic
 regex = "1" # test assertions
