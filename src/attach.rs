@@ -1,16 +1,18 @@
 use std::env;
 use std::path::PathBuf;
+use std::thread;
 
 use anyhow::{Context, anyhow};
-use log::{info, warn};
+use log::{info, warn, error};
 
 use super::{protocol, test_hooks, tty};
 
 pub fn run(name: String, socket: PathBuf) -> anyhow::Result<()> {
     info!("\n\n======================== STARTING ATTACH ============================\n\n");
     test_hooks::emit_event("attach-startup");
+    SignalHandler::new(name.clone(), socket.clone()).spawn()?;
 
-    let mut client = protocol::Client::new(socket)?;
+    let mut client = protocol::Client::new(&socket)?;
 
     let tty_size = match tty::Size::from_fd(0) {
         Ok(s) => s,
@@ -53,4 +55,79 @@ pub fn run(name: String, socket: PathBuf) -> anyhow::Result<()> {
     let _tty_guard = tty::set_attach_flags();
 
     client.pipe_bytes()
+}
+
+//
+// Signal Handling
+//
+
+struct SignalHandler {
+    session_name: String,
+    socket: PathBuf,
+}
+impl SignalHandler {
+    fn new(session_name: String, socket: PathBuf) -> Self {
+        SignalHandler {
+            session_name,
+            socket,
+        }
+    }
+
+    fn spawn(self) -> anyhow::Result<()> {
+        use signal_hook::consts::*;
+        use signal_hook::iterator::*;
+
+        let sigs = vec![
+            SIGWINCH
+        ];
+        let mut signals = Signals::new(&sigs)
+            .context("creating signal iterator")?;
+
+        thread::spawn(move || {
+            for signal in &mut signals {
+                let res = match signal as libc::c_int {
+                    SIGWINCH => self.handle_sigwinch(),
+                    sig => {
+                        error!("unknown signal: {}", sig);
+                        panic!("unknown signal: {}", sig);
+                    }
+                };
+                if let Err(e) = res {
+                    error!("signal handler error: {:?}", e);
+                }
+            }
+        });
+
+        Ok(())
+    }
+
+    fn handle_sigwinch(&self) -> anyhow::Result<()> {
+        info!("handle_sigwinch: enter");
+        let mut client = protocol::Client::new(&self.socket)?;
+
+        let tty_size = tty::Size::from_fd(0).context("getting tty size")?;
+        info!("handle_sigwinch: tty_size={:?}", tty_size);
+
+        // write the request on a new, seperate connection
+        client.write_connect_header(protocol::ConnectHeader::SessionMessage(protocol::SessionMessageRequest {
+            session_name: self.session_name.clone(),
+            payload: protocol::SessionMessageRequestPayload::Resize(protocol::ResizeRequest {
+                tty_size: tty_size.clone(),
+            }),
+        })).context("writing resize request")?;
+
+        let reply: protocol::SessionMessageReply = client.read_reply()
+            .context("reading session message reply")?;
+        match reply {
+            protocol::SessionMessageReply::NotFound => {
+                warn!("handle_sigwinch: sent resize for session '{}', but the daemon has no record of that session", self.session_name);
+            }
+            protocol::SessionMessageReply::Resize(protocol::ResizeReply::Ok) => {
+                info!("handle_sigwinch: resized session '{}' to {:?}",
+                      self.session_name, tty_size);
+            }
+        }
+
+        Ok(())
+    }
 }

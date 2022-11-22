@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{io, thread};
 
@@ -34,6 +34,56 @@ pub enum ConnectHeader {
     LocalCommandSetName(LocalCommandSetNameRequest),
     /// List all of the currently active sessions.
     List,
+    /// A message for a named, running sessions. This
+    /// provides a mechanism for RPC-like calls to be
+    /// made to running sessions. Messages are only
+    /// delivered if there is currently a client attached
+    /// to the session.
+    SessionMessage(SessionMessageRequest)
+}
+
+/// SessionMessageRequest represents a request that
+/// ought to be routed to the session indicated by
+/// `session_name`.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SessionMessageRequest {
+    /// The session to route this request to.
+    pub session_name: String,
+    /// The actual message to send to the session.
+    pub payload: SessionMessageRequestPayload,
+}
+
+/// SessionMessageRequestPayload contains a request for
+/// a running session.
+#[derive(Serialize, Deserialize, Debug)]
+pub enum SessionMessageRequestPayload {
+    /// Resize a named session's pty. Generated when
+    /// a `shpool attach` process receives a SIGWINCH.
+    Resize(ResizeRequest),
+}
+
+/// ResizeRequest resizes the pty for a given named session.
+/// We use an out-of-band request rather than doing this
+/// in the input stream because we don't want to have to
+/// introduce a framing protocol for the input stream.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ResizeRequest {
+    /// The size of the client's tty
+    pub tty_size: tty::Size,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub enum SessionMessageReply {
+    /// The session was not found in the session table
+    NotFound,
+    /// The response to a resize message
+    Resize(ResizeReply),
+}
+
+/// A reply to a resize message
+#[derive(Serialize, Deserialize, Debug)]
+pub enum ResizeReply {
+    Ok,
 }
 
 /// AttachHeader is the blob of metadata that a client transmits when it
@@ -116,7 +166,7 @@ pub enum AttachStatus {
     /// Timeouted out waiting for a session to attach to. Only happens in
     /// response to a RemoteCommandLock style attach attempt.
     Timeout,
-    /// Indicates that the parksing slot for an inbound ssh-extension style
+    /// Indicates that the parking slot for an inbound ssh-extension style
     /// attach is occupied, and the user should try to reconnect again later.
     SshExtensionParkingSlotFull,
     /// Some unexpected error
@@ -141,9 +191,8 @@ impl ChunkKind {
     }
 }
 
-/// Chunk represents of a chunk of data meant for stdout or stderr.
-/// Chunks get interleaved over the unix socket connection that
-/// `shpool attach` uses to talk to `shpool daemon`, with the following
+/// Chunk represents of a chunk of data in the output stream
+///
 /// format:
 ///
 /// ```
@@ -222,7 +271,7 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(sock: PathBuf) -> anyhow::Result<Self> {
+    pub fn new<P: AsRef<Path>>(sock: P) -> anyhow::Result<Self> {
         let stream = UnixStream::connect(sock).context("connecting to shpool")?;
         Ok(Client { stream })
     }
@@ -248,6 +297,9 @@ impl Client {
         Ok(reply)
     }
 
+    /// pipe_bytes suffles bytes from std{in,out} to the unix
+    /// socket and back again. It is the main loop of
+    /// `shpool attach`.
     pub fn pipe_bytes(self) -> anyhow::Result<()> {
         let stop = AtomicBool::new(false);
 

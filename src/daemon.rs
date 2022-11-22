@@ -20,12 +20,14 @@ use super::{consts, protocol, test_hooks, tty};
 const SSH_EXTENSION_ATTACH_WINDOW: time::Duration = time::Duration::from_secs(30);
 
 const SUPERVISOR_POLL_DUR: time::Duration = time::Duration::from_millis(300);
+const RPC_LOOP_POLL_DUR: time::Duration = time::Duration::from_millis(300);
+
+// controls how long we wait on attempted sends and receives
+// when sending a message to a running session
+const SESSION_MESSAGE_TIMEOUT: time::Duration = time::Duration::from_secs(10);
 
 #[derive(Deserialize, Default)]
 struct Config {
-    // TODO(ethan): implement keepalive support
-    // keepalive_secs: Option<usize>,
-    
     /// norc makes it so that new shells do not load rc files when they
     /// spawn. Only works with bash.
     norc: Option<bool>,
@@ -61,16 +63,8 @@ pub fn run(config_file: Option<String>, socket: PathBuf) -> anyhow::Result<()> {
         }),
     };
 
-    let teardown_socket = socket.clone();
-    ctrlc::set_handler(move || {
-        info!("ctrlc handler: cleaning up socket");
-        if let Err(e)= std::fs::remove_file(teardown_socket.clone()).context("cleaning up socket") {
-            error!("error cleaning up socket file: {}", e);
-        }
-
-        info!("ctrlc handler: exiting");
-        std::process::exit(128 + 2 /* default SIGINT exit code */);
-    }).context("registering ctrlc handler")?;
+    // spawn the signal handler thread in the background
+    SignalHandler::new(socket.clone()).spawn()?;
 
     info!("listening on socket {:?}", socket);
     test_hooks::emit_event("daemon-about-to-listen");
@@ -104,6 +98,8 @@ struct Daemon {
 
 struct ShellSession {
     started_at: time::SystemTime,
+    rpc_in: crossbeam_channel::Sender<protocol::SessionMessageRequestPayload>,
+    rpc_out: crossbeam_channel::Receiver<protocol::SessionMessageReply>,
     inner: Arc<Mutex<ShellSessionInner>>,
 }
 
@@ -111,11 +107,20 @@ struct ShellSession {
 /// able to mutate and fully control.
 #[derive(Debug)]
 struct ShellSessionInner {
+    rpc_in: crossbeam_channel::Receiver<protocol::SessionMessageRequestPayload>,
+    rpc_out: crossbeam_channel::Sender<protocol::SessionMessageReply>,
     child_exited: crossbeam_channel::Receiver<()>,
     pty_master: pty::fork::Fork,
     client_stream: Option<UnixStream>,
 }
 impl ShellSessionInner {
+    fn handle_resize_rpc(&self, req: protocol::ResizeRequest) -> anyhow::Result<protocol::ResizeReply> {
+        info!("handle_resize_rpc: resize {:?} to {:?}",
+              self, &req.tty_size);
+        self.set_pty_size(&req.tty_size)?;
+        Ok(protocol::ResizeReply::Ok)
+    }
+
     fn set_pty_size(&self, size: &tty::Size) -> anyhow::Result<()> {
         let pty_master = self.pty_master.is_parent()
             .context("internal error: executing in child fork")?;
@@ -176,6 +181,8 @@ impl Daemon {
             protocol::ConnectHeader::RemoteCommandLock => self.handle_remote_command_lock(stream),
             protocol::ConnectHeader::LocalCommandSetName(h) => self.handle_local_command_set_name(stream, h),
             protocol::ConnectHeader::List => self.handle_list(stream),
+            protocol::ConnectHeader::SessionMessage(header) =>
+                self.handle_session_message(stream, header),
         }
     }
 
@@ -229,9 +236,11 @@ impl Daemon {
 
         if status == protocol::AttachStatus::Created {
             info!("handle_attach: creating new subshell");
-            let inner = self.spawn_subshell(stream, &header)?;
+            let (rpc_in, rpc_out, inner) = self.spawn_subshell(stream, &header)?;
 
             shells.insert(header.name.clone(), ShellSession {
+                rpc_in,
+                rpc_out,
                 started_at: time::SystemTime::now(),
                 inner: Arc::new(Mutex::new(inner)),
             });
@@ -399,11 +408,40 @@ impl Daemon {
         Ok(())
     }
 
+    fn handle_session_message(&self, mut stream: UnixStream, header: protocol::SessionMessageRequest) -> anyhow::Result<()> {
+        info!("handle_session_message: header={:?}", header);
+
+        // create a slot to store our reply so we can do
+        // our IO without the lock held.
+        let reply: protocol::SessionMessageReply;
+
+        {
+            let shells = self.shells.lock().unwrap();
+            if let Some(session) = shells.get(&header.session_name) {
+                session.rpc_in.send_timeout(header.payload, SESSION_MESSAGE_TIMEOUT)
+                    .context("sending session message")?;
+                reply = session.rpc_out.recv_timeout(SESSION_MESSAGE_TIMEOUT)
+                    .context("receiving session message reply")?;
+            } else {
+                reply = protocol::SessionMessageReply::NotFound;
+            }
+        }
+
+        write_reply(&mut stream, reply)
+            .context("handle_session_message: writing reply")?;
+
+        Ok(())
+    }
+
     fn spawn_subshell(
         &self,
         client_stream: UnixStream,
         header: &protocol::AttachHeader,
-    ) -> anyhow::Result<ShellSessionInner> {
+    ) -> anyhow::Result<(
+        crossbeam_channel::Sender<protocol::SessionMessageRequestPayload>,
+        crossbeam_channel::Receiver<protocol::SessionMessageReply>,
+        ShellSessionInner
+    )> {
         let user_info = user_info()?;
         let shell = if let Some(s) = &self.config.shell {
             s.clone()
@@ -479,12 +517,12 @@ impl Daemon {
 
         // spawn a background thread to reap the shell when it exits
         // and notify about the exit by closing a channel.
-        let (tx, rx) = crossbeam_channel::bounded(0);
+        let (child_exited_tx, child_exited_rx) = crossbeam_channel::bounded(0);
         let waitable_child = fork.clone();
         thread::spawn(move || {
             // Take ownership of the sender so it gets dropped when
             // this thread exits, closing the channel.
-            let _tx = tx;
+            let _tx = child_exited_tx;
 
             match waitable_child.wait() {
                 Ok(_) => {} // fallthrough
@@ -496,13 +534,17 @@ impl Daemon {
             info!("reaped child shell: {:?}", waitable_child);
         });
 
+        let (in_tx, in_rx) = crossbeam_channel::unbounded();
+        let (out_tx, out_rx) = crossbeam_channel::unbounded();
         let session = ShellSessionInner {
-            child_exited: rx,
+            rpc_in: in_rx,
+            rpc_out: out_tx,
+            child_exited: child_exited_rx,
             pty_master: fork,
             client_stream: Some(client_stream),
         };
         session.set_pty_size(&header.local_tty_size).context("setting initial pty size")?;
-        Ok(session)
+        Ok((in_tx, out_rx, session))
     }
 }
 
@@ -522,7 +564,7 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
 
     // set timeouts so we can wake up to handle cancelation correctly
     client_stream.set_nonblocking(true).context("setting client stream nonblocking")?;
-    
+
     let mut reader_client_stream = client_stream.try_clone().context("creating reader client stream")?;
     let client_stream_m = Mutex::new(client_stream.try_clone()
                                    .context("wrapping a stream handle in mutex")?);
@@ -573,7 +615,7 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
                 }
 
                 debug!("bidi_stream: client->shell: read {} bytes", len);
-                
+
                 let mut to_write = &buf[0..len];
                 debug!("bidi_stream: client->shell: created to_write='{}'", String::from_utf8_lossy(to_write));
 
@@ -742,13 +784,42 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
             }
         });
 
+        let rpc_h = s.spawn(|| -> anyhow::Result<()> {
+            loop {
+                if stop.load(Ordering::Relaxed) {
+                    info!("bidi_stream: supervisor: recvd stop msg");
+                    return Ok(())
+                }
+
+                let req = match inner.rpc_in.recv_timeout(RPC_LOOP_POLL_DUR) {
+                    Ok(r) => r,
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(e) => Err(e).context("recving sessession msg")?,
+                };
+                let resp = match req {
+                    protocol::SessionMessageRequestPayload::Resize(req) => {
+                        protocol::SessionMessageReply::Resize(
+                            inner.handle_resize_rpc(req)?)
+                    },
+                };
+
+                // A timeout here is a hard error because it represents
+                // lost data. We could technically write a retry loop
+                // around the timeout, but it is an unbounded channel,
+                // so a timeout seems very unlikely.
+                inner.rpc_out.send_timeout(resp, RPC_LOOP_POLL_DUR)
+                    .context("sending session reply")?
+            }
+        });
+
         loop {
             let c_done = child_done.load(Ordering::Acquire);
             if client_to_shell_h.is_finished() || shell_to_client_h.is_finished()
-                || heartbeat_h.is_finished() || supervisor_h.is_finished() || c_done {
-                debug!("bidi_stream: signaling for threads to stop: client_to_shell_finished={} shell_to_client_finished={} heartbeat_finished={} supervisor_finished={} child_done={}",
+                || heartbeat_h.is_finished() || supervisor_h.is_finished() || rpc_h.is_finished() || c_done {
+                debug!("bidi_stream: signaling for threads to stop: client_to_shell_finished={} shell_to_client_finished={} heartbeat_finished={} supervisor_finished={} rpc_finished={} child_done={}",
                     client_to_shell_h.is_finished(), shell_to_client_h.is_finished(),
-                    heartbeat_h.is_finished(), supervisor_h.is_finished(), c_done,
+                    heartbeat_h.is_finished(), supervisor_h.is_finished(),
+                    rpc_h.is_finished(), c_done,
                 );
                 stop.store(true, Ordering::Relaxed);
                 break;
@@ -787,7 +858,7 @@ fn bidi_stream(inner: &mut ShellSessionInner) -> anyhow::Result<bool> {
 
     info!("bidi_stream: done child_done={}", c_done);
     Ok(c_done)
-} 
+}
 
 #[derive(Debug)]
 struct UserInfo {
@@ -850,4 +921,62 @@ fn write_reply<H>(
     stream.set_write_timeout(None)
         .context("unsetting write timout on inbound session")?;
     Ok(())
+}
+
+//
+// Signal Handling
+//
+
+struct SignalHandler {
+    sock: PathBuf,
+}
+impl SignalHandler {
+    fn new(sock: PathBuf) -> Self {
+        SignalHandler {
+            sock,
+        }
+    }
+
+    fn spawn(self) -> anyhow::Result<()> {
+        use signal_hook::consts::TERM_SIGNALS;
+        use signal_hook::iterator::*;
+        use signal_hook::flag;
+
+        // This sets us up to shutdown immediately if someone
+        // mashes ^C so we don't get stuck attempting a graceful
+        // shutdown.
+        let term_now = Arc::new(AtomicBool::new(false));
+        for sig in TERM_SIGNALS {
+            // When terminated by a second term signal, exit with exit code 1.
+            // This will do nothing the first time (because term_now is false).
+            flag::register_conditional_shutdown(*sig, 1, Arc::clone(&term_now))?;
+            // But this will "arm" the above for the second time, by setting it to true.
+            // The order of registering these is important, if you put this one first, it will
+            // first arm and then terminate ‒ all in the first round.
+            flag::register(*sig, Arc::clone(&term_now))?;
+        }
+
+        let mut signals = Signals::new(TERM_SIGNALS)
+            .context("creating signal iterator")?;
+
+        thread::spawn(move || {
+            for signal in &mut signals {
+                match signal as libc::c_int {
+                    term_sig => {
+                        assert!(TERM_SIGNALS.contains(&term_sig));
+
+                        info!("term sig handler : cleaning up socket");
+                        if let Err(e)= std::fs::remove_file(self.sock).context("cleaning up socket") {
+                            error!("error cleaning up socket file: {}", e);
+                        }
+
+                        info!("term sig handler: exiting");
+                        std::process::exit(128 + 2 /* default SIGINT exit code */);
+                    }
+                }
+            }
+        });
+
+        Ok(())
+    }
 }

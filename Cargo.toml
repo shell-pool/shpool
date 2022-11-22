@@ -19,7 +19,7 @@ serde_derive = "1" # config parsing, connection header formatting
 toml = "0.5" # config parsing
 byteorder = "1" # endianness
 rmp-serde = "1" # MessagePack serde adapter
-ctrlc = { version = "3", features = ["termination"] } # graceful shutdown
+signal-hook = "0.3" # signal handling
 nix = { version = "0.25", features = ["poll", "ioctl"] } # rusty wrapper for unix apis
 pty = { git = "https://github.com/ethanpailes/pty-rs", version = "0.2.5"} # spawning shells in ptys
 termios = "0.3" # configuring terminal flags
@@ -29,5 +29,6 @@ atty = "0.2" # checking if we are connected to a terminal
 libc = "0.2"
 
 [dev-dependencies]
-tempfile = { git = "https://github.com/ethanpailes/tempfile", branch = "disown" } # keeping tests hermetic
+#tempfile = { git = "https://github.com/ethanpailes/tempfile", branch = "disown" } # keeping tests hermetic
+tempfile = "3" # keeping tests hermetic
 regex = "1" # test assertions

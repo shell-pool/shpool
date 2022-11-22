@@ -69,7 +69,7 @@ pub fn set_attach_flags() -> anyhow::Result<AttachFlagsGuard> {
     use termios::*;
 
     let fd = 0;
-    
+
     if atty::isnt(atty::Stream::Stdout) || atty::isnt(atty::Stream::Stdin) || atty::isnt(atty::Stream::Stderr) {
         // We are not attached to a terminal, so don't futz with its flags.
         return Ok(AttachFlagsGuard { fd, old: None });

@@ -32,8 +32,8 @@ Handle full screen applications (vim/less):
 - There is a lot of heartbeat overhead. See if we can reduce that.
 - Get ssh extension mode to be compatible with ssh multiplexing so
   it only requires a single gnubby touch.
-- Forward resize signals (SIGWINCH), start the pty with the correct size.
 - Reset TERM if someone reattaches from a new terminal type.
+- Reload config if we get a SIGHUP
 
 
 There is a cool pair of signals that might be useful for dealing with IO
