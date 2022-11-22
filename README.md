@@ -8,15 +8,88 @@ the whole terminal and provide window splitting and tiling features, `shpool`
 only provides persistent sessions. The biggest advantage of this approach is
 that `shpool` does not break native scrollback.
 
-## Hacking
+## Project Status
 
-For information on how to develop shpool, see [HACKING.md](./HACKING.md).
+`shpool` has all the usability basics covered, but is likely
+to mangle your session if your connection drops while you are
+using a curses based app like vim or less. It is ready for people
+to kick the tires, but we probably should not be rolling it out.
 
-## Usage
+## Installation
 
-`shpool` has a few different subcommands for its various modes.
+`shpool` is still experimental, so installation is somewhat manual.
 
-### ssh Extension Mode
+### Clone the repo
+
+If you have not worked with git-on-borg before, install
+a required helper tool with
+
+```
+$ sudo apt-get install git-remote-google
+```
+
+now you can clone the actual repo with
+
+```
+$ git clone rpc://team/cloudtop-connectivity-eng-team/shpool
+```
+
+If you plan to work on `shpool`, install the gerrit Change-Id
+hook with
+
+```
+$ (cd shpool && f=`git rev-parse --git-dir`/hooks/commit-msg ; mkdir -p $(dirname $f) ; curl -Lo $f https://gerrit-review.googlesource.com/tools/hooks/commit-msg ; chmod +x $f)
+```
+
+if you just want to install and use `shpool` there is no need to
+install this hook.
+
+### Install a rust toolchain
+
+If you have not already done so, install a rust toolchain.
+If you intend to develop with rust, [`rustup`](https://rustup.rs/)
+is a nice tool maintained by the rust project that allows
+you to easily use different toolchain versions. If you
+just want to build `shpool` quickly, you can run
+`sudo apt install cargo` to install the rust package manager
+and `rustc`.
+
+Make sure that `~/.cargo/bin` is on you `PATH` so you can use
+binaries installed with cargo. An entry like
+
+```
+source "$HOME/.cargo/env"
+```
+
+in your `.profile` file should do the trick.
+
+### Build `shpool`
+
+To build and install `shpool` run
+
+```
+$ cargo install --path .
+```
+
+### (Optional) install the systemd user service unit file
+
+A convenient way to run the shpool daemon is to use systemd
+to start and run it as a user-level systemd service. You
+can use the `systemd/shpool.service` file in the `shpool`
+repo to do this. Install it by running
+
+```
+$ cp systemd/shpool.service ~/.config/systemd/user
+```
+
+enable and start it up with
+
+```
+$ systemctl --user enable shpool
+$ systemctl --user start shpool
+```
+
+### `ssh` Plugin Mode
 
 `shpool` can be used as an ssh extension to add session persistence to native
 ssh invocations. When used in this mode, shpool will generate a name based
@@ -33,6 +106,14 @@ Host = your-ssh-target-name
     PermitLocalCommand yes
     LocalCommand ssh -oPermitLocalCommand=no -oRemoteCommand="/usr/bin/shpool plumbing ssh-local-command-set-name '%u@%h:%p$(tty)'" %n
 ```
+
+## Usage
+
+In order to use `shpool` you must start the shpool daemon, either
+by using the `systemd` user level unit file as described above,
+or by manually running `shpool daemon`. Once the daemon is running,
+you can connect to it either by running `shpool attach <session name>`
+or by using the ssh plugin mode described above.
 
 ### Subcommands
 
@@ -66,12 +147,6 @@ access a remote host before invoking `shpool attach` on the remote host.
 In the event that the ssh pipe breaks, `shpool ssh` redials the connection
 and immediately attempts to reattach to the shell.
 
-## Project Setup
+## Hacking
 
-Clone the repository with
-
-```
-git clone rpc://team/cloudtop-connectivity-eng-team/shpool && (cd shpool && f=`git rev-parse --git-dir`/hooks/commit-msg ; mkdir -p $(dirname $f) ; curl -Lo $f https://gerrit-review.googlesource.com/tools/hooks/commit-msg ; chmod +x $f)
-```
-
-
+For information on how to develop shpool, see [HACKING.md](./HACKING.md).

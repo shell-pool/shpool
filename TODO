@@ -34,6 +34,7 @@ Handle full screen applications (vim/less):
   it only requires a single gnubby touch.
 - Reset TERM if someone reattaches from a new terminal type.
 - Reload config if we get a SIGHUP
+- Implement systemd socket activation
 
 
 There is a cool pair of signals that might be useful for dealing with IO

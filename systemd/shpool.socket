@@ -1,0 +1,8 @@
+[Unit]
+Description=Shpool Shell Session Pooler
+
+[Socket]
+ListenStream=%t/shpool.socket
+
+[Install]
+WantedBy=sockets.target

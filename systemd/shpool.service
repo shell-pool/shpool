@@ -1,0 +1,13 @@
+[Unit]
+Description=Shpool - Shell Session Pool
+# TODO(ethan): finish implementing systemd socket
+#              activation (it requires some code changes).
+#Requires=shpool.socket
+
+[Service]
+Type=simple
+ExecStart=%h/.cargo/bin/shpool daemon
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

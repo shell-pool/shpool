@@ -5,7 +5,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Condvar};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::{time, thread, process, net, io, fs};
+use std::{env, time, thread, process, net, io, fs};
 use std::os::unix::process::CommandExt;
 
 use anyhow::{anyhow, Context};
@@ -470,6 +470,11 @@ impl Daemon {
         if self.config.norc.unwrap_or(false) && shell == "/bin/bash" {
             cmd.arg("--norc").arg("--noprofile");
         }
+
+        if let Ok(xdg_runtime_dir) = env::var("XDG_RUNTIME_DIR") {
+            cmd.env("XDG_RUNTIME_DIR", xdg_runtime_dir);
+        }
+
         let mut term = header.term.to_string();
         if let Some(env) = self.config.env.as_ref() {
             if let Some(t) = env.get("TERM") {
