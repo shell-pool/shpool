@@ -79,239 +79,25 @@ impl SessionInner {
         let child_done = AtomicBool::new(false);
 
         thread::scope(|s| -> anyhow::Result<()> {
-            // client -> shell
-            let client_to_shell_h = s.spawn(|| -> anyhow::Result<()> {
-                let mut master_writer = pty_master.clone();
+            // Spawn the main data transport threads
+            let client_to_shell_h = self.spawn_client_to_shell(
+                s, &stop, &pty_master, &mut reader_client_stream);
+            let shell_to_client_h = self.spawn_shell_to_client(
+                s, &stop, &pty_master, &client_stream_m, &mut client_stream);
 
-                info!("bidi_stream: spawned client->shell thread");
+            // Send a steady stream of heartbeats to the client
+            // so that if the connection unexpectedly goes
+            // down, we detect it immediately.
+            let heartbeat_h = self.spawn_heartbeat(
+                s, &stop, &client_stream_m);
 
-                let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
+            // poll the pty master fd to see if the child
+            // shell has exited.
+            let supervisor_h = self.spawn_supervisor(
+                s, &stop, &child_done, &pty_master);
 
-                loop {
-                    if stop.load(Ordering::Relaxed) {
-                        info!("bidi_stream: client->shell: recvd stop msg (1)");
-                        return Ok(())
-                    }
-
-                    // N.B. we don't need to muck about with chunking or anything
-                    // in this direction, because there is only one input stream
-                    // to the shell subprocess, vs the two output streams we need
-                    // to handle coming back the other way.
-                    //
-                    // Also, not that we don't access through the mutex because reads
-                    // don't need to be excluded from trampling on writes.
-                    let len = match reader_client_stream.read(&mut buf) {
-                        Ok(l) => l,
-                        Err(e) => {
-                            if e.kind() == std::io::ErrorKind::WouldBlock {
-                                trace!("bidi_stream: client->shell: read: WouldBlock");
-                                thread::sleep(consts::PIPE_POLL_DURATION);
-                                continue;
-                            }
-                            return Err(e).context("reading client chunk");
-                        }
-                    };
-                    if len == 0 {
-                        continue;
-                    }
-
-                    debug!("bidi_stream: client->shell: read {} bytes", len);
-
-                    let mut to_write = &buf[0..len];
-                    debug!("bidi_stream: client->shell: created to_write='{}'", String::from_utf8_lossy(to_write));
-
-                    while to_write.len() > 0 {
-                        if stop.load(Ordering::Relaxed) {
-                            info!("bidi_stream: client->shell: recvd stop msg (1)");
-                            return Ok(())
-                        }
-
-                        // TODO(ethan): will we even get an EWOULDBLOCK return code anymore?
-                        //              the pty master file descriptor does not allow us to
-                        //              mark it nonblocking.
-                        let nwritten = match master_writer.write(&to_write) {
-                            Ok(n) => n,
-                            Err(e) => {
-                                if e.kind() == std::io::ErrorKind::WouldBlock {
-                                    trace!("bidi_stream: client->shell: write: WouldBlock");
-                                    thread::sleep(consts::PIPE_POLL_DURATION);
-                                    continue;
-                                }
-                                return Err(e).context("writing client chunk");
-                            }
-                        };
-                        debug!("bidi_stream: client->shell: wrote {} bytes", nwritten);
-                        to_write = &to_write[nwritten..];
-                        trace!("bidi_stream: client->shell: to_write='{}'", String::from_utf8_lossy(to_write));
-                    }
-
-                    master_writer.flush().context("flushing input from client to shell")?;
-                    test_hooks::emit_event("daemon-wrote-client-chunk");
-
-                    debug!("bidi_stream: client->shell: flushed chunk of len {}", len);
-                }
-            });
-
-            // shell -> client
-            let shell_to_client_h = s.spawn(|| -> anyhow::Result<()> {
-                info!("bidi_stream: spawned shell->client thread");
-
-                let mut master_reader = pty_master.clone();
-
-                let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
-
-                loop {
-                    if stop.load(Ordering::Relaxed) {
-                        info!("bidi_stream: shell->client: recvd stop msg");
-                        return Ok(())
-                    }
-
-                    // select so we know which stream to read from, and
-                    // know to wake up immediately when bytes are available.
-                    let mut fdset = nix::sys::select::FdSet::new();
-                    fdset.insert(master_reader.as_raw_fd());
-                    let mut poll_dur = consts::PIPE_POLL_DURATION_TIMEVAL.clone();
-                    let nready = match nix::sys::select::select(
-                        None,
-                        Some(&mut fdset),
-                        None,
-                        None,
-                        Some(&mut poll_dur),
-                    ) {
-                        Ok(n) => n,
-                        Err(nix::errno::Errno::EBADF) => {
-                            info!("bidi_stream: shell->client: shell went down");
-                            return Ok(());
-                        }
-                        Err(e) => return Err(e).context("selecting on pty master"),
-                    };
-                    if nready == 0 {
-                        continue;
-                    }
-
-                    if fdset.contains(master_reader.as_raw_fd()) {
-                        let len = match master_reader.read(&mut buf) {
-                            Ok(n) => n,
-                            Err(e) => {
-                                if e.kind() == std::io::ErrorKind::WouldBlock {
-                                    trace!("bidi_stream: shell->client: pty master read: WouldBlock");
-                                    thread::sleep(consts::PIPE_POLL_DURATION);
-                                    continue;
-                                }
-                                return Err(e).context("reading pty master chunk");
-                            }
-                        };
-                        if len == 0 {
-                            trace!("bidi_stream: shell->client: 0 stdout bytes, waiting");
-                            thread::sleep(consts::PIPE_POLL_DURATION);
-                            continue;
-                        }
-
-                        let chunk = protocol::Chunk {
-                            kind: protocol::ChunkKind::Data,
-                            buf: &buf[..len],
-                        };
-                        debug!("bidi_stream: shell->client: read pty master len={} '{}'", len, String::from_utf8_lossy(chunk.buf));
-                        {
-                            let mut s = client_stream_m.lock().unwrap();
-                            chunk.write_to(&mut *s, &stop)
-                                .context("writing stdout chunk to client stream")?;
-                        }
-                        debug!("bidi_stream: shell->client: wrote {} pty master bytes", chunk.buf.len());
-                    }
-
-                    // flush immediately
-                    client_stream.flush().context("flushing client stream")?;
-                }
-            });
-
-            // We send a steady stream of heartbeats to the client so that
-            // if the connection unexpectedly goes down, we detect it immediately.
-            let heartbeat_h = s.spawn(|| -> anyhow::Result<()> {
-                loop {
-                    trace!("bidi_stream: heartbeat: checking stop_rx");
-                    if stop.load(Ordering::Relaxed) {
-                        info!("bidi_stream: heartbeat: recvd stop msg");
-                        return Ok(())
-                    }
-
-                    thread::sleep(consts::HEARTBEAT_DURATION);
-                    let chunk = protocol::Chunk {
-                        kind: protocol::ChunkKind::Heartbeat,
-                        buf: &[],
-                    };
-                    {
-                        let mut s = client_stream_m.lock().unwrap();
-                        match chunk.write_to(&mut *s, &stop) {
-                            Ok(_) => {
-                                trace!("bidi_stream: heartbeat: wrote heartbeat");
-                            }
-                            Err(e) => {
-                                if e.kind() == io::ErrorKind::BrokenPipe {
-                                    trace!("bidi_stream: heartbeat: client hangup");
-                                    return Ok(());
-                                }
-                                return Err(e).context("writing heartbeat")?;
-                            }
-                        }
-                    }
-                }
-            });
-
-            // poll the pty master fd to see if the child shell has exited.
-            let supervisor_h = s.spawn(|| -> anyhow::Result<()> {
-                loop {
-                    trace!("bidi_stream: supervisor: checking stop_rx (pty_master={})",
-                           pty_master.as_raw_fd());
-                    if stop.load(Ordering::Relaxed) {
-                        info!("bidi_stream: supervisor: recvd stop msg");
-                        return Ok(())
-                    }
-
-                    match self.child_exited.recv_timeout(SUPERVISOR_POLL_DUR) {
-                        Ok(_) => {
-                            error!("internal error: unexpected send on child_exited chan");
-                        },
-                        Err(RecvTimeoutError::Timeout) => {
-                            // shell is still running, do nothing
-                            trace!("bidi_stream: supervisor: poll timeout");
-                        },
-                        Err(RecvTimeoutError::Disconnected) => {
-                            info!("bidi_stream: supervisor: child shell exited");
-                            child_done.store(true, Ordering::Release);
-                            return Ok(());
-                        }
-                    }
-                }
-            });
-
-            let rpc_h = s.spawn(|| -> anyhow::Result<()> {
-                loop {
-                    if stop.load(Ordering::Relaxed) {
-                        info!("bidi_stream: supervisor: recvd stop msg");
-                        return Ok(())
-                    }
-
-                    let req = match self.rpc_in.recv_timeout(RPC_LOOP_POLL_DUR) {
-                        Ok(r) => r,
-                        Err(RecvTimeoutError::Timeout) => continue,
-                        Err(e) => Err(e).context("recving sessession msg")?,
-                    };
-                    let resp = match req {
-                        protocol::SessionMessageRequestPayload::Resize(req) => {
-                            protocol::SessionMessageReply::Resize(
-                                self.handle_resize_rpc(req)?)
-                        },
-                    };
-
-                    // A timeout here is a hard error because it represents
-                    // lost data. We could technically write a retry loop
-                    // around the timeout, but it is an unbounded channel,
-                    // so a timeout seems very unlikely.
-                    self.rpc_out.send_timeout(resp, RPC_LOOP_POLL_DUR)
-                        .context("sending session reply")?
-                }
-            });
+            // handle SessionMessage RPCs
+            let rpc_h = self.spawn_rpc(s, &stop);
 
             loop {
                 let c_done = child_done.load(Ordering::Acquire);
@@ -359,5 +145,274 @@ impl SessionInner {
 
         info!("bidi_stream: done child_done={}", c_done);
         Ok(c_done)
+    }
+
+    fn spawn_client_to_shell<'scope, 'env>(
+        &'scope self,
+        scope: &'scope thread::Scope<'scope, 'env>,
+        stop: &'scope AtomicBool,
+        pty_master: &'scope pty::fork::Master,
+        reader_client_stream: &'scope mut UnixStream,
+    ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
+        scope.spawn(|| -> anyhow::Result<()> {
+            let mut master_writer = pty_master.clone();
+
+            info!("client->shell: spawned");
+
+            let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
+
+            loop {
+                if stop.load(Ordering::Relaxed) {
+                    info!("client->shell: recvd stop msg (1)");
+                    return Ok(())
+                }
+
+                // N.B. we don't need to muck about with chunking or anything
+                // in this direction, because there is only one input stream
+                // to the shell subprocess, vs the two output streams we need
+                // to handle coming back the other way.
+                //
+                // Also, not that we don't access through the mutex because reads
+                // don't need to be excluded from trampling on writes.
+                let len = match reader_client_stream.read(&mut buf) {
+                    Ok(l) => l,
+                    Err(e) => {
+                        if e.kind() == std::io::ErrorKind::WouldBlock {
+                            trace!("client->shell: read: WouldBlock");
+                            thread::sleep(consts::PIPE_POLL_DURATION);
+                            continue;
+                        }
+                        return Err(e).context("reading client chunk");
+                    }
+                };
+                if len == 0 {
+                    continue;
+                }
+
+                debug!("client->shell: read {} bytes", len);
+
+                let mut to_write = &buf[0..len];
+                debug!("client->shell: created to_write='{}'",
+                       String::from_utf8_lossy(to_write));
+
+                while to_write.len() > 0 {
+                    if stop.load(Ordering::Relaxed) {
+                        info!("client->shell: recvd stop msg (1)");
+                        return Ok(())
+                    }
+
+                    // TODO(ethan): will we even get an EWOULDBLOCK return code anymore?
+                    //              the pty master file descriptor does not allow us to
+                    //              mark it nonblocking.
+                    let nwritten = match master_writer.write(&to_write) {
+                        Ok(n) => n,
+                        Err(e) => {
+                            if e.kind() == std::io::ErrorKind::WouldBlock {
+                                trace!("client->shell: write: WouldBlock");
+                                thread::sleep(consts::PIPE_POLL_DURATION);
+                                continue;
+                            }
+                            return Err(e).context("writing client chunk");
+                        }
+                    };
+                    debug!("client->shell: wrote {} bytes", nwritten);
+                    to_write = &to_write[nwritten..];
+                    trace!("client->shell: to_write='{}'",
+                           String::from_utf8_lossy(to_write));
+                }
+
+                master_writer.flush().context("flushing input from client to shell")?;
+                test_hooks::emit_event("daemon-wrote-client-chunk");
+
+                debug!("client->shell: flushed chunk of len {}", len);
+            }
+        })
+    }
+
+    fn spawn_shell_to_client<'scope, 'env>(
+        &'scope self,
+        scope: &'scope thread::Scope<'scope, 'env>,
+        stop: &'scope AtomicBool,
+        pty_master: &'scope pty::fork::Master,
+        client_stream_m: &'scope Mutex<UnixStream>,
+        client_stream: &'scope mut UnixStream,
+    ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
+        scope.spawn(move || -> anyhow::Result<()> {
+            info!("shell->client: spawned");
+
+            let mut master_reader = pty_master.clone();
+
+            let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
+
+            loop {
+                if stop.load(Ordering::Relaxed) {
+                    info!("shell->client: recvd stop msg");
+                    return Ok(())
+                }
+
+                // select so we know which stream to read from, and
+                // know to wake up immediately when bytes are available.
+                let mut fdset = nix::sys::select::FdSet::new();
+                fdset.insert(master_reader.as_raw_fd());
+                let mut poll_dur = consts::PIPE_POLL_DURATION_TIMEVAL.clone();
+                let nready = match nix::sys::select::select(
+                    None,
+                    Some(&mut fdset),
+                    None,
+                    None,
+                    Some(&mut poll_dur),
+                ) {
+                    Ok(n) => n,
+                    Err(nix::errno::Errno::EBADF) => {
+                        info!("shell->client: shell went down");
+                        return Ok(());
+                    }
+                    Err(e) => return Err(e).context("selecting on pty master"),
+                };
+                if nready == 0 {
+                    continue;
+                }
+
+                if fdset.contains(master_reader.as_raw_fd()) {
+                    let len = match master_reader.read(&mut buf) {
+                        Ok(n) => n,
+                        Err(e) => {
+                            if e.kind() == std::io::ErrorKind::WouldBlock {
+                                trace!("shell->client: pty master read: WouldBlock");
+                                thread::sleep(consts::PIPE_POLL_DURATION);
+                                continue;
+                            }
+                            return Err(e).context("reading pty master chunk");
+                        }
+                    };
+                    if len == 0 {
+                        trace!("shell->client: 0 stdout bytes, waiting");
+                        thread::sleep(consts::PIPE_POLL_DURATION);
+                        continue;
+                    }
+
+                    let chunk = protocol::Chunk {
+                        kind: protocol::ChunkKind::Data,
+                        buf: &buf[..len],
+                    };
+                    debug!("shell->client: read pty master len={} '{}'", len, String::from_utf8_lossy(chunk.buf));
+                    {
+                        let mut s = client_stream_m.lock().unwrap();
+                        chunk.write_to(&mut *s, &stop)
+                            .context("writing stdout chunk to client stream")?;
+                    }
+                    debug!("shell->client: wrote {} pty master bytes", chunk.buf.len());
+                }
+
+                // flush immediately
+                client_stream.flush().context("flushing client stream")?;
+            }
+        })
+    }
+
+    fn spawn_heartbeat<'scope, 'env>(
+        &'scope self,
+        scope: &'scope thread::Scope<'scope, 'env>,
+        stop: &'scope AtomicBool,
+        client_stream_m: &'scope Mutex<UnixStream>,
+    ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
+        scope.spawn(move || -> anyhow::Result<()> {
+            loop {
+                trace!("heartbeat: checking stop_rx");
+                if stop.load(Ordering::Relaxed) {
+                    info!("heartbeat: recvd stop msg");
+                    return Ok(())
+                }
+
+                thread::sleep(consts::HEARTBEAT_DURATION);
+                let chunk = protocol::Chunk {
+                    kind: protocol::ChunkKind::Heartbeat,
+                    buf: &[],
+                };
+                {
+                    let mut s = client_stream_m.lock().unwrap();
+                    match chunk.write_to(&mut *s, &stop) {
+                        Ok(_) => {
+                            trace!("heartbeat: wrote heartbeat");
+                        }
+                        Err(e) => {
+                            if e.kind() == io::ErrorKind::BrokenPipe {
+                                trace!("heartbeat: client hangup");
+                                return Ok(());
+                            }
+                            return Err(e).context("writing heartbeat")?;
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    fn spawn_supervisor<'scope, 'env>(
+        &'scope self,
+        scope: &'scope thread::Scope<'scope, 'env>,
+        stop: &'scope AtomicBool,
+        child_done: &'scope AtomicBool,
+        pty_master: &'scope pty::fork::Master,
+    ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
+        scope.spawn(|| -> anyhow::Result<()> {
+            loop {
+                trace!("supervisor: checking stop_rx (pty_master={})",
+                       pty_master.as_raw_fd());
+                if stop.load(Ordering::Relaxed) {
+                    info!("supervisor: recvd stop msg");
+                    return Ok(())
+                }
+
+                match self.child_exited.recv_timeout(SUPERVISOR_POLL_DUR) {
+                    Ok(_) => {
+                        error!("internal error: unexpected send on child_exited chan");
+                    },
+                    Err(RecvTimeoutError::Timeout) => {
+                        // shell is still running, do nothing
+                        trace!("supervisor: poll timeout");
+                    },
+                    Err(RecvTimeoutError::Disconnected) => {
+                        info!("supervisor: child shell exited");
+                        child_done.store(true, Ordering::Release);
+                        return Ok(());
+                    }
+                }
+            }
+        })
+    }
+
+    fn spawn_rpc<'scope, 'env>(
+        &'scope self,
+        scope: &'scope thread::Scope<'scope, 'env>,
+        stop: &'scope AtomicBool,
+    ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
+        scope.spawn(|| -> anyhow::Result<()> {
+            loop {
+                if stop.load(Ordering::Relaxed) {
+                    info!("supervisor: recvd stop msg");
+                    return Ok(())
+                }
+
+                let req = match self.rpc_in.recv_timeout(RPC_LOOP_POLL_DUR) {
+                    Ok(r) => r,
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(e) => Err(e).context("recving sessession msg")?,
+                };
+                let resp = match req {
+                    protocol::SessionMessageRequestPayload::Resize(req) => {
+                        protocol::SessionMessageReply::Resize(
+                            self.handle_resize_rpc(req)?)
+                    },
+                };
+
+                // A timeout here is a hard error because it represents
+                // lost data. We could technically write a retry loop
+                // around the timeout, but it is an unbounded channel,
+                // so a timeout seems very unlikely.
+                self.rpc_out.send_timeout(resp, RPC_LOOP_POLL_DUR)
+                    .context("sending session reply")?
+            }
+        })
     }
 }
