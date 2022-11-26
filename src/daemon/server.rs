@@ -44,12 +44,10 @@ impl Server {
         }
     }
 
-    pub fn serve<P>(&mut self, socket: P) -> anyhow::Result<()>
-        where P: AsRef<Path> + std::fmt::Debug
+    pub fn serve(&mut self, listener: UnixListener) -> anyhow::Result<()>
     {
-        info!("listening on socket {:?}", socket);
+        info!("listening on socket");
         test_hooks::emit_event("daemon-about-to-listen");
-        let listener = UnixListener::bind(&socket).context("binding to socket")?;
         for stream in listener.incoming() {
             match stream {
                 Ok(stream) => {

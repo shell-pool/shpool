@@ -18,12 +18,22 @@ mod tty;
 #[derive(Parser, Debug)]
 #[clap(version, author, about)]
 struct Args {
-    #[clap(short, long, action, help = "the file to write logs to, by default they are swallowed or go to stderr in daemon mode")]
+    #[clap(short, long, action,
+           long_help = "the file to write logs to
+
+In most modes logs are discarded by default, but if shpool is
+running in daemon mode, the logs will go to stderr by default.")]
     log_file: Option<String>,
     #[clap(short, long, action = clap::ArgAction::Count,
            help = "show more in logs, may be provided multiple times")]
     verbose: u8,
-    #[clap(short, long, action, help = "the path for the unix socket to listen on, default = $XDG_RUNTIME_DIR/shpool.socket")]
+    #[clap(short, long, action,
+           long_help = "the path for the unix socket to listen on
+
+This defaults to $XDG_RUNTIME_DIR/shpool.socket.
+
+This flag gets overridden by systemd socket activation when
+the daemon is launched by systemd.")]
     socket: Option<String>,
     #[clap(subcommand)]
     command: Commands,

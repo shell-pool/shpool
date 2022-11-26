@@ -77,11 +77,11 @@ $ cargo install --path .
 
 A convenient way to run the shpool daemon is to use systemd
 to start and run it as a user-level systemd service. You
-can use the `systemd/shpool.service` file in the `shpool`
-repo to do this. Install it by running
+can use the `systemd/shpool.{service,socket}` files
+to do this. Install it by running
 
 ```
-$ cp systemd/shpool.service ~/.config/systemd/user
+$ cp systemd/* ~/.config/systemd/user
 ```
 
 enable and start it up with

@@ -10,10 +10,10 @@ use signal_hook::iterator::*;
 use signal_hook::flag;
 
 pub struct Handler {
-    sock: PathBuf,
+    sock: Option<PathBuf>,
 }
 impl Handler {
-    pub fn new(sock: PathBuf) -> Self {
+    pub fn new(sock: Option<PathBuf>) -> Self {
         Handler {
             sock,
         }
@@ -43,13 +43,16 @@ impl Handler {
                     term_sig => {
                         assert!(TERM_SIGNALS.contains(&term_sig));
 
-                        info!("term sig handler : cleaning up socket");
-                        if let Err(e)= std::fs::remove_file(self.sock).context("cleaning up socket") {
-                            error!("error cleaning up socket file: {}", e);
+                        info!("term sig handler: cleaning up socket");
+                        if let Some(sock) = self.sock {
+                            if let Err(e)= std::fs::remove_file(sock)
+                                .context("cleaning up socket") {
+                                error!("error cleaning up socket file: {}", e);
+                            }
                         }
 
                         info!("term sig handler: exiting");
-                        std::process::exit(128 + 2 /* default SIGINT exit code */);
+                        std::process::exit(0);
                     }
                 }
             }

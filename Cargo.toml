@@ -26,7 +26,8 @@ termios = "0.3" # configuring terminal flags
 lazy_static = "1" # globals
 crossbeam-channel = "0.5" # channels
 atty = "0.2" # checking if we are connected to a terminal
-libc = "0.2"
+libc = "0.2" # basic libc types
+systemd = "0.10" # socket activation
 
 [dev-dependencies]
 tempfile = "3" # keeping tests hermetic
