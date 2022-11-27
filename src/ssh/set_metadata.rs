@@ -2,11 +2,11 @@ use std::path::PathBuf;
 use std::env;
 
 use anyhow::{anyhow, Context};
-use super::protocol;
+use super::super::protocol;
 
 use log::{info, warn};
 
-use super::tty;
+use super::super::tty;
 
 pub fn run(session_name: String, socket: PathBuf) -> anyhow::Result<()> {
     info!("\n\n================ STARTING SSH-LOCAL-COMMAND-SET-NAME =====================\n\n");
@@ -21,21 +21,21 @@ pub fn run(session_name: String, socket: PathBuf) -> anyhow::Result<()> {
         }
     };
 
-    client.write_connect_header(protocol::ConnectHeader::LocalCommandSetName(
-        protocol::LocalCommandSetNameRequest{
+    client.write_connect_header(protocol::ConnectHeader::LocalCommandSetMetadata(
+        protocol::SetMetadataRequest{
             name: session_name.clone(),
             term: env::var("TERM").context("resolving local $TERM")?,
             local_tty_size: tty_size,
         },
-    )).context("writing LocalCommandSetName header")?;
+    )).context("writing LocalCommandSetMetadata header")?;
 
-    let reply: protocol::LocalCommandSetNameReply = client.read_reply()
-        .context("reading LocalCommandSetName reply")?;
+    let reply: protocol::LocalCommandSetMetadataReply = client.read_reply()
+        .context("reading LocalCommandSetMetadata reply")?;
     match reply.status {
-        protocol::LocalCommandSetNameStatus::Timeout => {
+        protocol::LocalCommandSetMetadataStatus::Timeout => {
             return Err(anyhow!("timeout"));
         }
-        protocol::LocalCommandSetNameStatus::Ok => {
+        protocol::LocalCommandSetMetadataStatus::Ok => {
             info!("set name '{}' for the parked remote command thread", session_name);
         }
     }

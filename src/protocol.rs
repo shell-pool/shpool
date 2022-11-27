@@ -22,16 +22,17 @@ pub enum ConnectHeader {
     ///
     /// Responds with an AttachReplyHeader.
     Attach(AttachHeader),
-    /// Take a global lock for 5s, waiting for a LocalCommandSetName
-    /// to arrive to release the lock and inform us of the session to
-    /// connect to.
+    /// Take a global lock for ATTACH_WINDOW secs,
+    /// waiting for a LocalCommandSetMetadata
+    /// to arrive to release the lock and
+    /// inform us of the session to connect to.
     ///
     /// Responds with an AttachReplyHeader.
     RemoteCommandLock,
     /// Release a parked RemoteCommandLock thread.
     ///
-    /// Responds with LocalCommandSetNameReply.
-    LocalCommandSetName(LocalCommandSetNameRequest),
+    /// Responds with SetMetadataRequest.
+    LocalCommandSetMetadata(SetMetadataRequest),
     /// List all of the currently active sessions.
     List,
     /// A message for a named, running sessions. This
@@ -103,10 +104,11 @@ pub struct AttachHeader {
     pub local_tty_size: tty::Size,
 }
 
-/// LocalCommandSetNameRequest releases the lock created by a ConnectHeader::RemoteCommandLock
-/// informing the parked thread of the name of the session it should try to attach to.
+/// SetMetadataRequest releases the lock created by a
+/// ConnectHeader::RemoteCommandLock informing the parked
+/// thread of the name of the session it should try to attach to.
 #[derive(Serialize, Deserialize, Debug)]
-pub struct LocalCommandSetNameRequest {
+pub struct SetMetadataRequest {
     /// The name of the session to create or attach to.
     pub name: String,
     /// The value of the local TERM environment variable.
@@ -137,11 +139,11 @@ pub struct Session {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct LocalCommandSetNameReply {
-    pub status: LocalCommandSetNameStatus,
+pub struct LocalCommandSetMetadataReply {
+    pub status: LocalCommandSetMetadataStatus,
 }
 #[derive(Serialize, Deserialize, Debug)]
-pub enum LocalCommandSetNameStatus {
+pub enum LocalCommandSetMetadataStatus {
     /// Indicates we timed out waiting to link up with the remote command
     /// thread.
     Timeout,

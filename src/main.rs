@@ -10,8 +10,7 @@ mod consts;
 mod daemon;
 mod list;
 mod protocol;
-mod ssh_local_command_set_name;
-mod ssh_remote_command;
+mod ssh;
 mod test_hooks;
 mod tty;
 
@@ -81,7 +80,7 @@ advantage of this command.
 
 This command is internal to shpool and you should never have to reference it directly, even in your config.
 "#)]
-    SshLocalCommandSetName {
+    SshLocalCommandSetMetadata {
         session_name: String,
     },
 }
@@ -157,10 +156,12 @@ fn main() -> anyhow::Result<()> {
         Commands::Plumbing { command } => {
             match command {
                 PlumbingCommands::SshRemoteCommand => {
-                    ssh_remote_command::run(socket)
+                    ssh::remote_cmd::run(socket)
                 }
-                PlumbingCommands::SshLocalCommandSetName { session_name } => {
-                    ssh_local_command_set_name::run(session_name, socket)
+                PlumbingCommands::SshLocalCommandSetMetadata {
+                    session_name
+                } => {
+                    ssh::set_metadata::run(session_name, socket)
                 }
             }
         }

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::{Context, anyhow};
 use log::info;
 
-use super::protocol;
+use super::super::protocol;
 // Plan: do the same thing as the attach command, but dial in
 //       with the remote command request.
 

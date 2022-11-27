@@ -82,7 +82,9 @@ impl Server {
         match header {
             protocol::ConnectHeader::Attach(h) => self.handle_attach(stream, h),
             protocol::ConnectHeader::RemoteCommandLock => self.handle_remote_command_lock(stream),
-            protocol::ConnectHeader::LocalCommandSetName(h) => self.handle_local_command_set_name(stream, h),
+            protocol::ConnectHeader::LocalCommandSetMetadata(h) => {
+                self.handle_local_command_set_metadata(stream, h)
+            },
             protocol::ConnectHeader::List => self.handle_list(stream),
             protocol::ConnectHeader::SessionMessage(header) =>
                 self.handle_session_message(stream, header),
@@ -243,15 +245,19 @@ impl Server {
         self.handle_attach(stream, attach_header)
     }
 
-    fn handle_local_command_set_name(&self, mut stream: UnixStream, header: protocol::LocalCommandSetNameRequest) -> anyhow::Result<()> {
-        info!("handle_local_command_set_name: header={:?}", header);
+    fn handle_local_command_set_metadata(
+        &self,
+        mut stream: UnixStream,
+        header: protocol::SetMetadataRequest,
+    ) -> anyhow::Result<()> {
+        info!("handle_local_command_set_metadata: header={:?}", header);
         let status = {
             let mut inner = self.ssh_extension_parker.inner.lock().unwrap();
 
             if inner.has_parked_remote {
                 assert!(!inner.has_parked_local, "local: should never have two threads parked at once");
 
-                info!("handle_local_command_set_name: there is a remote thread waiting to be woken");
+                info!("handle_local_command_set_metadata: there is a remote thread waiting to be woken");
                 inner.attach_header = Some(protocol::AttachHeader {
                     name: header.name.clone(),
                     term: header.term.clone(),
@@ -259,9 +265,9 @@ impl Server {
                 });
                 self.ssh_extension_parker.cond.notify_one();
 
-                protocol::LocalCommandSetNameStatus::Ok
+                protocol::LocalCommandSetMetadataStatus::Ok
             } else {
-                info!("handle_local_command_set_name: no remote thread, we will have to wait ourselves");
+                info!("handle_local_command_set_metadata: no remote thread, we will have to wait ourselves");
                 inner.attach_header = Some(protocol::AttachHeader {
                     name: header.name.clone(),
                     term: header.term.clone(),
@@ -272,19 +278,19 @@ impl Server {
                     .wait_timeout_while(inner, ssh_plugin::ATTACH_WINDOW, |inner| inner.attach_header.is_none()).unwrap();
                 inner.has_parked_local = false;
                 if timeout_res.timed_out() {
-                    info!("handle_local_command_set_name: timed out waiting for remote command");
-                    protocol::LocalCommandSetNameStatus::Timeout
+                    info!("handle_local_command_set_metadata: timed out waiting for remote command");
+                    protocol::LocalCommandSetMetadataStatus::Timeout
                 } else {
-                    info!("handle_local_command_set_name: finished the handshake successfully");
-                    protocol::LocalCommandSetNameStatus::Ok
+                    info!("handle_local_command_set_metadata: finished the handshake successfully");
+                    protocol::LocalCommandSetMetadataStatus::Ok
                 }
             }
         };
 
         // write the reply without the lock held to avoid doin IO with a lock held
-        info!("handle_local_command_set_name: status={:?} name={}", status, header.name);
-        write_reply(&mut stream, protocol::LocalCommandSetNameReply{
-            status: protocol::LocalCommandSetNameStatus::Ok
+        info!("handle_local_command_set_metadata: status={:?} name={}", status, header.name);
+        write_reply(&mut stream, protocol::LocalCommandSetMetadataReply{
+            status: protocol::LocalCommandSetMetadataStatus::Ok
         })?;
         return Ok(())
     }

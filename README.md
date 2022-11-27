@@ -106,7 +106,7 @@ Host = your-ssh-target-name
 
     RemoteCommand $HOME/.cargo/bin/shpool plumbing ssh-remote-command
     PermitLocalCommand yes
-    LocalCommand ssh -oPermitLocalCommand=no -oRemoteCommand="$HOME/.cargo/bin/shpool plumbing ssh-local-command-set-name '%u@%h:%p$(tty)'" %n
+    LocalCommand ssh -oPermitLocalCommand=no -oRemoteCommand="$HOME/.cargo/bin/shpool plumbing ssh-local-command-set-metadata '%u@%h:%p$(tty)'" %n
 ```
 
 Note that due to limitations in the hooks that ssh exposes to us,
