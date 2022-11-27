@@ -4,7 +4,7 @@ mod support;
 
 #[test]
 fn happy_path() -> anyhow::Result<()> {
-    let mut daemon_proc = support::DaemonProc::new("norc.toml")
+    let mut daemon_proc = support::daemon::Proc::new("norc.toml")
         .context("starting daemon proc")?;
     let mut attach_proc = daemon_proc.attach("sh1")
         .context("starting attach proc")?;
@@ -30,7 +30,7 @@ fn happy_path() -> anyhow::Result<()> {
 // same shell session.
 #[test]
 fn bounce() -> anyhow::Result<()> {
-    let mut daemon_proc = support::DaemonProc::new("norc.toml")
+    let mut daemon_proc = support::daemon::Proc::new("norc.toml")
         .context("starting daemon proc")?;
 
     let bidi_done_w = daemon_proc.events.take().unwrap()
@@ -67,7 +67,7 @@ fn bounce() -> anyhow::Result<()> {
 // same shell session.
 #[test]
 fn explicit_exit() -> anyhow::Result<()> {
-    let mut daemon_proc = support::DaemonProc::new("norc.toml")
+    let mut daemon_proc = support::daemon::Proc::new("norc.toml")
         .context("starting daemon proc")?;
 
     let bidi_done_w = daemon_proc.events.take().unwrap()
@@ -106,7 +106,7 @@ fn explicit_exit() -> anyhow::Result<()> {
 // same shell session.
 #[test]
 fn exit_immediate_drop() -> anyhow::Result<()> {
-    let mut daemon_proc = support::DaemonProc::new("norc.toml")
+    let mut daemon_proc = support::daemon::Proc::new("norc.toml")
         .context("starting daemon proc")?;
 
     let reap_w = daemon_proc.events.take().unwrap()
@@ -147,7 +147,7 @@ fn exit_immediate_drop() -> anyhow::Result<()> {
 
 #[test]
 fn up_arrow_no_crash() -> anyhow::Result<()> {
-    let mut daemon_proc = support::DaemonProc::new("norc.toml")
+    let mut daemon_proc = support::daemon::Proc::new("norc.toml")
         .context("starting daemon proc")?;
     let mut attach_proc = daemon_proc.attach("sh1")
         .context("starting attach proc")?;
