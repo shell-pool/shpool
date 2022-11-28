@@ -22,7 +22,7 @@ pub enum ConnectHeader {
     ///
     /// Responds with an AttachReplyHeader.
     Attach(AttachHeader),
-    /// Take a global lock for ATTACH_WINDOW secs,
+    /// Take a global lock for ssh_handshake_timeout_ms,
     /// waiting for a LocalCommandSetMetadata
     /// to arrive to release the lock and
     /// inform us of the session to connect to.
@@ -113,14 +113,12 @@ pub struct SetMetadataRequest {
     pub name: String,
     /// The value of the local TERM environment variable.
     pub term: String,
-    /// The size of the local tty.
-    pub local_tty_size: tty::Size,
 }
 
 /// AttachReplyHeader is the blob of metadata that the shpool service prefixes
 /// the data stream with after an attach. In can be used to indicate a connection
 /// error.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct AttachReplyHeader {
     pub status: AttachStatus,
 }
@@ -153,7 +151,7 @@ pub enum LocalCommandSetMetadataStatus {
 }
 
 /// AttachStatus indicates what happened during an attach attempt.
-#[derive(PartialEq, Eq, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Serialize, Deserialize, Debug)]
 pub enum AttachStatus {
     /// Attached indicates that there was an existing shell session with
     /// the given name, and `shpool attach` successfully connected to it.
@@ -280,8 +278,10 @@ impl Client {
 
     pub fn write_connect_header(&mut self, header: ConnectHeader) -> anyhow::Result<()> {
         let buf = rmp_serde::to_vec(&header).context("formatting reply header")?;
+        debug!("writing connect header length prefix={}", buf.len());
         self.stream.write_u32::<LittleEndian>(buf.len() as u32)
             .context("writing reply length prefix")?;
+        debug!("writing connect header");
         self.stream.write_all(&buf).context("writing reply header")?;
 
         Ok(())

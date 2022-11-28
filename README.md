@@ -14,8 +14,6 @@ that `shpool` does not break native scrollback.
 to mangle your session if your connection drops while you are
 using a curses based app like vim or less. It is ready for people
 to kick the tires, but we probably should not be rolling it out.
-The `ssh` plugin mode is not currently working, so stick to using
-`shpool attach` for now.
 
 ## Installation
 

@@ -75,9 +75,10 @@ impl TestHookServer {
     }
 
     /// start is the background thread to listen on a unix socket
-    /// for a test harness to dial in so it can wait for events. The caller
-    /// is responsible for spawning the worker thread. Events are pushed to
-    /// everyone who has dialed in as a newline delimited stream of event tags.
+    /// for a test harness to dial in so it can wait for events.
+    /// The caller is responsible for spawning the worker thread.
+    /// Events are pushed to everyone who has dialed in as a
+    /// newline delimited stream of event tags.
     pub fn start(&self) {
         let sock_path: String;
         {

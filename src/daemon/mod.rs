@@ -22,8 +22,7 @@ pub fn run(config_file: Option<String>, socket: PathBuf) -> anyhow::Result<()> {
         config = toml::from_str(&config_str).context("parsing config file")?;
     }
 
-    let mut server = server::Server::new(config);
-
+    let server = server::Server::new(config);
 
     let mut cleanup_socket = None;
     let listener = match systemd::activation_socket() {
@@ -37,7 +36,7 @@ pub fn run(config_file: Option<String>, socket: PathBuf) -> anyhow::Result<()> {
             UnixListener::bind(&socket).context("binding to socket")?
         }
     };
-    server.serve(listener)?;
+    server::Server::serve(server, listener)?;
 
     // spawn the signal handler thread in the background
     signals::Handler::new(cleanup_socket.clone()).spawn()?;

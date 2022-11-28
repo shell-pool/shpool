@@ -139,7 +139,8 @@ fn exit_immediate_drop() -> anyhow::Result<()> {
         let mut line_matcher = attach_proc.line_matcher()?;
 
         attach_proc.run_cmd("echo ${MYVAR:-second}")?;
-        line_matcher.match_re("second$")?;
+        line_matcher.match_re("second$")
+            .context("matching second")?;
     }
 
     Ok(())

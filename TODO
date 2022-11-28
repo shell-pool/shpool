@@ -23,8 +23,6 @@ Handle full screen applications (vim/less):
       to emulate a termianl in a buffer and be able to blit that
       to the screen on reconnect.
 
-- start pinning down behavior by actually writing tests for these various cases
-    - test for ssh plugin mode commands
 - come up with some sort of keybinding to exit the shpool shell.
   make it configurable via the daemon's toml file. (Or maybe just
   make users use commands to do this? That won't work for long running
@@ -34,7 +32,6 @@ Handle full screen applications (vim/less):
   it only requires a single gnubby touch.
 - Reset TERM if someone reattaches from a new terminal type.
 - Reload config if we get a SIGHUP
-- Implement systemd socket activation
 
 
 There is a cool pair of signals that might be useful for dealing with IO
