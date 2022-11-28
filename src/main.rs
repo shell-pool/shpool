@@ -169,6 +169,7 @@ fn main() -> anyhow::Result<()> {
 
     if let Err(err) = res {
         error!("shpool: {:?}", err);
+        std::process::exit(1);
     }
 
     Ok(())

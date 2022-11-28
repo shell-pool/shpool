@@ -156,6 +156,23 @@ impl Proc {
         })
     }
 
+    /// list launches a `shpool list` process, collects the
+    /// output and returns it as a string
+    pub fn list(&mut self) -> anyhow::Result<process::Output> {
+        let tmp_dir = self.tmp_dir.as_ref().ok_or(anyhow!("missing tmp_dir"))?;
+        let log_file = tmp_dir.path().join(format!("list_{}.log", self.subproc_counter));
+        eprintln!("spawning list proc with log {:?}", &log_file);
+        self.subproc_counter += 1;
+
+        Command::new(shpool_bin())
+            .arg("-vv")
+            .arg("--log-file").arg(&log_file)
+            .arg("--socket").arg(&self.socket_path)
+            .arg("list")
+            .output()
+            .context("spawning list proc")
+    }
+
     pub fn await_event(&mut self, event: &str) -> anyhow::Result<()> {
         if let Some(events) = &mut self.events {
             events.await_event(event)

@@ -52,6 +52,7 @@ impl SessionInner {
     /// the client connection. It returns true if the subprocess
     /// has exited, and false if it is still running.
     pub fn bidi_stream(&mut self) -> anyhow::Result<bool> {
+        test_hooks::emit_event("daemon-bidi-stream-enter");
         let _bidi_stream_test_guard = test_hooks::ScopedEvent::new("daemon-bidi-stream-done");
 
         // we take the client stream so that it gets closed when this routine
