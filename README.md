@@ -58,10 +58,16 @@ Make sure that `~/.cargo/bin` is on you `PATH` so you can use
 binaries installed with cargo. An entry like
 
 ```
-source "$HOME/.cargo/env"
+$ source "$HOME/.cargo/env"
 ```
 
 in your `.profile` file should do the trick.
+
+### Install systemd dependencies
+
+```
+$ sudo apt install libsystemd-dev
+```
 
 ### Build `shpool`
 
