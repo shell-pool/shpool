@@ -102,106 +102,113 @@ impl Server {
     fn handle_attach(&self, mut stream: UnixStream, header: protocol::AttachHeader) -> anyhow::Result<()> {
         info!("handle_attach: header={:?}", header);
 
-        // we unwrap to propigate the poison as an unwind
-        let mut shells = self.shells.lock().unwrap();
+        let (inner_to_stream, status) = {
+            // we unwrap to propigate the poison as an unwind
+            let mut shells = self.shells.lock().unwrap();
 
-        info!("handle_attach: locked shells table");
+            info!("handle_attach: locked shells table");
 
-        let mut status = protocol::AttachStatus::Attached;
-        if let Some(session) = shells.get(&header.name) {
-            info!("handle_attach: found entry for '{}'", header.name);
-            if let Ok(mut inner) = session.inner.try_lock() {
-                info!("handle_attach: session '{}': locked inner", header.name);
-                // We have an existing session in our table, but the subshell
-                // proc might have exited in the mean time, for example if the
-                // user typed `exit` right before the connection dropped there
-                // could be a zombie entry in our session table. We need to
-                // re-check whether the subshell has exited before taking this over.
-                match inner.child_exited.try_recv() {
-                    Ok(_) => {
-                        return Err(anyhow!("unexpected send on child_exited chan"));
-                    }
-                    Err(TryRecvError::Empty) => {
-                        // the channel is still open so the subshell is still running
-                        info!("handle_attach: taking over existing session inner={:?}", inner);
-                        inner.set_pty_size(&header.local_tty_size)
-                            .context("resetting pty size on reattach")?;
-                        inner.client_stream = Some(stream.try_clone()?);
+            let mut status = protocol::AttachStatus::Attached;
+            if let Some(session) = shells.get(&header.name) {
+                info!("handle_attach: found entry for '{}'", header.name);
+                if let Ok(mut inner) = session.inner.try_lock() {
+                    info!("handle_attach: session '{}': locked inner", header.name);
+                    // We have an existing session in our table, but the subshell
+                    // proc might have exited in the mean time, for example if the
+                    // user typed `exit` right before the connection dropped there
+                    // could be a zombie entry in our session table. We need to
+                    // re-check whether the subshell has exited before taking this over.
+                    match inner.child_exited.try_recv() {
+                        Ok(_) => {
+                            return Err(anyhow!("unexpected send on child_exited chan"));
+                        }
+                        Err(TryRecvError::Empty) => {
+                            // the channel is still open so the subshell is still running
+                            info!("handle_attach: taking over existing session inner={:?}", inner);
+                            inner.set_pty_size(&header.local_tty_size)
+                                .context("resetting pty size on reattach")?;
+                            inner.client_stream = Some(stream.try_clone()?);
 
-                        // status is already attached
+                            // status is already attached
+                        }
+                        Err(TryRecvError::Disconnected) => {
+                            // the channel is closed so we know the subshell exited
+                            info!("handle_attach: stale inner={:?}, clobbering with new subshell", inner);
+                            status = protocol::AttachStatus::Created;
+                        }
                     }
-                    Err(TryRecvError::Disconnected) => {
-                        // the channel is closed so we know the subshell exited
-                        info!("handle_attach: stale inner={:?}, clobbering with new subshell", inner);
-                        status = protocol::AttachStatus::Created;
-                    }
+
+                    // fallthrough to bidi streaming
+                } else {
+                    info!("handle_attach: busy shell session, doing nothing");
+                    // The stream is busy, so we just inform the client and close the stream.
+                    write_reply(&mut stream, protocol::AttachReplyHeader{
+                        status: protocol::AttachStatus::Busy,
+                    })?;
+                    stream.shutdown(net::Shutdown::Both).context("closing stream")?;
+                    return Ok(())
                 }
-
-                // fallthrough to bidi streaming
             } else {
-                info!("handle_attach: busy shell session, doing nothing");
-                // The stream is busy, so we just inform the client and close the stream.
-                write_reply(&mut stream, protocol::AttachReplyHeader{
-                    status: protocol::AttachStatus::Busy,
-                })?;
-                stream.shutdown(net::Shutdown::Both).context("closing stream")?;
-                return Ok(())
+                status = protocol::AttachStatus::Created;
             }
-        } else {
-            status = protocol::AttachStatus::Created;
-        }
 
-        if status == protocol::AttachStatus::Created {
-            info!("handle_attach: creating new subshell");
-            let (rpc_in, rpc_out, inner) = self.spawn_subshell(stream, &header)?;
+            if status == protocol::AttachStatus::Created {
+                info!("handle_attach: creating new subshell");
+                let (rpc_in, rpc_out, inner) = self.spawn_subshell(stream, &header)?;
 
-            shells.insert(header.name.clone(), shell::Session {
-                rpc_in,
-                rpc_out,
-                started_at: time::SystemTime::now(),
-                inner: Arc::new(Mutex::new(inner)),
-            });
-            // fallthrough to bidi streaming
-        }
-
-        // the nested "if let" buisness is to please the borrow checker
-        if let Some(session) = shells.get(&header.name) {
-            let mut child_done = false;
-
-            if let Ok(mut inner) = session.inner.lock() {
-                let client_stream = match inner.client_stream.as_mut() {
-                    Some(s) => s,
-                    None => {
-                        return Err(anyhow!("no client stream, should be impossible"));
-                    }
-                };
-
-                let reply_status = write_reply(client_stream, protocol::AttachReplyHeader{
-                    status,
+                shells.insert(header.name.clone(), shell::Session {
+                    rpc_in,
+                    rpc_out,
+                    started_at: time::SystemTime::now(),
+                    inner: Arc::new(Mutex::new(inner)),
                 });
-                if let Err(e) = reply_status {
-                    error!("error writing reply status: {:?}", e);
-                }
+                // fallthrough to bidi streaming
+            }
 
-                info!("handle_attach: starting bidi stream loop");
-                match inner.bidi_stream() {
-                    Ok(done) => {
-                        child_done = done;
-                    },
-                    Err(e) => {
-                        error!("error shuffling bytes: {:?}", e);
-                    },
-                }
+            // return a reference to the inner session so that
+            // we can work with it without the global session
+            // table lock held
+            if let Some(session) = shells.get(&header.name) {
+                (Some(Arc::clone(&session.inner)), status)
             } else {
-                error!("internal error: failed to lock just created mutex");
+                (None, status)
+            }
+        };
+
+        if let Some(inner) = inner_to_stream {
+            let mut child_done = false;
+            let mut inner = inner.lock().unwrap();
+            let client_stream = match inner.client_stream.as_mut() {
+                Some(s) => s,
+                None => {
+                    return Err(anyhow!("no client stream, should be impossible"));
+                }
+            };
+
+            let reply_status = write_reply(client_stream, protocol::AttachReplyHeader{
+                status,
+            });
+            if let Err(e) = reply_status {
+                error!("error writing reply status: {:?}", e);
+            }
+
+            info!("handle_attach: starting bidi stream loop");
+            match inner.bidi_stream() {
+                Ok(done) => {
+                    child_done = done;
+                },
+                Err(e) => {
+                    error!("error shuffling bytes: {:?}", e);
+                },
             }
 
             if child_done {
                 info!("'{}' exited, removing from session table", header.name);
+                let mut shells = self.shells.lock().unwrap();
                 shells.remove(&header.name);
             }
         } else {
-            error!("inernal error: failed to fetch just inserted session");
+            error!("internal error: failed to fetch just inserted session");
         }
 
         Ok(())

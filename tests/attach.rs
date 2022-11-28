@@ -63,6 +63,28 @@ fn bounce() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test]
+fn two_at_once() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new("norc.toml")
+        .context("starting daemon proc")?;
+
+    let mut attach_proc1 = daemon_proc.attach("sh1")
+        .context("starting sh1")?;
+    let mut attach_proc2 = daemon_proc.attach("sh2")
+        .context("starting sh2")?;
+
+    let mut line_matcher1 = attach_proc1.line_matcher()?;
+    let mut line_matcher2 = attach_proc2.line_matcher()?;
+
+    attach_proc1.run_cmd("echo proc1").context("proc1 echo")?;
+    line_matcher1.match_re("proc1$").context("proc1 match")?;
+
+    attach_proc2.run_cmd("echo proc2").context("proc2 echo")?;
+    line_matcher2.match_re("proc2$").context("proc2 match")?;
+
+    Ok(())
+}
+
 // test the attach process getting killed, then re-attaching to the
 // same shell session.
 #[test]
