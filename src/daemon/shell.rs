@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, TryLockError};
 use std::{thread, time, io};
 
 use anyhow::{anyhow, Context};
@@ -13,6 +13,7 @@ use super::super::{tty, protocol, test_hooks, consts};
 
 const SUPERVISOR_POLL_DUR: time::Duration = time::Duration::from_millis(300);
 const RPC_LOOP_POLL_DUR: time::Duration = time::Duration::from_millis(300);
+const SESSION_MESSAGE_TIMEOUT: time::Duration = time::Duration::from_secs(10);
 
 /// Session represent a shell session
 pub struct Session {
@@ -20,6 +21,26 @@ pub struct Session {
     pub rpc_in: crossbeam_channel::Sender<protocol::SessionMessageRequestPayload>,
     pub rpc_out: crossbeam_channel::Receiver<protocol::SessionMessageReply>,
     pub inner: Arc<Mutex<SessionInner>>,
+}
+
+impl Session {
+    pub fn rpc_call(&self, arg: protocol::SessionMessageRequestPayload) -> anyhow::Result<protocol::SessionMessageReply> {
+        // make a best effort attempt to avoid sending messages
+        // to a session with no attached terminal
+        match self.inner.try_lock() {
+            // if it is locked, someone is attached
+            Err(TryLockError::WouldBlock) => {}
+            // if we can lock it, there is no one to get our msg
+            _ => {
+                return Ok(protocol::SessionMessageReply::NotAttached);
+            },
+        }
+
+        self.rpc_in.send_timeout(arg, SESSION_MESSAGE_TIMEOUT)
+            .context("sending session message")?;
+        Ok(self.rpc_out.recv_timeout(SESSION_MESSAGE_TIMEOUT)
+            .context("receiving session message reply")?)
+    }
 }
 
 /// ShellSessionInner contains values that the pipe thread needs to be
@@ -405,6 +426,11 @@ impl SessionInner {
                         protocol::SessionMessageReply::Resize(
                             self.handle_resize_rpc(req)?)
                     },
+                    protocol::SessionMessageRequestPayload::Detach => {
+                        stop.store(true, Ordering::Relaxed);
+                        protocol::SessionMessageReply::Detach(
+                            protocol::SessionMessageDetachReply::Ok)
+                    }
                 };
 
                 // A timeout here is a hard error because it represents

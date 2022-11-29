@@ -8,6 +8,7 @@ use log::{info, error};
 mod attach;
 mod consts;
 mod daemon;
+mod detach;
 mod list;
 mod protocol;
 mod ssh;
@@ -49,6 +50,15 @@ enum Commands {
     Attach {
         #[clap(help = "the name of the shell session to create or attach to")]
         name: String,
+    },
+    #[clap(about = "make the given session detach from shpool
+
+This does not close the shell. If no session name is provided
+$SHPOOL_SESSION_NAME will be used if it is present in the
+environment.")]
+    Detach {
+        #[clap(multiple = true, help = "sessions to detach")]
+        sessions: Vec<String>,
     },
     #[clap(about = "lists all the running shell sessions")]
     List,
@@ -145,6 +155,9 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Attach { name } => {
             attach::run(name, socket)
+        }
+        Commands::Detach { sessions } => {
+            detach::run(sessions, socket)
         }
         Commands::List => {
             list::run(socket)

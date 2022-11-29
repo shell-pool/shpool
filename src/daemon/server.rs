@@ -17,7 +17,6 @@ use super::super::{consts, protocol, tty, test_hooks};
 
 // controls how long we wait on attempted sends and receives
 // when sending a message to a running session
-const SESSION_MESSAGE_TIMEOUT: time::Duration = time::Duration::from_secs(10);
 const DEFAULT_SSH_HANDSHAKE_TIMEOUT_MS: u64 = 30 * 1000;
 
 pub struct Server {
@@ -88,10 +87,12 @@ impl Server {
         match header {
             protocol::ConnectHeader::Attach(h) =>
                 self.handle_attach(stream, h),
+            protocol::ConnectHeader::Detach(r) =>
+                self.handle_detach(stream, r),
             protocol::ConnectHeader::RemoteCommandLock =>
                 self.handle_remote_command_lock(stream),
-            protocol::ConnectHeader::LocalCommandSetMetadata(h) =>
-                self.handle_local_command_set_metadata(stream, h),
+            protocol::ConnectHeader::LocalCommandSetMetadata(r) =>
+                self.handle_local_command_set_metadata(stream, r),
             protocol::ConnectHeader::List =>
                 self.handle_list(stream),
             protocol::ConnectHeader::SessionMessage(header) =>
@@ -210,6 +211,32 @@ impl Server {
         } else {
             error!("internal error: failed to fetch just inserted session");
         }
+
+        Ok(())
+    }
+
+    fn handle_detach(&self, mut stream: UnixStream, request: protocol::DetachRequest) -> anyhow::Result<()> {
+
+        let mut not_found_sessions = vec![];
+        let mut not_attached_sessions = vec![];
+        {
+            let shells = self.shells.lock().unwrap();
+            for session in request.sessions.iter() {
+                if let Some(s) = shells.get(session) {
+                    let reply = s.rpc_call(protocol::SessionMessageRequestPayload::Detach)?;
+                    if reply == protocol::SessionMessageReply::NotAttached {
+                        not_attached_sessions.push(String::from(session));
+                    }
+                } else {
+                    not_found_sessions.push(String::from(session));
+                }
+            }
+        }
+
+        write_reply(&mut stream, protocol::DetachReply {
+            not_found_sessions,
+            not_attached_sessions,
+        }).context("writing detach reply")?;
 
         Ok(())
     }
@@ -378,10 +405,7 @@ impl Server {
         {
             let shells = self.shells.lock().unwrap();
             if let Some(session) = shells.get(&header.session_name) {
-                session.rpc_in.send_timeout(header.payload, SESSION_MESSAGE_TIMEOUT)
-                    .context("sending session message")?;
-                reply = session.rpc_out.recv_timeout(SESSION_MESSAGE_TIMEOUT)
-                    .context("receiving session message reply")?;
+                reply = session.rpc_call(header.payload)?;
             } else {
                 reply = protocol::SessionMessageReply::NotFound;
             }

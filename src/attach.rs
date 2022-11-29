@@ -126,6 +126,9 @@ impl SignalHandler {
                 info!("handle_sigwinch: resized session '{}' to {:?}",
                       self.session_name, tty_size);
             }
+            reply => {
+                warn!("handle_sigwinch: unexpected resize reply: {:?}", reply);
+            }
         }
 
         Ok(())

@@ -40,7 +40,24 @@ pub enum ConnectHeader {
     /// made to running sessions. Messages are only
     /// delivered if there is currently a client attached
     /// to the session.
-    SessionMessage(SessionMessageRequest)
+    SessionMessage(SessionMessageRequest),
+    /// A message to request that a list of running
+    /// sessions get detached from.
+    Detach(DetachRequest),
+}
+
+/// DetachRequest represents a request to detach
+/// from the given named sessions.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct DetachRequest {
+    /// The sessions to detach
+    pub sessions: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct DetachReply {
+    pub not_found_sessions: Vec<String>,
+    pub not_attached_sessions: Vec<String>,
 }
 
 /// SessionMessageRequest represents a request that
@@ -61,6 +78,9 @@ pub enum SessionMessageRequestPayload {
     /// Resize a named session's pty. Generated when
     /// a `shpool attach` process receives a SIGWINCH.
     Resize(ResizeRequest),
+    /// Detach the given session. Generated internally
+    /// by the server from a batch detach request.
+    Detach,
 }
 
 /// ResizeRequest resizes the pty for a given named session.
@@ -73,16 +93,27 @@ pub struct ResizeRequest {
     pub tty_size: tty::Size,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub enum SessionMessageReply {
     /// The session was not found in the session table
     NotFound,
+    /// There is not terminal attached to the session so
+    /// it can't handle messages right now.
+    NotAttached,
     /// The response to a resize message
     Resize(ResizeReply),
+    /// The response to a detach message
+    Detach(SessionMessageDetachReply),
+}
+
+/// A reply to a detach message
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub enum SessionMessageDetachReply {
+    Ok,
 }
 
 /// A reply to a resize message
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub enum ResizeReply {
     Ok,
 }
