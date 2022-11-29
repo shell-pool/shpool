@@ -62,14 +62,6 @@ environment.")]
     },
     #[clap(about = "lists all the running shell sessions")]
     List,
-    #[clap(about = r#"connects to a remote machine with a pool running on it.
-
-All args are passed directly to ssh with the addition of a shpool-attach
-command to be run on the remote machine. ssh may be invoked multiple times."#)]
-    Ssh {
-        #[clap(multiple = true, help = "arguments to pass to the ssh binary")]
-        args: Vec<String>,
-    },
     #[clap(about = "contains subcommands not meant to be directly invoked")]
     Plumbing{
         #[clap(subcommand)]
@@ -161,10 +153,6 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::List => {
             list::run(socket)
-        }
-        Commands::Ssh { args } => {
-            println!("TODO: ssh with args: {:?}", args);
-            Ok(())
         }
         Commands::Plumbing { command } => {
             match command {

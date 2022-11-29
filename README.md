@@ -146,16 +146,15 @@ connected to that session.
 
 Lists all the current shell sessions.
 
+#### `shpool detach`
+
+Detach from a one or more sessions without stopping them.
+Will detach the current session if run from inside a shpool
+session with no session name arguments.
+
 #### `shpool kill`
 
 Kills a named shell session.
-
-#### `shpool ssh`
-
-The `ssh` subcommand generates a random shell name, then invokes ssh to
-access a remote host before invoking `shpool attach` on the remote host.
-In the event that the ssh pipe breaks, `shpool ssh` redials the connection
-and immediately attempts to reattach to the shell.
 
 ## Hacking
 
