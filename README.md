@@ -10,10 +10,17 @@ that `shpool` does not break native scrollback.
 
 ## Project Status
 
-`shpool` has all the usability basics covered, but is likely
-to mangle your session if your connection drops while you are
-using a curses based app like vim or less. It is ready for people
-to kick the tires, but we probably should not be rolling it out.
+`shpool` has all the usability basics covered, but still has a few
+warts. I've been using it as a daily driver for a few weeks now.
+The two biggest things I'm having to work around are:
+- sometimes I need to manually run `shpool detach` to free up
+  named sessions after my connection drops and I ssh back onto
+  my cloudtop to reattach.
+- when I reconnect to a curses application like vim, usually
+  the SIGWINCH that shpool generates on reconnect is enough to
+  get it to redraw the screen, but sometimes I need to manually
+  resize my terminal window to trigger a second SIGWINCH. So far
+  this second SIGWINCH has always fixed things for me.
 
 ## Installation
 
