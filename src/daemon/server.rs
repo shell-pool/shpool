@@ -450,7 +450,8 @@ impl Server {
             // and whatnot.
             .env_clear()
             .env("HOME", user_info.home_dir)
-            .env("SHPOOL_SESSION_NAME", &header.name);
+            .env("SHPOOL_SESSION_NAME", &header.name)
+            .env("USER", user_info.user);
         if self.config.norc.unwrap_or(false) && shell == "/bin/bash" {
             cmd.arg("--norc").arg("--noprofile");
         }
