@@ -112,6 +112,24 @@ impl Proc {
         cmd.output().context("spawning detach proc")
     }
 
+    pub fn kill(&mut self, sessions: Vec<String>) -> anyhow::Result<process::Output> {
+        let tmp_dir = self.tmp_dir.as_ref().ok_or(anyhow!("missing tmp_dir"))?;
+        let log_file = tmp_dir.path().join(format!("kill_{}.log", self.subproc_counter));
+        eprintln!("spawning kill proc with log {:?}", &log_file);
+        self.subproc_counter += 1;
+
+        let mut cmd = Command::new(shpool_bin());
+        cmd.arg("-vv")
+            .arg("--log-file").arg(&log_file)
+            .arg("--socket").arg(&self.socket_path)
+            .arg("kill");
+        for session in sessions.iter() {
+            cmd.arg(session);
+        }
+
+        cmd.output().context("spawning kill proc")
+    }
+
     pub fn ssh_remote_cmd(&mut self) -> anyhow::Result<ssh::RemoteCmdProc> {
         let tmp_dir = self.tmp_dir.as_ref().ok_or(anyhow!("missing tmp_dir"))?;
         let log_file = tmp_dir.path().join(format!("remote_cmd_{}.log", self.subproc_counter));

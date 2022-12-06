@@ -54,10 +54,10 @@ fn no_daemon() -> anyhow::Result<()> {
         .arg("--socket").arg("/fake/does/not/exist/shpool.socket")
         .arg("detach")
         .output()
-        .context("spawning list proc")?;
+        .context("spawning detach proc")?;
 
     assert!(!out.status.success(),
-            "list proc exited successfully");
+            "detach proc exited successfully");
 
     let stdout = String::from_utf8_lossy(&out.stdout[..]);
     assert!(stdout.contains("could not connect to daemon"));
@@ -126,7 +126,7 @@ fn reattach() -> anyhow::Result<()> {
     let mut sess2 = daemon_proc.attach("sh1")
         .context("starting attach proc")?;
     let mut lm2 = sess2.line_matcher()?;
-    sess2.run_cmd("echo ${MYVAR-second}")?;
+    sess2.run_cmd("echo ${MYVAR:-second}")?;
     lm2.match_re("first$")?;
 
     Ok(())

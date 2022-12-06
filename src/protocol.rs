@@ -44,6 +44,22 @@ pub enum ConnectHeader {
     /// A message to request that a list of running
     /// sessions get detached from.
     Detach(DetachRequest),
+    /// A message to request that a list of running
+    /// sessions get killed.
+    Kill(KillRequest),
+}
+
+/// KillRequest represents a request to kill
+/// from the given named sessions.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct KillRequest {
+    /// The sessions to detach
+    pub sessions: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct KillReply {
+    pub not_found_sessions: Vec<String>,
 }
 
 /// DetachRequest represents a request to detach

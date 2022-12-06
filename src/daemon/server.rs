@@ -1,16 +1,18 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, Condvar};
-use std::os::unix::process::CommandExt;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::path::Path;
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::process::CommandExt;
+use std::path::Path;
+//use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, Condvar};
 use std::{env, time, thread, process, net};
 
-use crossbeam_channel::TryRecvError;
 use anyhow::{anyhow, Context};
+use crossbeam_channel::TryRecvError;
 use log::{error, info, warn};
+use nix::{sys::signal, unistd::Pid};
 
 use super::{config, ssh_plugin, shell, user};
 use super::super::{consts, protocol, tty, test_hooks};
@@ -89,6 +91,8 @@ impl Server {
                 self.handle_attach(stream, h),
             protocol::ConnectHeader::Detach(r) =>
                 self.handle_detach(stream, r),
+            protocol::ConnectHeader::Kill(r) =>
+                self.handle_kill(stream, r),
             protocol::ConnectHeader::RemoteCommandLock =>
                 self.handle_remote_command_lock(stream),
             protocol::ConnectHeader::LocalCommandSetMetadata(r) =>
@@ -216,16 +220,15 @@ impl Server {
     }
 
     fn handle_detach(&self, mut stream: UnixStream, request: protocol::DetachRequest) -> anyhow::Result<()> {
-
         let mut not_found_sessions = vec![];
         let mut not_attached_sessions = vec![];
         {
             let shells = self.shells.lock().unwrap();
-            for session in request.sessions.iter() {
-                if let Some(s) = shells.get(session) {
+            for session in request.sessions.into_iter() {
+                if let Some(s) = shells.get(&session) {
                     let reply = s.rpc_call(protocol::SessionMessageRequestPayload::Detach)?;
                     if reply == protocol::SessionMessageReply::NotAttached {
-                        not_attached_sessions.push(String::from(session));
+                        not_attached_sessions.push(session);
                     }
                 } else {
                     not_found_sessions.push(String::from(session));
@@ -237,6 +240,48 @@ impl Server {
             not_found_sessions,
             not_attached_sessions,
         }).context("writing detach reply")?;
+
+        Ok(())
+    }
+
+    fn handle_kill(&self, mut stream: UnixStream, request: protocol::KillRequest) -> anyhow::Result<()> {
+        let mut not_found_sessions = vec![];
+        {
+            let mut shells = self.shells.lock().unwrap();
+
+            let mut to_remove = Vec::with_capacity(request.sessions.len());
+            for session in request.sessions.into_iter() {
+                if let Some(s) = shells.get(&session) {
+                    let reply = s.rpc_call(protocol::SessionMessageRequestPayload::Detach)?;
+                    if reply == protocol::SessionMessageReply::NotAttached {
+                        info!("killing already detached session '{}'", session);
+                    } else {
+                        info!("killing attached session '{}'", session);
+                    }
+
+                    let inner = s.inner.lock().unwrap();
+                    let pid = inner.pty_master.child_pid().ok_or(anyhow!("no child pid"))?;
+                    signal::kill(Pid::from_raw(pid), Some(signal::Signal::SIGKILL))
+                        .context("sending SIGKILL to child proc")?;
+                    // we don't need to wait since the dedicated reaping thread is active
+                    // even when a tty is not attached
+                    to_remove.push(session);
+                } else {
+                    not_found_sessions.push(session);
+                }
+            }
+
+            for session in to_remove.iter() {
+                shells.remove(session);
+            }
+            if to_remove.len() > 0 {
+                test_hooks::emit_event("daemon-handle-kill-removed-shells");
+            }
+        }
+
+        write_reply(&mut stream, protocol::KillReply {
+            not_found_sessions,
+        }).context("writing kill reply")?;
 
         Ok(())
     }
@@ -509,6 +554,7 @@ impl Server {
         // and notify about the exit by closing a channel.
         let (child_exited_tx, child_exited_rx) = crossbeam_channel::bounded(0);
         let waitable_child = fork.clone();
+        let session_name = header.name.clone();
         thread::spawn(move || {
             // Take ownership of the sender so it gets dropped when
             // this thread exits, closing the channel.
@@ -521,12 +567,13 @@ impl Server {
                 }
             }
 
-            info!("reaped child shell: {:?}", waitable_child);
+            info!("s({}): reaped child shell: {:?}", session_name, waitable_child);
         });
 
         let (in_tx, in_rx) = crossbeam_channel::unbounded();
         let (out_tx, out_rx) = crossbeam_channel::unbounded();
         let session = shell::SessionInner {
+            name: header.name.clone(),
             rpc_in: in_rx,
             rpc_out: out_tx,
             child_exited: child_exited_rx,

@@ -9,6 +9,7 @@ mod attach;
 mod consts;
 mod daemon;
 mod detach;
+mod kill;
 mod list;
 mod protocol;
 mod ssh;
@@ -58,6 +59,17 @@ $SHPOOL_SESSION_NAME will be used if it is present in the
 environment.")]
     Detach {
         #[clap(multiple = true, help = "sessions to detach")]
+        sessions: Vec<String>,
+    },
+    #[clap(about = "kill the given sessions
+
+This detaches the session if it is attached and kills the underlying
+shell with a SIGKILL. To more gracefully remove a shell, attach to
+it and run 'exit' yourself. If no session name is provided
+$SHPOOL_SESSION_NAME will be used if it is present in the
+environment.")]
+    Kill {
+        #[clap(multiple = true, help = "sessions to kill")]
         sessions: Vec<String>,
     },
     #[clap(about = "lists all the running shell sessions")]
@@ -150,6 +162,9 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Detach { sessions } => {
             detach::run(sessions, socket)
+        }
+        Commands::Kill { sessions } => {
+            kill::run(sessions, socket)
         }
         Commands::List => {
             list::run(socket)
