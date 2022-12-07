@@ -1,3 +1,6 @@
+// tooling gets confused by the conditional compilation
+#![allow(dead_code)]
+
 // The test_hooks module provides a mechanism for exposing events to
 // the test harness so that it does not have to rely on buggy and slow
 // sleeps in order to test various scenarios. The basic idea is that
@@ -10,6 +13,41 @@ use std::time;
 
 use anyhow::{anyhow, Context};
 use log::{info, error};
+
+#[cfg(feature = "test_hooks")]
+#[macro_export]
+macro_rules! emit {
+    ($e:expr) => {
+        info!("test version of emit");
+        $crate::test_hooks::emit_event_impl($e);
+    }
+}
+
+#[cfg(not(feature = "test_hooks"))]
+#[macro_export]
+macro_rules! emit {
+    ($e:expr) => {
+        info!("non-test version of emit");
+    } // no-op
+}
+
+pub(crate) use emit;
+
+#[cfg(feature = "test_hooks")]
+#[macro_export]
+macro_rules! scoped {
+    ($name:ident, $e:expr) => {
+        let $name = $crate::test_hooks::ScopedEvent::new($e);
+    }
+}
+
+#[cfg(not(feature = "test_hooks"))]
+#[macro_export]
+macro_rules! scoped {
+    ($name:ident, $e:expr) => {} // no-op
+}
+
+pub(crate) use scoped;
 
 /// ScopedEvent emits an event when it goes out of scope
 pub struct ScopedEvent<'a> {
@@ -24,11 +62,11 @@ impl<'a> ScopedEvent<'a> {
 }
 impl<'a> std::ops::Drop for ScopedEvent<'a> {
     fn drop(&mut self) {
-        emit_event(self.event);
+        emit_event_impl(self.event);
     }
 }
 
-pub fn emit_event(event: &str) {
+pub fn emit_event_impl(event: &str) {
     let sock_path = TEST_HOOK_SERVER.sock_path.lock().unwrap();
     if sock_path.is_some() {
         TEST_HOOK_SERVER.emit_event(event);

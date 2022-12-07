@@ -29,7 +29,7 @@ impl Proc {
         let log_file = tmp_dir.path().join("daemon.log");
         eprintln!("spawning daemon proc with log {:?}", &log_file);
 
-        let proc = Command::new(shpool_bin())
+        let proc = Command::new(shpool_bin()?)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .arg("-vv")
@@ -72,7 +72,7 @@ impl Proc {
         eprintln!("spawning attach proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
-        let proc = Command::new(shpool_bin())
+        let proc = Command::new(shpool_bin()?)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::piped())
@@ -100,7 +100,7 @@ impl Proc {
         eprintln!("spawning detach proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
-        let mut cmd = Command::new(shpool_bin());
+        let mut cmd = Command::new(shpool_bin()?);
         cmd.arg("-vv")
             .arg("--log-file").arg(&log_file)
             .arg("--socket").arg(&self.socket_path)
@@ -118,7 +118,7 @@ impl Proc {
         eprintln!("spawning kill proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
-        let mut cmd = Command::new(shpool_bin());
+        let mut cmd = Command::new(shpool_bin()?);
         cmd.arg("-vv")
             .arg("--log-file").arg(&log_file)
             .arg("--socket").arg(&self.socket_path)
@@ -138,7 +138,7 @@ impl Proc {
         eprintln!("spawning remote cmd proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
-        let proc = Command::new(shpool_bin())
+        let proc = Command::new(shpool_bin()?)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::piped())
@@ -170,7 +170,7 @@ impl Proc {
         eprintln!("spawning set metadata proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
-        let proc = Command::new(shpool_bin())
+        let proc = Command::new(shpool_bin()?)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::piped())
@@ -200,7 +200,7 @@ impl Proc {
         eprintln!("spawning list proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
-        Command::new(shpool_bin())
+        Command::new(shpool_bin()?)
             .arg("-vv")
             .arg("--log-file").arg(&log_file)
             .arg("--socket").arg(&self.socket_path)

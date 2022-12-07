@@ -49,7 +49,7 @@ impl Server {
     pub fn serve(server: Arc<Self>, listener: UnixListener) -> anyhow::Result<()>
     {
         info!("listening on socket");
-        test_hooks::emit_event("daemon-about-to-listen");
+        test_hooks::emit!("daemon-about-to-listen");
         for stream in listener.incoming() {
             info!("socket got a new connection");
             match stream {
@@ -275,7 +275,7 @@ impl Server {
                 shells.remove(session);
             }
             if to_remove.len() > 0 {
-                test_hooks::emit_event("daemon-handle-kill-removed-shells");
+                test_hooks::emit!("daemon-handle-kill-removed-shells");
             }
         }
 

@@ -9,7 +9,7 @@ use super::{protocol, test_hooks, tty};
 
 pub fn run(name: String, socket: PathBuf) -> anyhow::Result<()> {
     info!("\n\n======================== STARTING ATTACH ============================\n\n");
-    test_hooks::emit_event("attach-startup");
+    test_hooks::emit!("attach-startup");
     SignalHandler::new(name.clone(), socket.clone()).spawn()?;
 
     let mut client = protocol::Client::new(&socket)?;

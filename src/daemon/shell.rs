@@ -74,8 +74,8 @@ impl SessionInner {
     /// the client connection. It returns true if the subprocess
     /// has exited, and false if it is still running.
     pub fn bidi_stream(&mut self) -> anyhow::Result<bool> {
-        test_hooks::emit_event("daemon-bidi-stream-enter");
-        let _bidi_stream_test_guard = test_hooks::ScopedEvent::new("daemon-bidi-stream-done");
+        test_hooks::emit!("daemon-bidi-stream-enter");
+        test_hooks::scoped!(_bidi_stream_test_guard, "daemon-bidi-stream-done");
 
         // we take the client stream so that it gets closed when this routine
         // returns
@@ -249,7 +249,7 @@ impl SessionInner {
                 }
 
                 master_writer.flush().context("flushing input from client to shell")?;
-                test_hooks::emit_event("daemon-wrote-client-chunk");
+                test_hooks::emit!("daemon-wrote-client-chunk");
 
                 debug!("client->shell: flushed chunk of len {}", len);
             }

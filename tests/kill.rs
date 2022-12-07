@@ -6,7 +6,7 @@ mod support;
 
 #[test]
 fn no_daemon() -> anyhow::Result<()> {
-    let out = Command::new(support::shpool_bin())
+    let out = Command::new(support::shpool_bin()?)
         .arg("--socket").arg("/fake/does/not/exist/shpool.socket")
         .arg("kill")
         .output()
@@ -236,7 +236,7 @@ fn running_env_var() -> anyhow::Result<()> {
         .context("starting attach proc")?;
     waiter.wait_event("daemon-bidi-stream-enter")?;
 
-    let out = Command::new(support::shpool_bin())
+    let out = Command::new(support::shpool_bin()?)
         .arg("--socket").arg(&daemon_proc.socket_path)
         .arg("kill")
         .env("SHPOOL_SESSION_NAME", "sh1")

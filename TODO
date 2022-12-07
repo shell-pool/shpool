@@ -1,12 +1,8 @@
 
-- try to figure out how to disable test hooks at compile time
-  for non-test builds (and get the binaries used by the tests
-  to actually be built with the test flag) (or maybe just
-  send the SIGWINCH sourselves instead of relying on the pty
-  doing it for us when we resize it).
 - Try fixing the fact that SIGWINCH doesn't always seem to work
   on reconnect to a vim session by making the pty one column bigger
-  and then the right size to try to force a redraw.
+  and then the right size to try to force a redraw. (it's been
+  a while since I observed this, does it still even happen?).
 - come up with some sort of keybinding to exit the shpool shell.
   make it configurable via the daemon's toml file. (Or maybe just
   make users use commands to do this? That won't work for long running
@@ -27,3 +23,4 @@ alternative approach instead of spooling the output.
 
 Potential Alpha Testers:
 Alex King
+Salman

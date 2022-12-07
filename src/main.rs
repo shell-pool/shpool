@@ -3,7 +3,7 @@ use std::env;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use log::{info, error};
+use log::error;
 
 mod attach;
 mod consts;
@@ -13,8 +13,10 @@ mod kill;
 mod list;
 mod protocol;
 mod ssh;
-mod test_hooks;
 mod tty;
+
+#[macro_use]
+mod test_hooks;
 
 #[derive(Parser, Debug)]
 #[clap(version, author, about)]
@@ -130,13 +132,14 @@ fn main() -> anyhow::Result<()> {
     };
     log_dispatcher.apply().context("creating logger")?;
 
+    #[cfg(feature = "test_hooks")]
     if let Ok(test_hook_sock) = std::env::var("SHPOOL_TEST_HOOK_SOCKET_PATH") {
-        info!("spawning test hook sock at {}", test_hook_sock);
+        log::info!("spawning test hook sock at {}", test_hook_sock);
         test_hooks::TEST_HOOK_SERVER.set_socket_path(test_hook_sock.clone());
         std::thread::spawn(|| {
             test_hooks::TEST_HOOK_SERVER.start();
         });
-        info!("waiting for test hook connection");
+        log::info!("waiting for test hook connection");
         test_hooks::TEST_HOOK_SERVER.wait_for_connect()?;
     }
 

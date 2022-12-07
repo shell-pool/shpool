@@ -8,6 +8,9 @@ shpool is a mechanism for establishing lightweight persistant shell
 sessions to gracefully handle network disconnects
 '''
 
+[features]
+test_hooks = [] # for internal testing only, don't enable this feature
+
 [dependencies]
 clap = { version = "3", features = ["derive"] } # cli parsing
 anyhow = "1" # dynamic, unstructured errors
@@ -32,3 +35,4 @@ systemd = "0.10" # socket activation
 [dev-dependencies]
 tempfile = "3" # keeping tests hermetic
 regex = "1" # test assertions
+serde_json = "1" # json parsing

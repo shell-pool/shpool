@@ -17,7 +17,7 @@ fn start() -> anyhow::Result<()> {
     let tmp_dir = tempfile::Builder::new().prefix("shpool-test").rand_bytes(20)
         .tempdir().context("creating tmp dir")?;
 
-    let mut child = Command::new(support::shpool_bin())
+    let mut child = Command::new(support::shpool_bin()?)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .arg("--socket").arg(tmp_dir.path().join("shpool.socket"))
@@ -59,7 +59,7 @@ fn systemd_activation() -> anyhow::Result<()> {
         .context("creating pipe to collect stderr")?;
     // Saftey: this is a test
     let child_stderr_pipe = unsafe { Stdio::from_raw_fd(child_stderr) };
-    let mut cmd = Command::new(support::shpool_bin());
+    let mut cmd = Command::new(support::shpool_bin()?);
     cmd.stdout(Stdio::piped())
         .stderr(child_stderr_pipe)
         .env("LISTEN_FDS", "1")// format!("{}", activation_sock.as_raw_fd()))
@@ -141,7 +141,7 @@ fn config() -> anyhow::Result<()> {
     let tmp_dir = tempfile::Builder::new().prefix("shpool-test").rand_bytes(20)
         .tempdir().context("creating tmp dir")?;
 
-    let mut child = Command::new(support::shpool_bin())
+    let mut child = Command::new(support::shpool_bin()?)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .arg("--socket").arg(tmp_dir.path().join("shpool.socket"))

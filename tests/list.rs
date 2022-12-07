@@ -24,7 +24,7 @@ fn empty() -> anyhow::Result<()> {
 
 #[test]
 fn no_daemon() -> anyhow::Result<()> {
-    let out = Command::new(support::shpool_bin())
+    let out = Command::new(support::shpool_bin()?)
         .arg("--socket").arg("/fake/does/not/exist/shpool.socket")
         .arg("list")
         .output()
