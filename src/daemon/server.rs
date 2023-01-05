@@ -130,6 +130,18 @@ impl Server {
                         Err(TryRecvError::Empty) => {
                             // the channel is still open so the subshell is still running
                             info!("handle_attach: taking over existing session inner={:?}", inner);
+
+                            // Some ncurses apps get lazy about redrawing if the tty
+                            // size has not changed when they get a SIGWINCH, so we
+                            // first set a slightly larger size before setting the
+                            // real size in order to force a redraw.
+                            let tty_oversize = tty::Size {
+                                rows: header.local_tty_size.rows + 1,
+                                cols: header.local_tty_size.cols + 1,
+                            };
+                            inner.set_pty_size(&tty_oversize)
+                                .context("setting oversized pty size on reattach")?;
+
                             inner.set_pty_size(&header.local_tty_size)
                                 .context("resetting pty size on reattach")?;
                             inner.client_stream = Some(stream.try_clone()?);
