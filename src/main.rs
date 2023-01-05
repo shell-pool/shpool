@@ -98,6 +98,7 @@ This command is internal to shpool and you should never have to reference it dir
 "#)]
     SshLocalCommandSetMetadata {
         session_name: String,
+        term: String,
     },
 }
 
@@ -178,9 +179,9 @@ fn main() -> anyhow::Result<()> {
                     ssh::remote_cmd::run(socket)
                 }
                 PlumbingCommands::SshLocalCommandSetMetadata {
-                    session_name
+                    session_name, term
                 } => {
-                    ssh::set_metadata::run(session_name, socket)
+                    ssh::set_metadata::run(session_name, term, socket)
                 }
             }
         }

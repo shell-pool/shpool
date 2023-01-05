@@ -1,39 +1,36 @@
 use std::path::PathBuf;
-use std::env;
+use std::io;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use super::super::protocol;
 
-use log::{debug, info};
+use log::info;
 
-pub fn run(session_name: String, socket: PathBuf) -> anyhow::Result<()> {
+pub fn run(session_name: String, term: String, socket: PathBuf) -> anyhow::Result<()> {
     info!("\n\n================ STARTING SSH-LOCAL-COMMAND-SET-METADATA =====================\n\n");
 
-    let mut client = protocol::Client::new(socket)?;
+    let mut client = match protocol::Client::new(socket) {
+        Ok(c) => c,
+        Err(err) => {
+            let io_err = err.downcast::<io::Error>()?;
+            if io_err.kind() == io::ErrorKind::NotFound {
+                println!("could not connect to daemon");
+            }
+            return Err(io_err).context("connecting to daemon");
+        }
+    };
 
     client.write_connect_header(protocol::ConnectHeader::LocalCommandSetMetadata(
         protocol::SetMetadataRequest{
             name: session_name.clone(),
-            term: env::var("TERM").context("resolving local $TERM")?,
+            term,
         },
     )).context("writing LocalCommandSetMetadata header")?;
 
     info!("wrote connection header");
 
-    let reply: protocol::LocalCommandSetMetadataReply = client.read_reply()
-        .context("reading LocalCommandSetMetadata reply")?;
-
-    debug!("read reply: {:?}", reply);
-
-    match reply.status {
-        protocol::LocalCommandSetMetadataStatus::Timeout => {
-            println!("timeout");
-            return Err(anyhow!("timeout"));
-        }
-        protocol::LocalCommandSetMetadataStatus::Ok => {
-            info!("set name '{}' for the parked remote command thread", session_name);
-        }
-    }
+    // We don't wait for a reply because ssh will block until the
+    // LocalCommand completes before invoking the remote command
 
     Ok(())
 }

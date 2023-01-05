@@ -18,7 +18,6 @@ use log::{info, error};
 #[macro_export]
 macro_rules! emit {
     ($e:expr) => {
-        info!("test version of emit");
         $crate::test_hooks::emit_event_impl($e);
     }
 }
@@ -27,7 +26,6 @@ macro_rules! emit {
 #[macro_export]
 macro_rules! emit {
     ($e:expr) => {
-        info!("non-test version of emit");
     } // no-op
 }
 

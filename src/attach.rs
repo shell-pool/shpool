@@ -1,6 +1,5 @@
-use std::env;
+use std::{env, io, thread};
 use std::path::PathBuf;
-use std::thread;
 
 use anyhow::{Context, anyhow};
 use log::{info, warn, error};
@@ -12,7 +11,16 @@ pub fn run(name: String, socket: PathBuf) -> anyhow::Result<()> {
     test_hooks::emit!("attach-startup");
     SignalHandler::new(name.clone(), socket.clone()).spawn()?;
 
-    let mut client = protocol::Client::new(&socket)?;
+    let mut client = match protocol::Client::new(&socket) {
+        Ok(c) => c,
+        Err(err) => {
+            let io_err = err.downcast::<io::Error>()?;
+            if io_err.kind() == io::ErrorKind::NotFound {
+                println!("could not connect to daemon");
+            }
+            return Err(io_err).context("connecting to daemon");
+        }
+    };
 
     let tty_size = match tty::Size::from_fd(0) {
         Ok(s) => s,

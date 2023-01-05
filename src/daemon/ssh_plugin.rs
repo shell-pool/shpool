@@ -27,10 +27,50 @@ pub struct ParkerInner {
     /// to attach. Set by the LocalCommandSetName thread
     /// when it wakes up the parked RemoteCommand thread.
     pub metadata: Option<Metadata>,
-    /// True when there is a RemoteCommand thread parked.
-    pub has_parked_remote: bool,
-    /// True when there is a LocalCommand thread parked.
-    pub has_parked_local: bool,
+    remote_parked_at: time::Instant,
+    local_parked_at: time::Instant,
+    park_timeout: time::Duration,
+}
+
+impl ParkerInner {
+    pub fn new(metadata: Option<Metadata>, park_timeout: time::Duration) -> Self {
+        let expired_park_time = time::Instant::now().checked_sub(park_timeout).unwrap();
+
+        ParkerInner {
+            metadata,
+            remote_parked_at: expired_park_time,
+            local_parked_at: expired_park_time,
+            park_timeout,
+        }
+    }
+
+    pub fn set_has_parked_remote(&mut self, has: bool) {
+        if has {
+            self.remote_parked_at = time::Instant::now()
+        } else {
+            let expired_park_time = time::Instant::now()
+                .checked_sub(self.park_timeout).unwrap();
+            self.remote_parked_at = expired_park_time;
+        }
+    }
+
+    pub fn has_parked_remote(&self) -> bool {
+        self.remote_parked_at.elapsed() < self.park_timeout
+    }
+
+    pub fn set_has_parked_local(&mut self, has: bool) {
+        if has {
+            self.local_parked_at = time::Instant::now()
+        } else {
+            let expired_park_time = time::Instant::now()
+                .checked_sub(self.park_timeout).unwrap();
+            self.local_parked_at = expired_park_time;
+        }
+    }
+
+    pub fn has_parked_local(&self) -> bool {
+        self.local_parked_at.elapsed() < self.park_timeout
+    }
 }
 
 #[derive(Debug)]

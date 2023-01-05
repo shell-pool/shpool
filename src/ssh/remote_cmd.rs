@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::io;
 
 use anyhow::{Context, anyhow};
 use log::{debug, info};
@@ -8,7 +9,16 @@ use super::super::protocol;
 pub fn run(socket: PathBuf) -> anyhow::Result<()> {
     info!("\n\n=================== STARTING SSH-REMOTE-COMMAND =======================\n\n");
 
-    let mut client = protocol::Client::new(socket)?;
+    let mut client = match protocol::Client::new(socket) {
+        Ok(c) => c,
+        Err(err) => {
+            let io_err = err.downcast::<io::Error>()?;
+            if io_err.kind() == io::ErrorKind::NotFound {
+                println!("could not connect to daemon");
+            }
+            return Err(io_err).context("connecting to daemon");
+        }
+    };
 
     client.write_connect_header(protocol::ConnectHeader::RemoteCommandLock)
         .context("writing RemoteCommandLock header")?;

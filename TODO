@@ -1,8 +1,4 @@
 
-- Try fixing the fact that SIGWINCH doesn't always seem to work
-  on reconnect to a vim session by making the pty one column bigger
-  and then the right size to try to force a redraw. (it's been
-  a while since I observed this, does it still even happen?).
 - come up with some sort of keybinding to exit the shpool shell.
   make it configurable via the daemon's toml file. (Or maybe just
   make users use commands to do this? That won't work for long running
@@ -12,6 +8,12 @@
   it only requires a single gnubby touch.
 - Reset TERM if someone reattaches from a new terminal type.
 - Reload config if we get a SIGHUP
+- Implement spooling logic to handle subprocesses which generate
+  a bunch of output after we have detached.
+- Fix echo bug in ssh plugin mode. For some reason the tty echo seems
+  to work differently for ssh plugin mode, so we see commands twice if
+  we enable echo for the pty as normal. Disabling pty echo
+  explicitly helps a bit, but we still get double newlines for some reason.
 
 
 There is a cool pair of signals that might be useful for dealing with IO
@@ -24,3 +26,4 @@ alternative approach instead of spooling the output.
 Potential Alpha Testers:
 Alex King
 Salman
+David
