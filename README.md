@@ -54,12 +54,12 @@ install this hook.
 ### Install a rust toolchain
 
 If you have not already done so, install a rust toolchain.
-If you intend to develop with rust, [`rustup`](https://rustup.rs/)
-is a nice tool maintained by the rust project that allows
-you to easily use different toolchain versions. If you
-just want to build `shpool` quickly, you can run
-`sudo apt install cargo` to install the rust package manager
-and `rustc`.
+The minimum rust version for shpool is `1.63.0`, so make sure that
+`cargo --version` reports that version or higher before attempting
+to build shpool. The easiest way to install an up to date
+rust toolchain is with [`rustup`](https://rustup.rs/),
+a nice tool maintained by the rust project that allows
+you to easily use different toolchain versions.
 
 Make sure that `~/.cargo/bin` is on you `PATH` so you can use
 binaries installed with cargo. An entry like
@@ -84,7 +84,7 @@ To build and install `shpool` run
 $ cargo install --path .
 ```
 
-### (Optional) install the systemd user service unit file
+### Install the systemd user service unit file
 
 A convenient way to run the shpool daemon is to use systemd
 to start and run it as a user-level systemd service. You
@@ -102,14 +102,14 @@ $ systemctl --user enable shpool
 $ systemctl --user start shpool
 ```
 
-### `ssh` Plugin Mode
+### (Optional) `ssh` Plugin Mode
 
 `shpool` can be used as an ssh extension to add session persistence to native
 ssh invocations. When used in this mode, shpool will generate a name based
 on the tty number of the terminal you are using and various metadata like your
 username and client hostname. In order to set up the shpool extension for a given
-remote host, edit your `~/.ssh/config` file to contain a block like the
-following:
+remote host, edit your `~/.ssh/config` file *on the client machine* to contain
+a block like the following:
 
 ```
 Host = your-ssh-target-name
