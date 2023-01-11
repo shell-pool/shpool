@@ -87,6 +87,7 @@ can use the `systemd/shpool.{service,socket}` files
 to do this. Install it by running
 
 ```
+$ mkdir -p ~/.config/systemd/user
 $ cp systemd/* ~/.config/systemd/user
 ```
 
