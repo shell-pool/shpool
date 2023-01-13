@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 """
 Helper script to install shpool and its dependencies.
 """

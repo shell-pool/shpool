@@ -19,84 +19,22 @@ The biggest thing I'm having to work around is:
 
 ## Installation
 
-`shpool` is still experimental, so installation is somewhat manual.
-
-### Clone the repo
-
-If you have not worked with git-on-borg before, install
-a required helper tool with
+The easiest way to install shpool is to use the installer script
 
 ```
-$ sudo apt-get install git-remote-google
+$ /google/data/ro/users/pa/pailes/shpool/install.py --shpool-checkout-dir=/tmp/shpool-install
 ```
 
-now you can clone the actual repo with
+If you want more details on the installation steps, they can be found
+in HACKING.md
 
-```
-$ git clone rpc://team/cloudtop-connectivity-eng-team/shpool
-```
+## Usage
 
-If you plan to work on `shpool`, install the gerrit Change-Id
-hook with
-
-```
-$ (cd shpool && f=`git rev-parse --git-dir`/hooks/commit-msg ; mkdir -p $(dirname $f) ; curl -Lo $f https://gerrit-review.googlesource.com/tools/hooks/commit-msg ; chmod +x $f)
-```
-
-if you just want to install and use `shpool` there is no need to
-install this hook.
-
-### Install a rust toolchain
-
-If you have not already done so, install a rust toolchain.
-The minimum rust version for shpool is `1.63.0`, so make sure that
-`cargo --version` reports that version or higher before attempting
-to build shpool. The easiest way to install an up to date
-rust toolchain is with [`rustup`](https://rustup.rs/),
-a nice tool maintained by the rust project that allows
-you to easily use different toolchain versions.
-
-Make sure that `~/.cargo/bin` is on you `PATH` so you can use
-binaries installed with cargo. An entry like
-
-```
-$ source "$HOME/.cargo/env"
-```
-
-in your `.profile` file should do the trick.
-
-### Install systemd dependencies
-
-```
-$ sudo apt install libsystemd-dev
-```
-
-### Build `shpool`
-
-To build and install `shpool` run
-
-```
-$ cargo install --path .
-```
-
-### Install the systemd user service unit file
-
-A convenient way to run the shpool daemon is to use systemd
-to start and run it as a user-level systemd service. You
-can use the `systemd/shpool.{service,socket}` files
-to do this. Install it by running
-
-```
-$ mkdir -p ~/.config/systemd/user
-$ cp systemd/* ~/.config/systemd/user
-```
-
-enable and start it up with
-
-```
-$ systemctl --user enable shpool
-$ systemctl --user start shpool
-```
+In order to use `shpool` you must start the shpool daemon, either
+by using the `systemd` user level unit file as described above,
+or by manually running `shpool daemon`. Once the daemon is running,
+you can connect to it either by running `shpool attach <session name>`
+or by using the ssh plugin mode described above.
 
 ### (Optional) `ssh` Plugin Mode
 
@@ -119,14 +57,6 @@ Host = your-ssh-target-name
 Note that due to limitations in the hooks that ssh exposes to us,
 you will need to gnubby touch twice in order to use `shpool` in
 this mode.
-
-## Usage
-
-In order to use `shpool` you must start the shpool daemon, either
-by using the `systemd` user level unit file as described above,
-or by manually running `shpool daemon`. Once the daemon is running,
-you can connect to it either by running `shpool attach <session name>`
-or by using the ssh plugin mode described above.
 
 ### Subcommands
 
