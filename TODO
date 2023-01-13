@@ -10,6 +10,11 @@
   to work differently for ssh plugin mode, so we see commands twice if
   we enable echo for the pty as normal. Disabling pty echo
   explicitly helps a bit, but we still get double newlines for some reason.
+- allow people to gcert inside a shpool session by plumbing SSH_AUTH_SOCK
+  in from the client environment (possibly by adding some config options to
+  the toml file so users can control which env vars get forwarded or
+  possibly by copying what tmux does with its update-environment subcommand).
+  See go/sk-screen-tmux for more details.
 
 
 There is a cool pair of signals that might be useful for dealing with IO
