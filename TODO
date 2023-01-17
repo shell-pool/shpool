@@ -15,6 +15,10 @@
   the toml file so users can control which env vars get forwarded or
   possibly by copying what tmux does with its update-environment subcommand).
   See go/sk-screen-tmux for more details.
+- Add a keybinding for detaching. Make it simpler than tmux or screen since
+  this will be the only keybinding. Make it configurable in the toml file
+  with at least enough flexibility to allow tmux users to use their normal
+  "C-a d" keybinding.
 
 
 There is a cool pair of signals that might be useful for dealing with IO
@@ -22,9 +26,3 @@ from the shell after a network drop. SIGTIN/SIGTOUT suspend a background
 process if they try to read or write to the termianl. It causes them
 to pause and wait for a SIGCONT just like ^Z does. This might present an
 alternative approach instead of spooling the output.
-
-
-Potential Alpha Testers:
-Alex King
-Salman
-David
