@@ -1,3 +1,4 @@
+use std::env;
 use std::process::Command;
 
 use anyhow::Context;
@@ -26,10 +27,13 @@ fn empty() -> anyhow::Result<()> {
     let mut daemon_proc = support::daemon::Proc::new("norc.toml")
         .context("starting daemon proc")?;
 
+    env::remove_var("SHPOOL_SESSION_NAME");
+
     let out = daemon_proc.kill(vec![])?;
     assert!(!out.status.success());
 
     let stdout = String::from_utf8_lossy(&out.stdout[..]);
+    eprintln!("stdout: {}", stdout);
     assert!(stdout.contains("no session to kill"));
 
     Ok(())
