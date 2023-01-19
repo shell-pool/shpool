@@ -10,15 +10,12 @@
   to work differently for ssh plugin mode, so we see commands twice if
   we enable echo for the pty as normal. Disabling pty echo
   explicitly helps a bit, but we still get double newlines for some reason.
-- allow people to gcert inside a shpool session by plumbing SSH_AUTH_SOCK
-  in from the client environment (possibly by adding some config options to
-  the toml file so users can control which env vars get forwarded or
-  possibly by copying what tmux does with its update-environment subcommand).
-  See go/sk-screen-tmux for more details.
 - Add a keybinding for detaching. Make it simpler than tmux or screen since
   this will be the only keybinding. Make it configurable in the toml file
   with at least enough flexibility to allow tmux users to use their normal
   "C-a d" keybinding.
+- SIGWINCH appears to redraw the shell prompt some of the time, but not
+  always on reconnect https://screencast.googleplex.com/cast/NjM5ODM3MzQ1MzEwMzEwNHwzZTRiNjJmYy1iNg shows the problem.
 
 
 There is a cool pair of signals that might be useful for dealing with IO

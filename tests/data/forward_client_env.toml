@@ -1,0 +1,9 @@
+norc = true
+noecho = true
+shell = "/bin/bash"
+
+client_env = ["MY_FORWARD_VAR"]
+
+[env]
+PS1 = "prompt> "
+TERM = ""

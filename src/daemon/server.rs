@@ -1,5 +1,5 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -378,6 +378,7 @@ impl Server {
             name: metadata.name,
             term: metadata.term,
             local_tty_size: tty_size,
+            local_env: vec![], // TODO(ethan): support env-var forwarding for ssh plugin mode
         }, true)
     }
 
@@ -495,6 +496,19 @@ impl Server {
         };
         info!("spawn_subshell: user_info={:?}", user_info);
 
+        let client_env = if let Some(env) = &self.config.client_env {
+            env.clone()
+        } else {
+            vec![String::from("DISPLAY"), String::from("KRB5CCNAME"),
+                String::from("SSH_ASKPASS"), String::from("SSH_AUTH_SOCK"),
+                String::from("SSH_AGENT_PID"), String::from("SSH_CONNECTION"),
+                String::from("WINDOWID"), String::from("XAUTHORITY")]
+        };
+        let mut client_env_set = HashSet::with_capacity(client_env.len());
+        for var in client_env.into_iter() {
+            client_env_set.insert(var);
+        }
+
         // Build up the command we will exec while allocation is still chill.
         // We will exec this command after a fork, so we want to just inherit
         // stdout/stderr/stdin. The pty crate automatically `dup2`s the file
@@ -519,6 +533,12 @@ impl Server {
 
         if let Ok(xdg_runtime_dir) = env::var("XDG_RUNTIME_DIR") {
             cmd.env("XDG_RUNTIME_DIR", xdg_runtime_dir);
+        }
+
+        for (var, value) in header.local_env.iter() {
+            if client_env_set.contains(var) {
+                cmd.env(var, value);
+            }
         }
 
         let mut term = header.term.to_string();

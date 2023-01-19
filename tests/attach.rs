@@ -1,4 +1,4 @@
-use std::{time, io::Read};
+use std::{time, env, io::Read};
 
 use anyhow::Context;
 
@@ -28,6 +28,23 @@ fn happy_path() -> anyhow::Result<()> {
     // make sure that shpool sets a $USER variable
     attach_proc.run_cmd(r#"echo "user=$USER" "#)?;
     line_matcher.match_re("user=[a-zA-Z0-9]+$")?;
+
+    Ok(())
+}
+
+#[test]
+fn forward_client_var() -> anyhow::Result<()> {
+    env::set_var("MY_FORWARD_VAR", "forward-var-value");
+
+    let mut daemon_proc = support::daemon::Proc::new("forward_client_env.toml")
+        .context("starting daemon proc")?;
+    let mut attach_proc = daemon_proc.attach("sh1")
+        .context("starting attach proc")?;
+
+    let mut line_matcher = attach_proc.line_matcher()?;
+
+    attach_proc.run_cmd("echo $MY_FORWARD_VAR")?;
+    line_matcher.match_re("forward-var-value$")?;
 
     Ok(())
 }

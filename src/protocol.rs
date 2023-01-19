@@ -149,6 +149,11 @@ pub struct AttachHeader {
     /// pty can be kept in sync (important so curses applications look
     /// right).
     pub local_tty_size: tty::Size,
+    /// The full environment of the shell that `shpool attach` is run
+    /// in. The daemon will filter out vars it isn't interested in, so
+    /// this is a bit inefficient, but it allows us to avoid having to try
+    /// to read the config file from the client.
+    pub local_env: Vec<(String, String)>,
 }
 
 /// SetMetadataRequest releases the lock created by a

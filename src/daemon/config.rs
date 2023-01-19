@@ -11,6 +11,13 @@ pub struct Config {
     /// a table of environment variables to inject into the
     /// initial shell
     pub env: Option<HashMap<String, String>>,
+    /// a list of environment variables to take from the shell
+    /// where `shpool attach` is run. Vars in this list but not
+    /// in the clients environment are left untouched.
+    /// Overrides `env` vars if they collide. By default
+    /// vec!["DISPLAY", "KRB5CCNAME", "SSH_ASKPASS", "SSH_AUTH_SOCK",
+    ///      "SSH_AGENT_PID", "SSH_CONNECTION", "WINDOWID", "XAUTHORITY"]
+    pub client_env: Option<Vec<String>>,
     /// Disable the tty echo flag for spawned subshells.
     /// You likely don't want to set this, but if you
     /// plan on interacting programatically with the

@@ -34,6 +34,7 @@ pub fn run(name: String, socket: PathBuf) -> anyhow::Result<()> {
         name: name.clone(),
         term: env::var("TERM").context("resolving local $TERM")?,
         local_tty_size: tty_size,
+        local_env: env::vars().collect::<Vec<(String, String)>>(),
     })).context("writing attach header")?;
 
     let attach_resp: protocol::AttachReplyHeader = client.read_reply()
