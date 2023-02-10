@@ -17,7 +17,7 @@ The biggest thing I'm having to work around is:
   named sessions after my connection drops and I ssh back onto
   my cloudtop to reattach.
 
-## Installation
+## Installation & Setup
 
 The easiest way to install shpool is to use the installer script
 
@@ -28,13 +28,40 @@ $ /google/data/ro/users/pa/pailes/shpool/install.py --shpool-checkout-dir=/tmp/s
 If you want more details on the installation steps, they can be found
 in HACKING.md
 
+Once shpool is installed, make sure the user-level systemd unit is
+running. You can check its status with
+
+```
+systemctl --user status shpool
+```
+
+Enable and start it with
+
+```
+systemctl --user enable shpool
+systemctl --user start shpool
+```
+
 ## Usage
 
-In order to use `shpool` you must start the shpool daemon, either
-by using the `systemd` user level unit file as described above,
-or by manually running `shpool daemon`. Once the daemon is running,
-you can connect to it either by running `shpool attach <session name>`
-or by using the ssh plugin mode described above.
+Generally `shpool` is used to provide persistent sessions when
+sshing in to a remote host. To do so, `shpool` must be installed
+on the remote host. No extra software is required on the client.
+After installing and setting up, the typical usage pattern
+is to ssh into the host you have installed shpool on, then create
+a new named session by running `shpool attach main`. Here `main`
+is the name of the session. You'll want a separate named session
+for each terminal you use to connect to your remote host. If your
+connection drops or becomes stuck, you can ssh back into the remote
+host and re-attach to the same named session by running `shpool attach main`
+again.
+
+If your terminal gets stuck and you forcibly close the window, you
+might find that shpool still think a terminal is connected to
+your session when you attempt to reattach. This is likely because
+an ssh proxy is holding the connection open in the vain hope that
+it will get some traffic again. You can just run `shpool detach main`
+to force the session to detach and allow you to attach.
 
 ### Subcommands
 
@@ -88,6 +115,14 @@ Host = your-ssh-target-name
 Note that due to limitations in the hooks that ssh exposes to us,
 you will need to gnubby touch twice in order to use `shpool` in
 this mode.
+
+## Bugs
+
+The TODO file in the root of this repo is the most sophisticated project
+planning tool in use by the shpool project at the moment. It contains
+a list of known bugs and future plans. If you wish to report a bug or
+are having trouble with shpool, feel free to ping me (pailes@) directly
+and I'll add your bug to the file and try to help you work around it.
 
 ## Hacking
 
