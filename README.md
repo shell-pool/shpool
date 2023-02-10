@@ -36,28 +36,6 @@ or by manually running `shpool daemon`. Once the daemon is running,
 you can connect to it either by running `shpool attach <session name>`
 or by using the ssh plugin mode described above.
 
-### (Optional) `ssh` Plugin Mode
-
-`shpool` can be used as an ssh extension to add session persistence to native
-ssh invocations. When used in this mode, shpool will generate a name based
-on the tty number of the terminal you are using and various metadata like your
-username and client hostname. In order to set up the shpool extension for a given
-remote host, edit your `~/.ssh/config` file *on the client machine* to contain
-a block like the following:
-
-```
-Host = your-ssh-target-name
-    Hostname your.ssh.host.example.com
-
-    RemoteCommand $HOME/.cargo/bin/shpool plumbing ssh-remote-command
-    PermitLocalCommand yes
-    LocalCommand ssh -oPermitLocalCommand=no -oRemoteCommand="$HOME/.cargo/bin/shpool plumbing ssh-local-command-set-metadata '%u@%h:%p$(tty)'" %n
-```
-
-Note that due to limitations in the hooks that ssh exposes to us,
-you will need to gnubby touch twice in order to use `shpool` in
-this mode.
-
 ### Subcommands
 
 #### `shpool daemon`
@@ -88,6 +66,28 @@ session with no session name arguments.
 #### `shpool kill`
 
 Kills a named shell session.
+
+### (Optional) `ssh` Plugin Mode
+
+`shpool` can be used as an ssh extension to add session persistence to native
+ssh invocations. When used in this mode, shpool will generate a name based
+on the tty number of the terminal you are using and various metadata like your
+username and client hostname. In order to set up the shpool extension for a given
+remote host, edit your `~/.ssh/config` file *on the client machine* to contain
+a block like the following:
+
+```
+Host = your-ssh-target-name
+    Hostname your.ssh.host.example.com
+
+    RemoteCommand $HOME/.cargo/bin/shpool plumbing ssh-remote-command
+    PermitLocalCommand yes
+    LocalCommand ssh -oPermitLocalCommand=no -oRemoteCommand="$HOME/.cargo/bin/shpool plumbing ssh-local-command-set-metadata '%u@%h:%p$(tty)'" %n
+```
+
+Note that due to limitations in the hooks that ssh exposes to us,
+you will need to gnubby touch twice in order to use `shpool` in
+this mode.
 
 ## Hacking
 
