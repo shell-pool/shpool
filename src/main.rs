@@ -1,11 +1,14 @@
 use std::{
     collections::hash_map::DefaultHasher,
     env,
+    fs,
     hash::{
         Hash,
         Hasher,
     },
+    io,
     path::PathBuf,
+    sync::Mutex,
 };
 
 use anyhow::Context;
@@ -14,6 +17,7 @@ use clap::{
     Subcommand,
 };
 use log::error;
+use tracing_subscriber::fmt::format::FmtSpan;
 
 mod attach;
 mod consts;
@@ -120,33 +124,29 @@ This command is internal to shpool and you should never have to reference it dir
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    let filter_level = if args.verbose == 0 {
-        log::LevelFilter::Info
+    let trace_level = if args.verbose == 0 {
+        tracing::Level::INFO
     } else if args.verbose == 1 {
-        log::LevelFilter::Debug
+        tracing::Level::DEBUG
     } else {
-        log::LevelFilter::Trace
+        tracing::Level::TRACE
     };
-
-    let mut log_dispatcher = fern::Dispatch::new()
-        .format(|out, message, record| {
-            out.finish(format_args!(
-                "[{}] {} [{}] {}",
-                chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ"),
-                record.level(),
-                record.target(),
-                message,
-            ));
-        })
-        .level(log::LevelFilter::Warn)
-        .level_for("shpool", filter_level);
     if let Some(log_file) = args.log_file.clone() {
-        log_dispatcher =
-            log_dispatcher.chain(fern::log_file(log_file).context("prepping log file")?);
+        let file = fs::File::create(log_file)?;
+        tracing_subscriber::fmt()
+            .with_max_level(trace_level)
+            .with_thread_ids(true)
+            .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+            .with_writer(Mutex::new(file))
+            .init();
     } else if let Commands::Daemon { .. } = args.command {
-        log_dispatcher = log_dispatcher.chain(std::io::stderr());
-    };
-    log_dispatcher.apply().context("creating logger")?;
+        tracing_subscriber::fmt()
+            .with_max_level(trace_level)
+            .with_thread_ids(true)
+            .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+            .with_writer(io::stderr)
+            .init();
+    }
 
     #[cfg(feature = "test_hooks")]
     if let Ok(test_hook_sock) = std::env::var("SHPOOL_TEST_HOOK_SOCKET_PATH") {
