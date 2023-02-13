@@ -21,20 +21,6 @@
     it looks like there is a compatibility layer
     (https://user.git.corp.google.com/rasputin/wprs/+/refs/heads/main/src/utils.rs#41
     shows how to configure it to generate output)
-- Set client env vars on reconnect as well as the initial connection. SSH_AUTH_SOCK
-  can change between login sessions.
-    - This is harder than it first appears since you can't change environment variables
-      within a child process after you launch it.
-    - As an alternative to updating the environment variables, we can redo the feature
-      to only focus on SSH_AUTH_SOCK since the other env vars are not really needed.
-      Rather than directly setting the value from the client, we instead create a
-      simlink to the auth sock, then set that simlink as the SSH_AUTH_SOCK value.
-      On reconnect, we simply update the simlink to point to the new SSH_AUTH_SOCK
-      concrete value. This way the value of the environment variable within
-      shpool will not change, but we can redirect it to point to the correct
-      socket on reconnect.
-    - I came up with some other schemes to use LD_PRELOAD or gdb to update the
-      environment variables, but those approaches are too cursed.
 - Shpool introduces more lag than it should http://screencast/cast/NjU4Nzk0MTA3MDU2OTQ3MnxkYzhmZjhhZS00Nw
 
 

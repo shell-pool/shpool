@@ -46,7 +46,7 @@ fn one_session() -> anyhow::Result<()> {
     let bidi_enter_w = daemon_proc.events.take().unwrap()
         .waiter(["daemon-bidi-stream-enter"]);
 
-    let _sess1 = daemon_proc.attach("sh1")?;
+    let _sess1 = daemon_proc.attach("sh1", vec![])?;
 
     daemon_proc.events = Some(bidi_enter_w.wait_final_event(
             "daemon-bidi-stream-enter")?);
@@ -72,11 +72,11 @@ fn two_sessions() -> anyhow::Result<()> {
         .waiter(["daemon-bidi-stream-enter",
                 "daemon-bidi-stream-enter"]);
 
-    let _sess1 = daemon_proc.attach("sh1")?;
+    let _sess1 = daemon_proc.attach("sh1", vec![])?;
 
     bidi_enter_w.wait_event("daemon-bidi-stream-enter")?;
 
-    let _sess2 = daemon_proc.attach("sh2")?;
+    let _sess2 = daemon_proc.attach("sh2", vec![])?;
 
     daemon_proc.events = Some(bidi_enter_w.wait_final_event(
             "daemon-bidi-stream-enter")?);

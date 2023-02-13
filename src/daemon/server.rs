@@ -4,10 +4,9 @@ use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::CommandExt;
-use std::path::Path;
-//use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Condvar};
-use std::{env, time, thread, process, net};
+use std::{env, fs, os, time, thread, process, net};
 
 use anyhow::{anyhow, Context};
 use crossbeam_channel::TryRecvError;
@@ -28,10 +27,11 @@ pub struct Server {
     /// Syncronization primitives allowing us make sure that only
     /// one thread at a time attaches using the ssh extension mechanism.
     ssh_extension_parker: Arc<ssh_plugin::Parker>,
+    runtime_dir: PathBuf,
 }
 
 impl Server {
-    pub fn new(config: config::Config) -> Arc<Self> {
+    pub fn new(config: config::Config, runtime_dir: PathBuf) -> Arc<Self> {
         let park_timeout = time::Duration::from_millis(
             config.ssh_handshake_timeout_ms
                 .unwrap_or(DEFAULT_SSH_HANDSHAKE_TIMEOUT_MS));
@@ -43,6 +43,7 @@ impl Server {
                 inner: Mutex::new(ssh_plugin::ParkerInner::new(None, park_timeout)),
                 cond: Condvar::new(),
             }),
+            runtime_dir,
         })
     }
 
@@ -198,6 +199,8 @@ impl Server {
             }
         };
 
+        self.link_ssh_auth_sock(&header).context("linking SSH_AUTH_SOCK")?;
+
         if let Some(inner) = inner_to_stream {
             let mut child_done = false;
             let mut inner = inner.lock().unwrap();
@@ -233,6 +236,33 @@ impl Server {
         } else {
             error!("internal error: failed to fetch just inserted session");
         }
+
+        Ok(())
+    }
+
+    fn link_ssh_auth_sock(&self, header: &protocol::AttachHeader) -> anyhow::Result<()> {
+        if self.config.nosimlink_ssh_auth_sock.unwrap_or(false) {
+            return Ok(());
+        }
+
+        let mut ssh_auth_sock = "";
+        for (k, v) in header.local_env.iter() {
+            if k == "SSH_AUTH_SOCK" {
+                ssh_auth_sock = v;
+                break;
+            }
+        }
+        if ssh_auth_sock == "" {
+            info!("no SSH_AUTH_SOCK in client env, leaving it unlinked");
+            return Ok(());
+        }
+
+        let symlink = self.ssh_auth_sock_simlink(PathBuf::from(&header.name));
+        fs::create_dir_all(symlink.parent().ok_or(anyhow!("no simlink parent"))?)
+            .context("could not create directory for SSH_AUTH_SOCK simlink")?;
+        let _ = fs::remove_file(&symlink); // clean up the link if it exists already
+        os::unix::fs::symlink(ssh_auth_sock, &symlink)
+            .context(format!("could not symlink '{:?}' to point to '{:?}'", symlink, ssh_auth_sock))?;
 
         Ok(())
     }
@@ -499,10 +529,7 @@ impl Server {
         let client_env = if let Some(env) = &self.config.client_env {
             env.clone()
         } else {
-            vec![String::from("DISPLAY"), String::from("KRB5CCNAME"),
-                String::from("SSH_ASKPASS"), String::from("SSH_AUTH_SOCK"),
-                String::from("SSH_AGENT_PID"), String::from("SSH_CONNECTION"),
-                String::from("WINDOWID"), String::from("XAUTHORITY")]
+            vec![]
         };
         let mut client_env_set = HashSet::with_capacity(client_env.len());
         for var in client_env.into_iter() {
@@ -520,13 +547,13 @@ impl Server {
             .stderr(process::Stdio::inherit())
             // The env should mostly be set up by the shell sourcing
             // rc files and whatnot, so we will start things off with
-            // an environment that is blank except for a little marker
-            // environment variable that people can hook into for scripts
-            // and whatnot.
+            // an environment that is blank except for a few vars we inject
+            // to avoid breakage and vars the user has asked us to inject.
             .env_clear()
             .env("HOME", user_info.home_dir)
             .env("SHPOOL_SESSION_NAME", &header.name)
-            .env("USER", user_info.user);
+            .env("USER", user_info.user)
+            .env("SSH_AUTH_SOCK", self.ssh_auth_sock_simlink(PathBuf::from(&header.name)));
         if self.config.norc.unwrap_or(false) && shell == "/bin/bash" {
             cmd.arg("--norc").arg("--noprofile");
         }
@@ -619,8 +646,11 @@ impl Server {
         session.set_pty_size(&header.local_tty_size).context("setting initial pty size")?;
         Ok((in_tx, out_rx, session))
     }
-}
 
+    fn ssh_auth_sock_simlink(&self, session_name: PathBuf) -> PathBuf {
+        self.runtime_dir.join("sessions").join(session_name).join("ssh-auth-sock.socket")
+    }
+}
 
 fn parse_connect_header(stream: &mut UnixStream) -> anyhow::Result<protocol::ConnectHeader> {
     let length_prefix = stream.read_u32::<LittleEndian>()

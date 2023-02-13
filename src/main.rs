@@ -1,5 +1,7 @@
-use std::path::PathBuf;
+use std::collections::hash_map::DefaultHasher;
 use std::env;
+use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
@@ -33,7 +35,8 @@ running in daemon mode, the logs will go to stderr by default.")]
     #[clap(short, long, action,
            long_help = "the path for the unix socket to listen on
 
-This defaults to $XDG_RUNTIME_DIR/shpool.socket.
+This defaults to $XDG_RUNTIME_DIR/shpool/shpool.socket or ~/.shpool/shpool.socket
+if XDG_RUNTIME_DIR is unset.
 
 This flag gets overridden by systemd socket activation when
 the daemon is launched by systemd.")]
@@ -144,22 +147,31 @@ fn main() -> anyhow::Result<()> {
         test_hooks::TEST_HOOK_SERVER.wait_for_connect()?;
     }
 
+    let mut runtime_dir = match env::var("XDG_RUNTIME_DIR") {
+        Ok(runtime_dir) => PathBuf::from(runtime_dir),
+        Err(_) => PathBuf::from(env::var("HOME").context("no XDG_RUNTIME_DIR or HOME")?).join(".shpool"),
+    }.join("shpool");
+
     let socket = match args.socket {
-        Some(s) => PathBuf::from(s),
-        None => {
-            match env::var("XDG_RUNTIME_DIR").context("getting runtime dir") {
-                Ok(runtime_dir) => PathBuf::from(runtime_dir).join("shpool.socket"),
-                Err(err) => {
-                    error!("{:?}", err);
-                    return Ok(());
-                }
-            }
+        Some(s) => {
+            // The user can reasonably expect that if they provide seperate
+            // sockets for differnt shpool instances to run on, they won't
+            // stomp on one another. To respect this expectation we need to
+            // namespace the rest of the runtime data if they provide a socket
+            // name. A short hash is probably good enough.
+            let mut hasher = DefaultHasher::new();
+            s.hash(&mut hasher);
+            let hash = hasher.finish();
+            runtime_dir = runtime_dir.join(format!("{:x}", hash));
+
+            PathBuf::from(s)
         },
+        None => runtime_dir.join("shpool.socket"),
     };
 
     let res: anyhow::Result<()> = match args.command {
         Commands::Daemon { config_file } => {
-            daemon::run(config_file, socket)
+            daemon::run(config_file, runtime_dir, socket)
         }
         Commands::Attach { name } => {
             attach::run(name, socket)

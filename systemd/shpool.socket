@@ -2,7 +2,7 @@
 Description=Shpool Shell Session Pooler
 
 [Socket]
-ListenStream=%t/shpool.socket
+ListenStream=%t/shpool/shpool.socket
 
 [Install]
 WantedBy=sockets.target

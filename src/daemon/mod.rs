@@ -13,7 +13,7 @@ mod ssh_plugin;
 mod systemd;
 mod user;
 
-pub fn run(config_file: Option<String>, socket: PathBuf) -> anyhow::Result<()> {
+pub fn run(config_file: Option<String>, runtime_dir: PathBuf, socket: PathBuf) -> anyhow::Result<()> {
     info!("\n\n======================== STARTING DAEMON ============================\n\n");
 
     let mut config = config::Config::default();
@@ -22,7 +22,7 @@ pub fn run(config_file: Option<String>, socket: PathBuf) -> anyhow::Result<()> {
         config = toml::from_str(&config_str).context("parsing config file")?;
     }
 
-    let server = server::Server::new(config);
+    let server = server::Server::new(config, runtime_dir);
 
     let mut cleanup_socket = None;
     let listener = match systemd::activation_socket() {

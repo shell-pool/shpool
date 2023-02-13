@@ -12,9 +12,9 @@ use super::{ssh, events::Events, attach, shpool_bin, testdata_file};
 /// It kills the subprocess when it goes out of scope.
 pub struct Proc {
     proc: process::Child,
-    tmp_dir: Option<TempDir>,
     subproc_counter: usize,
     log_file: PathBuf,
+    pub tmp_dir: Option<TempDir>,
     pub events: Option<Events>,
     pub socket_path: PathBuf,
 }
@@ -64,7 +64,7 @@ impl Proc {
         })
     }
 
-    pub fn attach(&mut self, name: &str) -> anyhow::Result<attach::Proc> {
+    pub fn attach(&mut self, name: &str, extra_env: Vec<(String, String)>) -> anyhow::Result<attach::Proc> {
         let tmp_dir = self.tmp_dir.as_ref().ok_or(anyhow!("missing tmp_dir"))?;
         let log_file = tmp_dir.path().join(format!("attach_{}_{}.log", name, self.subproc_counter));
         let test_hook_socket_path = tmp_dir.path()
@@ -80,6 +80,7 @@ impl Proc {
             .arg("--log-file").arg(&log_file)
             .arg("--socket").arg(&self.socket_path)
             .env("SHPOOL_TEST_HOOK_SOCKET_PATH", &test_hook_socket_path)
+            .envs(extra_env)
             .arg("attach")
             .arg(name)
             .spawn()
