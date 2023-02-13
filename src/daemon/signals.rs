@@ -1,22 +1,29 @@
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::thread;
+use std::{
+    path::PathBuf,
+    sync::{
+        atomic::AtomicBool,
+        Arc,
+    },
+    thread,
+};
 
 use anyhow::Context;
-use log::{info, error};
-use signal_hook::consts::TERM_SIGNALS;
-use signal_hook::iterator::*;
-use signal_hook::flag;
+use log::{
+    error,
+    info,
+};
+use signal_hook::{
+    consts::TERM_SIGNALS,
+    flag,
+    iterator::*,
+};
 
 pub struct Handler {
     sock: Option<PathBuf>,
 }
 impl Handler {
     pub fn new(sock: Option<PathBuf>) -> Self {
-        Handler {
-            sock,
-        }
+        Handler { sock }
     }
 
     pub fn spawn(self) -> anyhow::Result<()> {
@@ -34,8 +41,7 @@ impl Handler {
             flag::register(*sig, Arc::clone(&term_now))?;
         }
 
-        let mut signals = Signals::new(TERM_SIGNALS)
-            .context("creating signal iterator")?;
+        let mut signals = Signals::new(TERM_SIGNALS).context("creating signal iterator")?;
 
         thread::spawn(move || {
             for signal in &mut signals {
@@ -45,15 +51,15 @@ impl Handler {
 
                         info!("term sig handler: cleaning up socket");
                         if let Some(sock) = self.sock {
-                            if let Err(e)= std::fs::remove_file(sock)
-                                .context("cleaning up socket") {
+                            if let Err(e) = std::fs::remove_file(sock).context("cleaning up socket")
+                            {
                                 error!("error cleaning up socket file: {}", e);
                             }
                         }
 
                         info!("term sig handler: exiting");
                         std::process::exit(0);
-                    }
+                    },
                 }
             }
         });

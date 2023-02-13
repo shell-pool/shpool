@@ -1,12 +1,16 @@
-use std::path::Path;
-use std::{io, env};
+use std::{
+    env,
+    io,
+    path::Path,
+};
 
 use anyhow::Context;
 
 use super::protocol;
 
 pub fn run<P>(mut sessions: Vec<String>, socket: P) -> anyhow::Result<()>
-    where P: AsRef<Path>
+where
+    P: AsRef<Path>,
 {
     let mut client = match protocol::Client::new(socket) {
         Ok(c) => c,
@@ -16,7 +20,7 @@ pub fn run<P>(mut sessions: Vec<String>, socket: P) -> anyhow::Result<()>
                 println!("could not connect to daemon");
             }
             return Err(io_err).context("connecting to daemon");
-        }
+        },
     };
 
     // if no session has been provided, use the current one
@@ -31,12 +35,13 @@ pub fn run<P>(mut sessions: Vec<String>, socket: P) -> anyhow::Result<()>
         std::process::exit(1);
     }
 
-    client.write_connect_header(protocol::ConnectHeader::Kill(protocol::KillRequest {
-        sessions,
-    })).context("writing detach request header")?;
+    client
+        .write_connect_header(protocol::ConnectHeader::Kill(protocol::KillRequest {
+            sessions,
+        }))
+        .context("writing detach request header")?;
 
-    let reply: protocol::KillReply = client.read_reply()
-        .context("reading reply")?;
+    let reply: protocol::KillReply = client.read_reply().context("reading reply")?;
 
     let mut exit_status = 0;
     if reply.not_found_sessions.len() > 0 {

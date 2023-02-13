@@ -1,5 +1,6 @@
-use serde_derive::Deserialize;
 use std::collections::HashMap;
+
+use serde_derive::Deserialize;
 
 #[derive(Deserialize, Default)]
 pub struct Config {

@@ -16,7 +16,6 @@
   "C-a d" keybinding.
 - SIGWINCH appears to redraw the shell prompt some of the time, but not
   always on reconnect https://screencast.googleplex.com/cast/NjM5ODM3MzQ1MzEwMzEwNHwzZTRiNjJmYy1iNg shows the problem.
-- steal the rustfmt config from wprs https://user.git.corp.google.com/rasputin/wprs/+/refs/heads/main/rustfmt.toml
 - look into switching from the log to tracing https://docs.rs/tracing/latest/tracing/
     it looks like there is a compatibility layer
     (https://user.git.corp.google.com/rasputin/wprs/+/refs/heads/main/src/utils.rs#41

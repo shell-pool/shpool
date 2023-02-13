@@ -1,7 +1,12 @@
-use std::process;
-use std::ffi::CStr;
+use std::{
+    ffi::CStr,
+    process,
+};
 
-use anyhow::{anyhow, Context};
+use anyhow::{
+    anyhow,
+    Context,
+};
 
 #[derive(Debug)]
 pub struct Info {
@@ -17,19 +22,29 @@ pub fn info() -> anyhow::Result<Info> {
         .output()
         .context("spawning subshell to determine default shell")?;
     if !out.status.success() {
-        return Err(anyhow!("bad status checking for default shell: {}", out.status));
+        return Err(anyhow!(
+            "bad status checking for default shell: {}",
+            out.status
+        ));
     }
     if out.stderr.len() != 0 {
-        return Err(anyhow!("unexpected stderr when checking for default shell: {}",
-                           String::from_utf8_lossy(&out.stderr)));
+        return Err(anyhow!(
+            "unexpected stderr when checking for default shell: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
     }
 
     let parts = String::from_utf8(out.stdout.clone())
         .context("parsing default shell as utf8")?
-        .trim().split("|").map(String::from).collect::<Vec<String>>();
+        .trim()
+        .split("|")
+        .map(String::from)
+        .collect::<Vec<String>>();
     if parts.len() != 2 {
-        return Err(anyhow!("could not parse output: '{}'", 
-                           String::from_utf8_lossy(&out.stdout)));
+        return Err(anyhow!(
+            "could not parse output: '{}'",
+            String::from_utf8_lossy(&out.stdout)
+        ));
     }
 
     // Unfortunately, I couldn't find a safe way to get the current username
@@ -40,7 +55,9 @@ pub fn info() -> anyhow::Result<Info> {
     // Saftey: we immediately copy the data into an owned buffer and don't
     //         use it subsequently.
     let username = unsafe {
-        String::from(String::from_utf8_lossy(CStr::from_ptr(libc::getlogin()).to_bytes()))
+        String::from(String::from_utf8_lossy(
+            CStr::from_ptr(libc::getlogin()).to_bytes(),
+        ))
     };
 
     Ok(Info {

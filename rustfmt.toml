@@ -1,0 +1,7 @@
+# Use: `cargo +nightly fmt`
+imports_layout = "Vertical"
+imports_granularity = "Crate"
+group_imports = "StdExternalCrate"
+match_block_trailing_comma = true
+use_field_init_shorthand = true
+use_try_shorthand = true

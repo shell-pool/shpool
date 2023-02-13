@@ -1,10 +1,18 @@
-use std::collections::hash_map::DefaultHasher;
-use std::env;
-use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
+use std::{
+    collections::hash_map::DefaultHasher,
+    env,
+    hash::{
+        Hash,
+        Hasher,
+    },
+    path::PathBuf,
+};
 
 use anyhow::Context;
-use clap::{Parser, Subcommand};
+use clap::{
+    Parser,
+    Subcommand,
+};
 use log::error;
 
 mod attach;
@@ -23,23 +31,31 @@ mod test_hooks;
 #[derive(Parser, Debug)]
 #[clap(version, author, about)]
 struct Args {
-    #[clap(short, long, action,
-           long_help = "the file to write logs to
+    #[clap(
+        short,
+        long,
+        action,
+        long_help = "the file to write logs to
 
 In most modes logs are discarded by default, but if shpool is
-running in daemon mode, the logs will go to stderr by default.")]
+running in daemon mode, the logs will go to stderr by default."
+    )]
     log_file: Option<String>,
     #[clap(short, long, action = clap::ArgAction::Count,
            help = "show more in logs, may be provided multiple times")]
     verbose: u8,
-    #[clap(short, long, action,
-           long_help = "the path for the unix socket to listen on
+    #[clap(
+        short,
+        long,
+        action,
+        long_help = "the path for the unix socket to listen on
 
 This defaults to $XDG_RUNTIME_DIR/shpool/shpool.socket or ~/.shpool/shpool.socket
 if XDG_RUNTIME_DIR is unset.
 
 This flag gets overridden by systemd socket activation when
-the daemon is launched by systemd.")]
+the daemon is launched by systemd."
+    )]
     socket: Option<String>,
     #[clap(subcommand)]
     command: Commands,
@@ -80,12 +96,11 @@ environment.")]
     #[clap(about = "lists all the running shell sessions")]
     List,
     #[clap(about = "contains subcommands not meant to be directly invoked")]
-    Plumbing{
+    Plumbing {
         #[clap(subcommand)]
         command: PlumbingCommands,
     },
 }
-
 
 #[derive(Subcommand, Debug)]
 enum PlumbingCommands {
@@ -99,10 +114,7 @@ advantage of this command.
 
 This command is internal to shpool and you should never have to reference it directly, even in your config.
 "#)]
-    SshLocalCommandSetMetadata {
-        session_name: String,
-        term: String,
-    },
+    SshLocalCommandSetMetadata { session_name: String, term: String },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -129,8 +141,8 @@ fn main() -> anyhow::Result<()> {
         .level(log::LevelFilter::Warn)
         .level_for("shpool", filter_level);
     if let Some(log_file) = args.log_file.clone() {
-        log_dispatcher = log_dispatcher.chain(
-            fern::log_file(log_file).context("prepping log file")?);
+        log_dispatcher =
+            log_dispatcher.chain(fern::log_file(log_file).context("prepping log file")?);
     } else if let Commands::Daemon { .. } = args.command {
         log_dispatcher = log_dispatcher.chain(std::io::stderr());
     };
@@ -149,8 +161,11 @@ fn main() -> anyhow::Result<()> {
 
     let mut runtime_dir = match env::var("XDG_RUNTIME_DIR") {
         Ok(runtime_dir) => PathBuf::from(runtime_dir),
-        Err(_) => PathBuf::from(env::var("HOME").context("no XDG_RUNTIME_DIR or HOME")?).join(".shpool"),
-    }.join("shpool");
+        Err(_) => {
+            PathBuf::from(env::var("HOME").context("no XDG_RUNTIME_DIR or HOME")?).join(".shpool")
+        },
+    }
+    .join("shpool");
 
     let socket = match args.socket {
         Some(s) => {
@@ -170,33 +185,17 @@ fn main() -> anyhow::Result<()> {
     };
 
     let res: anyhow::Result<()> = match args.command {
-        Commands::Daemon { config_file } => {
-            daemon::run(config_file, runtime_dir, socket)
-        }
-        Commands::Attach { name } => {
-            attach::run(name, socket)
-        }
-        Commands::Detach { sessions } => {
-            detach::run(sessions, socket)
-        }
-        Commands::Kill { sessions } => {
-            kill::run(sessions, socket)
-        }
-        Commands::List => {
-            list::run(socket)
-        }
-        Commands::Plumbing { command } => {
-            match command {
-                PlumbingCommands::SshRemoteCommand => {
-                    ssh::remote_cmd::run(socket)
-                }
-                PlumbingCommands::SshLocalCommandSetMetadata {
-                    session_name, term
-                } => {
-                    ssh::set_metadata::run(session_name, term, socket)
-                }
-            }
-        }
+        Commands::Daemon { config_file } => daemon::run(config_file, runtime_dir, socket),
+        Commands::Attach { name } => attach::run(name, socket),
+        Commands::Detach { sessions } => detach::run(sessions, socket),
+        Commands::Kill { sessions } => kill::run(sessions, socket),
+        Commands::List => list::run(socket),
+        Commands::Plumbing { command } => match command {
+            PlumbingCommands::SshRemoteCommand => ssh::remote_cmd::run(socket),
+            PlumbingCommands::SshLocalCommandSetMetadata { session_name, term } => {
+                ssh::set_metadata::run(session_name, term, socket)
+            },
+        },
     };
 
     if let Err(err) = res {

@@ -1,7 +1,14 @@
-use std::io::BufRead;
-use std::{process, time, io};
+use std::{
+    io,
+    io::BufRead,
+    process,
+    time,
+};
 
-use anyhow::{anyhow, Context};
+use anyhow::{
+    anyhow,
+    Context,
+};
 use regex::Regex;
 
 const CMD_READ_TIMEOUT: time::Duration = time::Duration::from_secs(3);
@@ -25,11 +32,14 @@ impl LineMatcher {
             match self.out.read_line(&mut line) {
                 Ok(0) => {
                     return Err(anyhow!("LineMatcher: EOF"));
-                }
+                },
                 Err(e) => {
                     if e.kind() == io::ErrorKind::WouldBlock {
                         if start.elapsed() > CMD_READ_TIMEOUT {
-                            return Err(io::Error::new(io::ErrorKind::TimedOut, "timed out reading line"))?;
+                            return Err(io::Error::new(
+                                io::ErrorKind::TimedOut,
+                                "timed out reading line",
+                            ))?;
                         }
 
                         std::thread::sleep(CMD_READ_SLEEP_DUR);
@@ -37,7 +47,7 @@ impl LineMatcher {
                     }
 
                     return Err(e).context("reading line from shell output")?;
-                }
+                },
                 Ok(_) => {
                     if line.ends_with('\n') {
                         line.pop();
@@ -50,12 +60,11 @@ impl LineMatcher {
 
             eprintln!("testing /{}/ against '{}'", re, &line);
             return match Regex::new(re)?.captures(&line) {
-                Some(caps) => {
-                    Ok(caps.iter().map(|maybe_match| maybe_match.map(|m| String::from(m.as_str()))).collect())
-                }
-                None => {
-                    Err(anyhow!("expected /{}/ to match '{}'", re, &line))
-                }
+                Some(caps) => Ok(caps
+                    .iter()
+                    .map(|maybe_match| maybe_match.map(|m| String::from(m.as_str())))
+                    .collect()),
+                None => Err(anyhow!("expected /{}/ to match '{}'", re, &line)),
             };
         }
     }

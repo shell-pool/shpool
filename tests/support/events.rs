@@ -1,7 +1,10 @@
-use std::io::BufRead;
-use std::path::Path;
-use std::{time, io};
-use std::os::unix::net::UnixStream;
+use std::{
+    io,
+    io::BufRead,
+    os::unix::net::UnixStream,
+    path::Path,
+    time,
+};
 
 use anyhow::anyhow;
 
@@ -40,21 +43,20 @@ impl Events {
     /// and you should make sure to use `wait_final_event` to get the
     /// Events struct back at the last event.
     pub fn waiter<S, SI>(mut self, events: SI) -> EventWaiter
-        where S: Into<String>,
-             SI: IntoIterator<Item = S> {
+    where
+        S: Into<String>,
+        SI: IntoIterator<Item = S>,
+    {
         let events: Vec<String> = events.into_iter().map(|s| s.into()).collect();
         assert!(events.len() > 0);
 
         let (tx, rx) = crossbeam_channel::bounded(events.len());
-        let waiter = EventWaiter {
-            matched: rx,
-        };
+        let waiter = EventWaiter { matched: rx };
         std::thread::spawn(move || {
             let mut return_lines = false;
             let mut offset = 0;
 
-            'LINELOOP:
-            for line in &mut self.lines {
+            'LINELOOP: for line in &mut self.lines {
                 match line {
                     Ok(l) => {
                         if events[offset] == l {
@@ -67,15 +69,16 @@ impl Events {
                             }
                             offset += 1;
                         }
-                    }
+                    },
                     Err(e) => {
                         eprintln!("error scanning for event '{}': {:?}", events[offset], e);
-                    }
+                    },
                 }
             }
 
             if return_lines {
-                tx.send(WaiterEvent::Done((events[offset].clone(), self.lines))).unwrap();
+                tx.send(WaiterEvent::Done((events[offset].clone(), self.lines)))
+                    .unwrap();
             }
         });
 
@@ -126,25 +129,24 @@ impl EventWaiter {
                 } else {
                     Err(anyhow!("Got '{}' event, want '{}'", e, event))
                 };
-            }
+            },
         }
     }
 
     pub fn wait_final_event(self, event: &str) -> anyhow::Result<Events> {
         match self.matched.recv()? {
-            WaiterEvent::Event(e) => {
-                Err(anyhow!("Got non-fianl '{}' event, want final '{}'", e, event))
-            },
+            WaiterEvent::Event(e) => Err(anyhow!(
+                "Got non-fianl '{}' event, want final '{}'",
+                e,
+                event
+            )),
             WaiterEvent::Done((e, lines)) => {
                 return if e == event {
-                    Ok(Events {
-                        lines
-                    })
+                    Ok(Events { lines })
                 } else {
                     Err(anyhow!("Got '{}' event, want '{}'", e, event))
                 };
-            }
+            },
         }
     }
 }
-

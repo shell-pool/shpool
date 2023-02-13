@@ -1,6 +1,8 @@
-use std::fs;
-use std::os::unix::net::UnixListener;
-use std::path::PathBuf;
+use std::{
+    fs,
+    os::unix::net::UnixListener,
+    path::PathBuf,
+};
 
 use anyhow::Context;
 use log::info;
@@ -13,7 +15,11 @@ mod ssh_plugin;
 mod systemd;
 mod user;
 
-pub fn run(config_file: Option<String>, runtime_dir: PathBuf, socket: PathBuf) -> anyhow::Result<()> {
+pub fn run(
+    config_file: Option<String>,
+    runtime_dir: PathBuf,
+    socket: PathBuf,
+) -> anyhow::Result<()> {
     info!("\n\n======================== STARTING DAEMON ============================\n\n");
 
     let mut config = config::Config::default();
@@ -34,7 +40,7 @@ pub fn run(config_file: Option<String>, runtime_dir: PathBuf, socket: PathBuf) -
             info!("no systemd activation socket: {:?}", e);
             cleanup_socket = Some(socket.clone());
             UnixListener::bind(&socket).context("binding to socket")?
-        }
+        },
     };
     server::Server::serve(server, listener)?;
 
@@ -42,8 +48,7 @@ pub fn run(config_file: Option<String>, runtime_dir: PathBuf, socket: PathBuf) -
     signals::Handler::new(cleanup_socket.clone()).spawn()?;
 
     if let Some(sock) = cleanup_socket {
-        std::fs::remove_file(sock).context(
-            "cleaning up socket on exit")?;
+        std::fs::remove_file(sock).context("cleaning up socket on exit")?;
     } else {
         info!("systemd manages the socket, so not cleaning it up");
     }

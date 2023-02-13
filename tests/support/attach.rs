@@ -1,11 +1,20 @@
-use std::io::Write;
-use std::path::PathBuf;
-use std::{process, io};
-use std::os::unix::io::AsRawFd;
+use std::{
+    io,
+    io::Write,
+    os::unix::io::AsRawFd,
+    path::PathBuf,
+    process,
+};
 
-use anyhow::{anyhow, Context};
+use anyhow::{
+    anyhow,
+    Context,
+};
 
-use super::{events::Events, line_matcher::LineMatcher};
+use super::{
+    events::Events,
+    line_matcher::LineMatcher,
+};
 
 /// Proc is a handle for a `shpool attach` subprocess
 /// spawned for testing
@@ -15,29 +24,26 @@ pub struct Proc {
     pub events: Option<Events>,
 }
 
-
 impl Proc {
-    pub fn run_raw_cmd(
-        &mut self,
-        mut cmd: Vec<u8>,
-    ) -> anyhow::Result<()> {
+    pub fn run_raw_cmd(&mut self, mut cmd: Vec<u8>) -> anyhow::Result<()> {
         let stdin = self.proc.stdin.as_mut().ok_or(anyhow!("missing stdin"))?;
 
         cmd.push("\n".as_bytes()[0]);
-        stdin.write_all(&cmd).context("writing cmd into attach proc")?;
+        stdin
+            .write_all(&cmd)
+            .context("writing cmd into attach proc")?;
         stdin.flush().context("flushing cmd")?;
 
         Ok(())
     }
 
-    pub fn run_cmd(
-        &mut self,
-        cmd: &str,
-    ) -> anyhow::Result<()> {
+    pub fn run_cmd(&mut self, cmd: &str) -> anyhow::Result<()> {
         let stdin = self.proc.stdin.as_mut().ok_or(anyhow!("missing stdin"))?;
 
         let full_cmd = format!("{}\n", cmd);
-        stdin.write_all(full_cmd.as_bytes()).context("writing cmd into attach proc")?;
+        stdin
+            .write_all(full_cmd.as_bytes())
+            .context("writing cmd into attach proc")?;
         stdin.flush().context("flushing cmd")?;
 
         Ok(())
@@ -54,9 +60,12 @@ impl Proc {
         nix::fcntl::fcntl(
             r.as_raw_fd(),
             nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
-        ).context("setting stdin nonblocking")?;
+        )
+        .context("setting stdin nonblocking")?;
 
-        Ok(LineMatcher{ out: io::BufReader::new(r) })
+        Ok(LineMatcher {
+            out: io::BufReader::new(r),
+        })
     }
 
     pub fn await_event(&mut self, event: &str) -> anyhow::Result<()> {

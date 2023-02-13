@@ -3,13 +3,22 @@
 // stuff here.
 #![allow(dead_code)]
 
-use std::sync::Mutex;
-use std::path::{PathBuf, Path};
-use std::{env, io};
-use std::process::Command;
-use std::io::BufRead;
+use std::{
+    env,
+    io,
+    io::BufRead,
+    path::{
+        Path,
+        PathBuf,
+    },
+    process::Command,
+    sync::Mutex,
+};
 
-use anyhow::{anyhow, Context};
+use anyhow::{
+    anyhow,
+    Context,
+};
 
 pub mod attach;
 pub mod daemon;
@@ -54,10 +63,13 @@ pub fn shpool_bin() -> anyhow::Result<PathBuf> {
     let line_reader = io::BufReader::new(&out.stdout[..]);
     for line in line_reader.lines() {
         let line = line.context("reading line from stdout")?;
-        let entry: serde_json::Value = serde_json::from_str(&line)
-            .context("parsing an output line from cargo")?;
+        let entry: serde_json::Value =
+            serde_json::from_str(&line).context("parsing an output line from cargo")?;
 
-        let src_path = entry.get("target").and_then(|v| v.get("src_path")).and_then(|v| v.as_str());
+        let src_path = entry
+            .get("target")
+            .and_then(|v| v.get("src_path"))
+            .and_then(|v| v.as_str());
         let exe = entry.get("executable").and_then(|v| v.as_str());
         let kind = entry
             .get("target")
@@ -70,7 +82,9 @@ pub fn shpool_bin() -> anyhow::Result<PathBuf> {
             .and_then(|v| v.get(0))
             .and_then(|v| v.as_str());
 
-        if let (Some(src_path), Some(exe), Some(kind), Some(crate_type)) = (src_path, exe, kind, crate_type) {
+        if let (Some(src_path), Some(exe), Some(kind), Some(crate_type)) =
+            (src_path, exe, kind, crate_type)
+        {
             if !src_path.ends_with("src/main.rs") {
                 continue;
             }
@@ -101,15 +115,16 @@ pub fn shpool_bin() -> anyhow::Result<PathBuf> {
 }
 
 pub fn cargo_dir() -> PathBuf {
-    env::var_os("CARGO_BIN_PATH").map(PathBuf::from).or_else(|| {
-        env::current_exe().ok().map(|mut path| {
-            path.pop();
-            if path.ends_with("deps") {
+    env::var_os("CARGO_BIN_PATH")
+        .map(PathBuf::from)
+        .or_else(|| {
+            env::current_exe().ok().map(|mut path| {
                 path.pop();
-            }
-            path
+                if path.ends_with("deps") {
+                    path.pop();
+                }
+                path
+            })
         })
-    }).unwrap_or_else(|| {
-        panic!("CARGO_BIN_PATH wasn't set. Cannot continue running test")
-    })
+        .unwrap_or_else(|| panic!("CARGO_BIN_PATH wasn't set. Cannot continue running test"))
 }

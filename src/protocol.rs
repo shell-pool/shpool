@@ -1,16 +1,44 @@
-use std::io::{Read, Write};
-use std::os::unix::io::AsRawFd;
-use std::os::unix::net::UnixStream;
-use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::{io, thread};
+use std::{
+    io,
+    io::{
+        Read,
+        Write,
+    },
+    os::unix::{
+        io::AsRawFd,
+        net::UnixStream,
+    },
+    path::Path,
+    sync::atomic::{
+        AtomicBool,
+        Ordering,
+    },
+    thread,
+};
 
-use anyhow::{anyhow, Context};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use log::{info, debug, trace};
-use serde_derive::{Serialize, Deserialize};
+use anyhow::{
+    anyhow,
+    Context,
+};
+use byteorder::{
+    LittleEndian,
+    ReadBytesExt,
+    WriteBytesExt,
+};
+use log::{
+    debug,
+    info,
+    trace,
+};
+use serde_derive::{
+    Deserialize,
+    Serialize,
+};
 
-use super::{consts, tty};
+use super::{
+    consts,
+    tty,
+};
 
 /// ConnectHeader is the blob of metadata that a client transmits when it
 /// first connections. It uses an enum to allow different connection types
@@ -260,28 +288,29 @@ pub struct Chunk<'data> {
 
 impl<'data> Chunk<'data> {
     pub fn write_to<W>(&self, w: &mut W, stop: &AtomicBool) -> io::Result<()>
-        where W: std::io::Write
+    where
+        W: std::io::Write,
     {
         if stop.load(Ordering::Relaxed) {
-            return Ok(())
+            return Ok(());
         }
 
         w.write_u8(self.kind as u8)?;
 
         if stop.load(Ordering::Relaxed) {
-            return Ok(())
+            return Ok(());
         }
 
         w.write_u32::<LittleEndian>(self.buf.len() as u32)?;
 
         if stop.load(Ordering::Relaxed) {
-            return Ok(())
+            return Ok(());
         }
 
         let mut to_write = &self.buf[..];
         while to_write.len() > 0 {
             if stop.load(Ordering::Relaxed) {
-                return Ok(())
+                return Ok(());
             }
 
             let nwritten = match w.write(&to_write) {
@@ -293,7 +322,7 @@ impl<'data> Chunk<'data> {
                         continue;
                     }
                     return Err(e);
-                }
+                },
             };
             to_write = &to_write[nwritten..];
         }
@@ -302,12 +331,17 @@ impl<'data> Chunk<'data> {
     }
 
     pub fn read_into<R>(r: &mut R, buf: &'data mut [u8]) -> anyhow::Result<Self>
-        where R: std::io::Read
+    where
+        R: std::io::Read,
     {
         let kind = r.read_u8()?;
         let len = r.read_u32::<LittleEndian>()? as usize;
         if len as usize > buf.len() {
-            return Err(anyhow!("chunk of size {} exceeds size limit of {} bytes", len, buf.len()));
+            return Err(anyhow!(
+                "chunk of size {} exceeds size limit of {} bytes",
+                len,
+                buf.len()
+            ));
         }
         r.read_exact(&mut buf[..len])?;
 
@@ -331,21 +365,29 @@ impl Client {
     pub fn write_connect_header(&mut self, header: ConnectHeader) -> anyhow::Result<()> {
         let buf = rmp_serde::to_vec(&header).context("formatting reply header")?;
         debug!("writing connect header length prefix={}", buf.len());
-        self.stream.write_u32::<LittleEndian>(buf.len() as u32)
+        self.stream
+            .write_u32::<LittleEndian>(buf.len() as u32)
             .context("writing reply length prefix")?;
         debug!("writing connect header");
-        self.stream.write_all(&buf).context("writing reply header")?;
+        self.stream
+            .write_all(&buf)
+            .context("writing reply header")?;
 
         Ok(())
     }
 
     pub fn read_reply<'data, R>(&mut self) -> anyhow::Result<R>
-        where R: serde::de::DeserializeOwned
+    where
+        R: serde::de::DeserializeOwned,
     {
-        let length_prefix = self.stream.read_u32::<LittleEndian>()
+        let length_prefix = self
+            .stream
+            .read_u32::<LittleEndian>()
             .context("reading header length prefix")?;
         let mut buf: Vec<u8> = vec![0; length_prefix as usize];
-        self.stream.read_exact(&mut buf).context("reading header buf")?;
+        self.stream
+            .read_exact(&mut buf)
+            .context("reading header buf")?;
 
         let reply: R = rmp_serde::from_read(&*buf).context("parsing header")?;
         Ok(reply)
@@ -371,12 +413,13 @@ impl Client {
                 nix::fcntl::fcntl(
                     stdin.as_raw_fd(),
                     nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
-                ).context("setting stdin nonblocking")?;
+                )
+                .context("setting stdin nonblocking")?;
 
                 loop {
                     if stop.load(Ordering::Relaxed) {
                         info!("pipe_bytes: stdin->sock: recvd stop msg (1)");
-                        return Ok(())
+                        return Ok(());
                     }
 
                     let nread = match stdin.read(&mut buf) {
@@ -388,22 +431,30 @@ impl Client {
                                 continue;
                             }
                             return Err(e).context("reading stdin from user");
-                        }
+                        },
                     };
 
                     debug!("pipe_bytes: stdin->sock: read {} bytes", nread);
 
                     let mut to_write = &buf[..nread];
-                    debug!("pipe_bytes: stdin->sock: created to_write='{}'", String::from_utf8_lossy(to_write));
+                    debug!(
+                        "pipe_bytes: stdin->sock: created to_write='{}'",
+                        String::from_utf8_lossy(to_write)
+                    );
                     while to_write.len() > 0 {
                         if stop.load(Ordering::Relaxed) {
                             info!("pipe_bytes: stdin->sock: recvd stop msg (2)");
-                            return Ok(())
+                            return Ok(());
                         }
 
-                        let nwritten = write_client_stream.write(to_write).context("writing chunk to server")?;
+                        let nwritten = write_client_stream
+                            .write(to_write)
+                            .context("writing chunk to server")?;
                         to_write = &to_write[nwritten..];
-                        trace!("pipe_bytes: stdin->sock: to_write={}", String::from_utf8_lossy(to_write));
+                        trace!(
+                            "pipe_bytes: stdin->sock: to_write={}",
+                            String::from_utf8_lossy(to_write)
+                        );
                     }
 
                     write_client_stream.flush().context("flushing client")?;
@@ -420,15 +471,19 @@ impl Client {
                 loop {
                     if stop.load(Ordering::Relaxed) {
                         info!("pipe_bytes: sock->stdout: recvd stop msg (1)");
-                        return Ok(())
+                        return Ok(());
                     }
 
                     let chunk = Chunk::read_into(&mut read_client_stream, &mut buf)
                         .context("reading output chunk from daemon")?;
 
                     if chunk.buf.len() > 0 {
-                        debug!("pipe_bytes: sock->stdout: chunk='{}' kind={:?} len={}",
-                               String::from_utf8_lossy(chunk.buf), chunk.kind, chunk.buf.len());
+                        debug!(
+                            "pipe_bytes: sock->stdout: chunk='{}' kind={:?} len={}",
+                            String::from_utf8_lossy(chunk.buf),
+                            chunk.kind,
+                            chunk.buf.len()
+                        );
                     }
 
                     let mut to_write = &chunk.buf[..];
@@ -437,10 +492,10 @@ impl Client {
                             trace!("pipe_bytes: got heartbeat chunk");
                         },
                         ChunkKind::Data => {
-                            while to_write.len() > 0  {
+                            while to_write.len() > 0 {
                                 if stop.load(Ordering::Relaxed) {
                                     info!("pipe_bytes: sock->stdout: recvd stop msg (2)");
-                                    return Ok(())
+                                    return Ok(());
                                 }
 
                                 debug!("pipe_bytes: sock->stdout: about to select on stdout");
@@ -453,14 +508,15 @@ impl Client {
                                     Some(&mut stdout_set),
                                     None,
                                     Some(&mut poll_dur),
-                                ).context("selecting on stdout")?;
+                                )
+                                .context("selecting on stdout")?;
                                 if nready == 0 || !stdout_set.contains(stdout.as_raw_fd()) {
                                     continue;
                                 }
 
-                                let nwritten = stdout.write(to_write).context("writing chunk to stdout")?;
-                                debug!("pipe_bytes: sock->stdout: wrote {} stdout bytes",
-                                    nwritten);
+                                let nwritten =
+                                    stdout.write(to_write).context("writing chunk to stdout")?;
+                                debug!("pipe_bytes: sock->stdout: wrote {} stdout bytes", nwritten);
                                 to_write = &to_write[nwritten..];
                             }
 
@@ -486,7 +542,6 @@ impl Client {
                 Ok(v) => v?,
                 Err(panic_err) => std::panic::resume_unwind(panic_err),
             }
-
 
             Ok(())
         })

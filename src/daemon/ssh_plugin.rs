@@ -1,5 +1,10 @@
-use std::time;
-use std::sync::{Mutex, Condvar};
+use std::{
+    sync::{
+        Condvar,
+        Mutex,
+    },
+    time,
+};
 
 /// SshExtensionParker contains syncronization primitives to allow the
 /// LocalCommand and RemoteCommand ssh extension threads to perform
@@ -48,8 +53,7 @@ impl ParkerInner {
         if has {
             self.remote_parked_at = time::Instant::now()
         } else {
-            let expired_park_time = time::Instant::now()
-                .checked_sub(self.park_timeout).unwrap();
+            let expired_park_time = time::Instant::now().checked_sub(self.park_timeout).unwrap();
             self.remote_parked_at = expired_park_time;
         }
     }
@@ -62,8 +66,7 @@ impl ParkerInner {
         if has {
             self.local_parked_at = time::Instant::now()
         } else {
-            let expired_park_time = time::Instant::now()
-                .checked_sub(self.park_timeout).unwrap();
+            let expired_park_time = time::Instant::now().checked_sub(self.park_timeout).unwrap();
             self.local_parked_at = expired_park_time;
         }
     }
@@ -85,8 +88,8 @@ impl std::default::Default for Metadata {
         Metadata {
             name: String::from(""),
             term: String::from(""),
-            set_at: time::Instant::now().checked_sub(
-                time::Duration::from_secs(60*60*24))
+            set_at: time::Instant::now()
+                .checked_sub(time::Duration::from_secs(60 * 60 * 24))
                 .unwrap_or(time::Instant::now()),
         }
     }

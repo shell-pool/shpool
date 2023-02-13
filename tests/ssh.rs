@@ -1,4 +1,7 @@
-use std::{thread, time};
+use std::{
+    thread,
+    time,
+};
 
 use anyhow::Context;
 
@@ -48,10 +51,11 @@ fn happy_path_remote_cmd_first() -> anyhow::Result<()> {
 
 #[test]
 fn remote_cmd_timeout() -> anyhow::Result<()> {
-    let mut daemon_proc = support::daemon::Proc::new("short_ssh_timeout.toml")
-        .context("starting daemon proc")?;
+    let mut daemon_proc =
+        support::daemon::Proc::new("short_ssh_timeout.toml").context("starting daemon proc")?;
 
-    let mut remote_cmd_proc = daemon_proc.ssh_remote_cmd()
+    let mut remote_cmd_proc = daemon_proc
+        .ssh_remote_cmd()
         .context("spawning ssh remote cmd")?;
 
     thread::sleep(time::Duration::from_millis(500));

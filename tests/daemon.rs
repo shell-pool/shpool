@@ -1,26 +1,42 @@
-use std::io::Read;
-use std::os::unix::io::AsRawFd;
-use std::os::unix::net::UnixListener;
-use std::os::unix::process::CommandExt;
-use std::process::{Command, Stdio};
-use std::time;
-use std::os::unix::io::FromRawFd;
-use std::fmt::Write;
+use std::{
+    fmt::Write,
+    io::Read,
+    os::unix::{
+        io::{
+            AsRawFd,
+            FromRawFd,
+        },
+        net::UnixListener,
+        process::CommandExt,
+    },
+    process::{
+        Command,
+        Stdio,
+    },
+    time,
+};
 
-use anyhow::{Context, anyhow};
+use anyhow::{
+    anyhow,
+    Context,
+};
 use nix::unistd::ForkResult;
 
 mod support;
 
 #[test]
 fn start() -> anyhow::Result<()> {
-    let tmp_dir = tempfile::Builder::new().prefix("shpool-test").rand_bytes(20)
-        .tempdir().context("creating tmp dir")?;
+    let tmp_dir = tempfile::Builder::new()
+        .prefix("shpool-test")
+        .rand_bytes(20)
+        .tempdir()
+        .context("creating tmp dir")?;
 
     let mut child = Command::new(support::shpool_bin()?)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .arg("--socket").arg(tmp_dir.path().join("shpool.socket"))
+        .arg("--socket")
+        .arg(tmp_dir.path().join("shpool.socket"))
         .arg("daemon")
         .spawn()
         .context("spawning daemon process")?;
@@ -33,7 +49,9 @@ fn start() -> anyhow::Result<()> {
 
     let mut stdout = child.stdout.take().context("missing stdout")?;
     let mut stdout_str = String::from("");
-    stdout.read_to_string(&mut stdout_str).context("slurping stdout")?;
+    stdout
+        .read_to_string(&mut stdout_str)
+        .context("slurping stdout")?;
 
     if stdout_str != "" {
         println!("{}", stdout_str);
@@ -42,7 +60,9 @@ fn start() -> anyhow::Result<()> {
 
     let mut stderr = child.stderr.take().context("missing stderr")?;
     let mut stderr_str = String::from("");
-    stderr.read_to_string(&mut stderr_str).context("slurping stderr")?;
+    stderr
+        .read_to_string(&mut stderr_str)
+        .context("slurping stderr")?;
     assert!(stderr_str.contains("STARTING DAEMON"));
 
     Ok(())
@@ -50,13 +70,16 @@ fn start() -> anyhow::Result<()> {
 
 #[test]
 fn systemd_activation() -> anyhow::Result<()> {
-    let tmp_dir = tempfile::Builder::new().prefix("shpool-test").rand_bytes(20)
-        .tempdir().context("creating tmp dir")?;
+    let tmp_dir = tempfile::Builder::new()
+        .prefix("shpool-test")
+        .rand_bytes(20)
+        .tempdir()
+        .context("creating tmp dir")?;
     let sock_path = tmp_dir.path().join("shpool.socket");
     let activation_sock = UnixListener::bind(&sock_path)?;
 
-    let (parent_stderr, child_stderr) = nix::unistd::pipe()
-        .context("creating pipe to collect stderr")?;
+    let (parent_stderr, child_stderr) =
+        nix::unistd::pipe().context("creating pipe to collect stderr")?;
     // Saftey: this is a test
     let child_stderr_pipe = unsafe { Stdio::from_raw_fd(child_stderr) };
     let mut cmd = Command::new(support::shpool_bin()?);
@@ -96,18 +119,16 @@ fn systemd_activation() -> anyhow::Result<()> {
                 .expect("getfd flags to work");
             let mut newflags = nix::fcntl::FdFlag::from_bits(fdflags).unwrap();
             newflags.remove(nix::fcntl::FdFlag::FD_CLOEXEC);
-            nix::fcntl::fcntl(
-                fdarg, nix::fcntl::FcntlArg::F_SETFD(newflags))
+            nix::fcntl::fcntl(fdarg, nix::fcntl::FcntlArg::F_SETFD(newflags))
                 .expect("FD_CLOEXEC to be unset");
 
             // set the LISTEN_PID environment variable without
             // allocating
-            write!(&mut pid_buf, "{}", std::process::id())
-                .expect("to be able to format the pid");
+            write!(&mut pid_buf, "{}", std::process::id()).expect("to be able to format the pid");
             cmd.env("LISTEN_PID", pid_buf);
 
             let err = cmd.exec();
-();
+            ();
             eprintln!("exec err: {:?}", err);
             std::process::exit(1);
         },
@@ -121,15 +142,12 @@ fn systemd_activation() -> anyhow::Result<()> {
     std::thread::sleep(time::Duration::from_millis(500));
 
     // kill the daemon proc and reap the return code
-    nix::sys::signal::kill(
-        child_pid,
-        Some(nix::sys::signal::Signal::SIGKILL),
-    ).context("killing daemon")?;
+    nix::sys::signal::kill(child_pid, Some(nix::sys::signal::Signal::SIGKILL))
+        .context("killing daemon")?;
     nix::sys::wait::waitpid(child_pid, None).context("reaping daemon")?;
 
     let mut stderr_buf: Vec<u8> = vec![0; 1024 * 8];
-    let len = nix::unistd::read(parent_stderr, &mut stderr_buf[..])
-        .context("reading stderr")?;
+    let len = nix::unistd::read(parent_stderr, &mut stderr_buf[..]).context("reading stderr")?;
     let stderr = String::from_utf8_lossy(&stderr_buf[..len]);
     assert!(stderr.contains("using systemd activation socket"));
 
@@ -138,15 +156,20 @@ fn systemd_activation() -> anyhow::Result<()> {
 
 #[test]
 fn config() -> anyhow::Result<()> {
-    let tmp_dir = tempfile::Builder::new().prefix("shpool-test").rand_bytes(20)
-        .tempdir().context("creating tmp dir")?;
+    let tmp_dir = tempfile::Builder::new()
+        .prefix("shpool-test")
+        .rand_bytes(20)
+        .tempdir()
+        .context("creating tmp dir")?;
 
     let mut child = Command::new(support::shpool_bin()?)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .arg("--socket").arg(tmp_dir.path().join("shpool.socket"))
+        .arg("--socket")
+        .arg(tmp_dir.path().join("shpool.socket"))
         .arg("daemon")
-        .arg("--config-file").arg(support::testdata_file("empty.toml"))
+        .arg("--config-file")
+        .arg(support::testdata_file("empty.toml"))
         .spawn()
         .context("spawning daemon process")?;
 
@@ -158,7 +181,9 @@ fn config() -> anyhow::Result<()> {
 
     let mut stdout = child.stdout.take().context("missing stdout")?;
     let mut stdout_str = String::from("");
-    stdout.read_to_string(&mut stdout_str).context("slurping stdout")?;
+    stdout
+        .read_to_string(&mut stdout_str)
+        .context("slurping stdout")?;
 
     if stdout_str != "" {
         println!("{}", stdout_str);
@@ -167,7 +192,9 @@ fn config() -> anyhow::Result<()> {
 
     let mut stderr = child.stderr.take().context("missing stderr")?;
     let mut stderr_str = String::from("");
-    stderr.read_to_string(&mut stderr_str).context("slurping stderr")?;
+    stderr
+        .read_to_string(&mut stderr_str)
+        .context("slurping stderr")?;
     assert!(stderr_str.contains("STARTING DAEMON"));
 
     Ok(())

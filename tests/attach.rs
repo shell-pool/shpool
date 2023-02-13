@@ -1,4 +1,9 @@
-use std::{env, fs, time, io::Read};
+use std::{
+    env,
+    fs,
+    io::Read,
+    time,
+};
 
 use anyhow::Context;
 
@@ -6,9 +11,10 @@ mod support;
 
 #[test]
 fn happy_path() -> anyhow::Result<()> {
-    let mut daemon_proc = support::daemon::Proc::new("norc.toml")
-        .context("starting daemon proc")?;
-    let mut attach_proc = daemon_proc.attach("sh1", vec![])
+    let mut daemon_proc =
+        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+    let mut attach_proc = daemon_proc
+        .attach("sh1", vec![])
         .context("starting attach proc")?;
 
     // not really needed, just here to test the events system
@@ -34,22 +40,22 @@ fn happy_path() -> anyhow::Result<()> {
 
 #[test]
 fn symlink_ssh_auth_sock() -> anyhow::Result<()> {
-    let mut daemon_proc = support::daemon::Proc::new("norc.toml")
-        .context("starting daemon proc")?;
+    let mut daemon_proc =
+        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
 
     let tmp_dir = daemon_proc.tmp_dir.as_ref().unwrap();
     let fake_auth_sock_tgt = tmp_dir.path().join("ssh-auth-sock-target.fake");
     fs::File::create(&fake_auth_sock_tgt)?;
 
-    let mut attach_proc = daemon_proc.attach(
-        "sh1",
-        vec![
-            (
+    let mut attach_proc = daemon_proc
+        .attach(
+            "sh1",
+            vec![(
                 String::from("SSH_AUTH_SOCK"),
                 String::from(fake_auth_sock_tgt.to_str().unwrap()),
-            )
-        ],
-    ).context("starting attach proc")?;
+            )],
+        )
+        .context("starting attach proc")?;
 
     let mut line_matcher = attach_proc.line_matcher()?;
 
@@ -68,15 +74,15 @@ fn config_disable_symlink_ssh_auth_sock() -> anyhow::Result<()> {
     let fake_auth_sock_tgt = tmp_dir.path().join("ssh-auth-sock-target.fake");
     fs::File::create(&fake_auth_sock_tgt)?;
 
-    let mut attach_proc = daemon_proc.attach(
-        "sh1",
-        vec![
-            (
+    let mut attach_proc = daemon_proc
+        .attach(
+            "sh1",
+            vec![(
                 String::from("SSH_AUTH_SOCK"),
                 String::from(fake_auth_sock_tgt.to_str().unwrap()),
-            )
-        ],
-    ).context("starting attach proc")?;
+            )],
+        )
+        .context("starting attach proc")?;
 
     let mut line_matcher = attach_proc.line_matcher()?;
 
@@ -90,9 +96,10 @@ fn config_disable_symlink_ssh_auth_sock() -> anyhow::Result<()> {
 fn forward_client_var() -> anyhow::Result<()> {
     env::set_var("MY_FORWARD_VAR", "forward-var-value");
 
-    let mut daemon_proc = support::daemon::Proc::new("forward_client_env.toml")
-        .context("starting daemon proc")?;
-    let mut attach_proc = daemon_proc.attach("sh1", vec![])
+    let mut daemon_proc =
+        support::daemon::Proc::new("forward_client_env.toml").context("starting daemon proc")?;
+    let mut attach_proc = daemon_proc
+        .attach("sh1", vec![])
         .context("starting attach proc")?;
 
     let mut line_matcher = attach_proc.line_matcher()?;
@@ -107,13 +114,17 @@ fn forward_client_var() -> anyhow::Result<()> {
 // same shell session.
 #[test]
 fn bounce() -> anyhow::Result<()> {
-    let mut daemon_proc = support::daemon::Proc::new("norc.toml")
-        .context("starting daemon proc")?;
+    let mut daemon_proc =
+        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
 
-    let bidi_done_w = daemon_proc.events.take().unwrap()
+    let bidi_done_w = daemon_proc
+        .events
+        .take()
+        .unwrap()
         .waiter(["daemon-bidi-stream-done"]);
     {
-        let mut attach_proc = daemon_proc.attach("sh1", vec![])
+        let mut attach_proc = daemon_proc
+            .attach("sh1", vec![])
             .context("starting attach proc")?;
 
         let mut line_matcher = attach_proc.line_matcher()?;
@@ -128,8 +139,7 @@ fn bounce() -> anyhow::Result<()> {
     daemon_proc.events = Some(bidi_done_w.wait_final_event("daemon-bidi-stream-done")?);
 
     {
-        let mut attach_proc = daemon_proc.attach("sh1", vec![])
-            .context("reattaching")?;
+        let mut attach_proc = daemon_proc.attach("sh1", vec![]).context("reattaching")?;
 
         let mut line_matcher = attach_proc.line_matcher()?;
 
@@ -142,13 +152,11 @@ fn bounce() -> anyhow::Result<()> {
 
 #[test]
 fn two_at_once() -> anyhow::Result<()> {
-    let mut daemon_proc = support::daemon::Proc::new("norc.toml")
-        .context("starting daemon proc")?;
+    let mut daemon_proc =
+        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
 
-    let mut attach_proc1 = daemon_proc.attach("sh1", vec![])
-        .context("starting sh1")?;
-    let mut attach_proc2 = daemon_proc.attach("sh2", vec![])
-        .context("starting sh2")?;
+    let mut attach_proc1 = daemon_proc.attach("sh1", vec![]).context("starting sh1")?;
+    let mut attach_proc2 = daemon_proc.attach("sh2", vec![]).context("starting sh2")?;
 
     let mut line_matcher1 = attach_proc1.line_matcher()?;
     let mut line_matcher2 = attach_proc2.line_matcher()?;
@@ -166,13 +174,17 @@ fn two_at_once() -> anyhow::Result<()> {
 // same shell session.
 #[test]
 fn explicit_exit() -> anyhow::Result<()> {
-    let mut daemon_proc = support::daemon::Proc::new("norc.toml")
-        .context("starting daemon proc")?;
+    let mut daemon_proc =
+        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
 
-    let bidi_done_w = daemon_proc.events.take().unwrap()
+    let bidi_done_w = daemon_proc
+        .events
+        .take()
+        .unwrap()
         .waiter(["daemon-bidi-stream-done"]);
     {
-        let mut attach_proc = daemon_proc.attach("sh1", vec![])
+        let mut attach_proc = daemon_proc
+            .attach("sh1", vec![])
             .context("starting attach proc")?;
 
         let mut line_matcher = attach_proc.line_matcher()?;
@@ -189,8 +201,7 @@ fn explicit_exit() -> anyhow::Result<()> {
     }
 
     {
-        let mut attach_proc = daemon_proc.attach("sh1", vec![])
-            .context("reattaching")?;
+        let mut attach_proc = daemon_proc.attach("sh1", vec![]).context("reattaching")?;
 
         let mut line_matcher = attach_proc.line_matcher()?;
 
@@ -205,14 +216,18 @@ fn explicit_exit() -> anyhow::Result<()> {
 // same shell session.
 #[test]
 fn exit_immediate_drop() -> anyhow::Result<()> {
-    let mut daemon_proc = support::daemon::Proc::new("norc.toml")
-        .context("starting daemon proc")?;
+    let mut daemon_proc =
+        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
 
-    let reap_w = daemon_proc.events.take().unwrap()
+    let reap_w = daemon_proc
+        .events
+        .take()
+        .unwrap()
         .waiter(["daemon-bidi-stream-done"]);
 
     {
-        let mut attach_proc = daemon_proc.attach("sh1", vec![])
+        let mut attach_proc = daemon_proc
+            .attach("sh1", vec![])
             .context("starting attach proc")?;
 
         let mut line_matcher = attach_proc.line_matcher()?;
@@ -232,13 +247,13 @@ fn exit_immediate_drop() -> anyhow::Result<()> {
     daemon_proc.events = Some(reap_w.wait_final_event("daemon-bidi-stream-done")?);
 
     {
-        let mut attach_proc = daemon_proc.attach("sh1", vec![])
-            .context("reattaching")?;
+        let mut attach_proc = daemon_proc.attach("sh1", vec![]).context("reattaching")?;
 
         let mut line_matcher = attach_proc.line_matcher()?;
 
         attach_proc.run_cmd("echo ${MYVAR:-second}")?;
-        line_matcher.match_re("second$")
+        line_matcher
+            .match_re("second$")
             .context("matching second")?;
     }
 
@@ -247,9 +262,10 @@ fn exit_immediate_drop() -> anyhow::Result<()> {
 
 #[test]
 fn output_flood() -> anyhow::Result<()> {
-    let mut daemon_proc = support::daemon::Proc::new("norc.toml")
-        .context("starting daemon proc")?;
-    let mut attach_proc = daemon_proc.attach("sh1", vec![])
+    let mut daemon_proc =
+        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+    let mut attach_proc = daemon_proc
+        .attach("sh1", vec![])
         .context("starting attach proc")?;
 
     attach_proc.run_cmd("cat /dev/urandom | hexdump")?;
@@ -257,9 +273,11 @@ fn output_flood() -> anyhow::Result<()> {
     let flood_duration = time::Duration::from_secs(2);
     let start_time = time::Instant::now();
     let mut stdout = attach_proc.proc.stdout.take().unwrap();
-    let mut buf: [u8; 1024*256] = [0; 1024*256];
+    let mut buf: [u8; 1024 * 256] = [0; 1024 * 256];
     while time::Instant::now().duration_since(start_time) < flood_duration {
-        stdout.read(&mut buf).context("reading a chunk of flood output")?;
+        stdout
+            .read(&mut buf)
+            .context("reading a chunk of flood output")?;
     }
 
     Ok(())

@@ -2,7 +2,10 @@ use std::os::unix::io::RawFd;
 
 use anyhow::Context;
 use log::error;
-use serde_derive::{Serialize, Deserialize};
+use serde_derive::{
+    Deserialize,
+    Serialize,
+};
 
 // see `man ioctl_tty` for info on these ioctl commands
 nix::ioctl_read_bad!(tiocgwinsz, libc::TIOCGWINSZ, libc::winsize);
@@ -62,7 +65,6 @@ pub fn disable_echo(fd: RawFd) -> std::io::Result<()> {
     tcsetattr(fd, TCSANOW, &term)
 }
 
-
 pub fn set_attach_flags() -> anyhow::Result<AttachFlagsGuard> {
     // TODO(ethan): it seems like we may be able to drop the termios
     //              dep and just use nix. See nix::sys::termios::Termios.
@@ -70,7 +72,10 @@ pub fn set_attach_flags() -> anyhow::Result<AttachFlagsGuard> {
 
     let fd = 0;
 
-    if atty::isnt(atty::Stream::Stdout) || atty::isnt(atty::Stream::Stdin) || atty::isnt(atty::Stream::Stderr) {
+    if atty::isnt(atty::Stream::Stdout)
+        || atty::isnt(atty::Stream::Stdin)
+        || atty::isnt(atty::Stream::Stderr)
+    {
         // We are not attached to a terminal, so don't futz with its flags.
         return Ok(AttachFlagsGuard { fd, old: None });
     }

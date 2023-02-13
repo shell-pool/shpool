@@ -1,15 +1,44 @@
-use std::io::{Read, Write};
-use std::os::unix::io::AsRawFd;
-use std::os::unix::net::UnixStream;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, TryLockError};
-use std::{thread, time, io};
+use std::{
+    io,
+    io::{
+        Read,
+        Write,
+    },
+    os::unix::{
+        io::AsRawFd,
+        net::UnixStream,
+    },
+    sync::{
+        atomic::{
+            AtomicBool,
+            Ordering,
+        },
+        Arc,
+        Mutex,
+        TryLockError,
+    },
+    thread,
+    time,
+};
 
-use anyhow::{anyhow, Context};
+use anyhow::{
+    anyhow,
+    Context,
+};
 use crossbeam_channel::RecvTimeoutError;
-use log::{debug, error, info, trace};
+use log::{
+    debug,
+    error,
+    info,
+    trace,
+};
 
-use super::super::{tty, protocol, test_hooks, consts};
+use super::super::{
+    consts,
+    protocol,
+    test_hooks,
+    tty,
+};
 
 const SUPERVISOR_POLL_DUR: time::Duration = time::Duration::from_millis(300);
 const RPC_LOOP_POLL_DUR: time::Duration = time::Duration::from_millis(300);
@@ -24,21 +53,27 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn rpc_call(&self, arg: protocol::SessionMessageRequestPayload) -> anyhow::Result<protocol::SessionMessageReply> {
+    pub fn rpc_call(
+        &self,
+        arg: protocol::SessionMessageRequestPayload,
+    ) -> anyhow::Result<protocol::SessionMessageReply> {
         // make a best effort attempt to avoid sending messages
         // to a session with no attached terminal
         match self.inner.try_lock() {
             // if it is locked, someone is attached
-            Err(TryLockError::WouldBlock) => {}
+            Err(TryLockError::WouldBlock) => {},
             // if we can lock it, there is no one to get our msg
             _ => {
                 return Ok(protocol::SessionMessageReply::NotAttached);
             },
         }
 
-        self.rpc_in.send_timeout(arg, SESSION_MESSAGE_TIMEOUT)
+        self.rpc_in
+            .send_timeout(arg, SESSION_MESSAGE_TIMEOUT)
             .context("sending session message")?;
-        Ok(self.rpc_out.recv_timeout(SESSION_MESSAGE_TIMEOUT)
+        Ok(self
+            .rpc_out
+            .recv_timeout(SESSION_MESSAGE_TIMEOUT)
             .context("receiving session message reply")?)
     }
 }
@@ -55,15 +90,22 @@ pub struct SessionInner {
     pub client_stream: Option<UnixStream>,
 }
 impl SessionInner {
-    pub fn handle_resize_rpc(&self, req: protocol::ResizeRequest) -> anyhow::Result<protocol::ResizeReply> {
-        info!("s({}): handle_resize_rpc: resize {:?} to {:?}",
-              self.name, self, &req.tty_size);
+    pub fn handle_resize_rpc(
+        &self,
+        req: protocol::ResizeRequest,
+    ) -> anyhow::Result<protocol::ResizeReply> {
+        info!(
+            "s({}): handle_resize_rpc: resize {:?} to {:?}",
+            self.name, self, &req.tty_size
+        );
         self.set_pty_size(&req.tty_size)?;
         Ok(protocol::ResizeReply::Ok)
     }
 
     pub fn set_pty_size(&self, size: &tty::Size) -> anyhow::Result<()> {
-        let pty_master = self.pty_master.is_parent()
+        let pty_master = self
+            .pty_master
+            .is_parent()
             .context("internal error: executing in child fork")?;
         size.set_fd(pty_master.as_raw_fd())
     }
@@ -81,19 +123,26 @@ impl SessionInner {
         // returns
         let mut client_stream = match self.client_stream.take() {
             Some(s) => s,
-            None => {
-                return Err(anyhow!("no client stream to take for bidi streaming"))
-            }
+            None => return Err(anyhow!("no client stream to take for bidi streaming")),
         };
 
         // set timeouts so we can wake up to handle cancelation correctly
-        client_stream.set_nonblocking(true).context("setting client stream nonblocking")?;
+        client_stream
+            .set_nonblocking(true)
+            .context("setting client stream nonblocking")?;
 
-        let mut reader_client_stream = client_stream.try_clone().context("creating reader client stream")?;
-        let client_stream_m = Mutex::new(client_stream.try_clone()
-                                       .context("wrapping a stream handle in mutex")?);
+        let mut reader_client_stream = client_stream
+            .try_clone()
+            .context("creating reader client stream")?;
+        let client_stream_m = Mutex::new(
+            client_stream
+                .try_clone()
+                .context("wrapping a stream handle in mutex")?,
+        );
 
-        let pty_master = self.pty_master.is_parent()
+        let pty_master = self
+            .pty_master
+            .is_parent()
             .context("internal error: executing in child fork")?;
 
         // A flag to indicate that outstanding threads should stop
@@ -166,7 +215,8 @@ impl SessionInner {
 
         let c_done = child_done.load(Ordering::Acquire);
         if c_done {
-            client_stream.shutdown(std::net::Shutdown::Both)
+            client_stream
+                .shutdown(std::net::Shutdown::Both)
                 .context("shutting down client stream")?;
         }
 
@@ -191,7 +241,7 @@ impl SessionInner {
             loop {
                 if stop.load(Ordering::Relaxed) {
                     info!("s({}): client->shell: recvd stop msg (1)", self.name);
-                    return Ok(())
+                    return Ok(());
                 }
 
                 // N.B. we don't need to muck about with chunking or anything
@@ -210,7 +260,7 @@ impl SessionInner {
                             continue;
                         }
                         return Err(e).context("reading client chunk");
-                    }
+                    },
                 };
                 if len == 0 {
                     continue;
@@ -219,13 +269,15 @@ impl SessionInner {
                 debug!("client->shell: read {} bytes", len);
 
                 let mut to_write = &buf[0..len];
-                debug!("client->shell: created to_write='{}'",
-                       String::from_utf8_lossy(to_write));
+                debug!(
+                    "client->shell: created to_write='{}'",
+                    String::from_utf8_lossy(to_write)
+                );
 
                 while to_write.len() > 0 {
                     if stop.load(Ordering::Relaxed) {
                         info!("s({}): client->shell: recvd stop msg (1)", self.name);
-                        return Ok(())
+                        return Ok(());
                     }
 
                     // TODO(ethan): will we even get an EWOULDBLOCK return code anymore?
@@ -240,15 +292,19 @@ impl SessionInner {
                                 continue;
                             }
                             return Err(e).context("writing client chunk");
-                        }
+                        },
                     };
                     debug!("client->shell: wrote {} bytes", nwritten);
                     to_write = &to_write[nwritten..];
-                    trace!("client->shell: to_write='{}'",
-                           String::from_utf8_lossy(to_write));
+                    trace!(
+                        "client->shell: to_write='{}'",
+                        String::from_utf8_lossy(to_write)
+                    );
                 }
 
-                master_writer.flush().context("flushing input from client to shell")?;
+                master_writer
+                    .flush()
+                    .context("flushing input from client to shell")?;
                 test_hooks::emit!("daemon-wrote-client-chunk");
 
                 debug!("client->shell: flushed chunk of len {}", len);
@@ -274,7 +330,7 @@ impl SessionInner {
             loop {
                 if stop.load(Ordering::Relaxed) {
                     info!("s({}): shell->client: recvd stop msg", self.name);
-                    return Ok(())
+                    return Ok(());
                 }
 
                 // select so we know which stream to read from, and
@@ -293,7 +349,7 @@ impl SessionInner {
                     Err(nix::errno::Errno::EBADF) => {
                         info!("s({}): shell->client: shell went down", self.name);
                         return Ok(());
-                    }
+                    },
                     Err(e) => return Err(e).context("selecting on pty master"),
                 };
                 if nready == 0 {
@@ -305,14 +361,19 @@ impl SessionInner {
                         Ok(n) => n,
                         Err(e) => {
                             if e.kind() == std::io::ErrorKind::WouldBlock {
-                                trace!("s({}): shell->client: pty master read: WouldBlock", self.name);
+                                trace!(
+                                    "s({}): shell->client: pty master read: WouldBlock",
+                                    self.name
+                                );
                                 thread::sleep(consts::PIPE_POLL_DURATION);
                                 continue;
                             }
-                            info!("sh({}): shell->client: error reading from pty: {:?}",
-                                  self.name, e);
+                            info!(
+                                "sh({}): shell->client: error reading from pty: {:?}",
+                                self.name, e
+                            );
                             return Err(e).context("reading pty master chunk");
-                        }
+                        },
                     };
                     if len == 0 {
                         trace!("s({}): shell->client: 0 stdout bytes, waiting", self.name);
@@ -324,15 +385,23 @@ impl SessionInner {
                         kind: protocol::ChunkKind::Data,
                         buf: &buf[..len],
                     };
-                    debug!("s({}): shell->client: read pty master len={} '{}'",
-                           self.name, len, String::from_utf8_lossy(chunk.buf));
+                    debug!(
+                        "s({}): shell->client: read pty master len={} '{}'",
+                        self.name,
+                        len,
+                        String::from_utf8_lossy(chunk.buf)
+                    );
                     {
                         let mut s = client_stream_m.lock().unwrap();
-                        chunk.write_to(&mut *s, &stop)
+                        chunk
+                            .write_to(&mut *s, &stop)
                             .context("writing stdout chunk to client stream")?;
                     }
-                    debug!("s({}): shell->client: wrote {} pty master bytes",
-                           self.name, chunk.buf.len());
+                    debug!(
+                        "s({}): shell->client: wrote {} pty master bytes",
+                        self.name,
+                        chunk.buf.len()
+                    );
                 }
 
                 // flush immediately
@@ -352,7 +421,7 @@ impl SessionInner {
                 trace!("s({}): heartbeat: checking stop_rx", self.name);
                 if stop.load(Ordering::Relaxed) {
                     info!("s({}): heartbeat: recvd stop msg", self.name);
-                    return Ok(())
+                    return Ok(());
                 }
 
                 thread::sleep(consts::HEARTBEAT_DURATION);
@@ -365,14 +434,14 @@ impl SessionInner {
                     match chunk.write_to(&mut *s, &stop) {
                         Ok(_) => {
                             trace!("s({}): heartbeat: wrote heartbeat", self.name);
-                        }
+                        },
                         Err(e) => {
                             if e.kind() == io::ErrorKind::BrokenPipe {
                                 trace!("s({}): heartbeat: client hangup", self.name);
                                 return Ok(());
                             }
                             return Err(e).context("writing heartbeat")?;
-                        }
+                        },
                     }
                 }
             }
@@ -388,16 +457,22 @@ impl SessionInner {
     ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
         scope.spawn(|| -> anyhow::Result<()> {
             loop {
-                trace!("sh({}): supervisor: checking stop_rx (pty_master={})",
-                       self.name, pty_master.as_raw_fd());
+                trace!(
+                    "sh({}): supervisor: checking stop_rx (pty_master={})",
+                    self.name,
+                    pty_master.as_raw_fd()
+                );
                 if stop.load(Ordering::Relaxed) {
                     info!("s({}): supervisor: recvd stop msg", self.name);
-                    return Ok(())
+                    return Ok(());
                 }
 
                 match self.child_exited.recv_timeout(SUPERVISOR_POLL_DUR) {
                     Ok(_) => {
-                        error!("s({}): internal error: unexpected send on child_exited chan", self.name);
+                        error!(
+                            "s({}): internal error: unexpected send on child_exited chan",
+                            self.name
+                        );
                     },
                     Err(RecvTimeoutError::Timeout) => {
                         // shell is still running, do nothing
@@ -407,7 +482,7 @@ impl SessionInner {
                         info!("s({}): supervisor: child shell exited", self.name);
                         child_done.store(true, Ordering::Release);
                         return Ok(());
-                    }
+                    },
                 }
             }
         })
@@ -422,7 +497,7 @@ impl SessionInner {
             loop {
                 if stop.load(Ordering::Relaxed) {
                     info!("s({}): rpc: recvd stop msg", self.name);
-                    return Ok(())
+                    return Ok(());
                 }
 
                 let req = match self.rpc_in.recv_timeout(RPC_LOOP_POLL_DUR) {
@@ -433,22 +508,23 @@ impl SessionInner {
                 let resp = match req {
                     protocol::SessionMessageRequestPayload::Resize(req) => {
                         debug!("s({}): rpc: handling resize", self.name);
-                        protocol::SessionMessageReply::Resize(
-                            self.handle_resize_rpc(req)?)
+                        protocol::SessionMessageReply::Resize(self.handle_resize_rpc(req)?)
                     },
                     protocol::SessionMessageRequestPayload::Detach => {
                         debug!("s({}): rpc: handling detach", self.name);
                         stop.store(true, Ordering::Relaxed);
                         protocol::SessionMessageReply::Detach(
-                            protocol::SessionMessageDetachReply::Ok)
-                    }
+                            protocol::SessionMessageDetachReply::Ok,
+                        )
+                    },
                 };
 
                 // A timeout here is a hard error because it represents
                 // lost data. We could technically write a retry loop
                 // around the timeout, but it is an unbounded channel,
                 // so a timeout seems very unlikely.
-                self.rpc_out.send_timeout(resp, RPC_LOOP_POLL_DUR)
+                self.rpc_out
+                    .send_timeout(resp, RPC_LOOP_POLL_DUR)
                     .context("sending session reply")?
             }
         })

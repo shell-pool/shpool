@@ -1,20 +1,70 @@
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::collections::{HashMap, HashSet};
-use std::io::{Read, Write};
-use std::os::unix::io::AsRawFd;
-use std::os::unix::net::{UnixListener, UnixStream};
-use std::os::unix::process::CommandExt;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, Condvar};
-use std::{env, fs, os, time, thread, process, net};
+use std::{
+    collections::{
+        HashMap,
+        HashSet,
+    },
+    env,
+    fs,
+    io::{
+        Read,
+        Write,
+    },
+    net,
+    os,
+    os::unix::{
+        io::AsRawFd,
+        net::{
+            UnixListener,
+            UnixStream,
+        },
+        process::CommandExt,
+    },
+    path::{
+        Path,
+        PathBuf,
+    },
+    process,
+    sync::{
+        Arc,
+        Condvar,
+        Mutex,
+    },
+    thread,
+    time,
+};
 
-use anyhow::{anyhow, Context};
+use anyhow::{
+    anyhow,
+    Context,
+};
+use byteorder::{
+    LittleEndian,
+    ReadBytesExt,
+    WriteBytesExt,
+};
 use crossbeam_channel::TryRecvError;
-use log::{error, info, warn};
-use nix::{sys::signal, unistd::Pid};
+use log::{
+    error,
+    info,
+    warn,
+};
+use nix::{
+    sys::signal,
+    unistd::Pid,
+};
 
-use super::{config, ssh_plugin, shell, user};
-use super::super::{consts, protocol, tty, test_hooks};
+use super::{
+    super::{
+        consts,
+        protocol,
+        test_hooks,
+        tty,
+    },
+    config,
+    shell,
+    ssh_plugin,
+    user,
+};
 
 // controls how long we wait on attempted sends and receives
 // when sending a message to a running session
@@ -33,8 +83,10 @@ pub struct Server {
 impl Server {
     pub fn new(config: config::Config, runtime_dir: PathBuf) -> Arc<Self> {
         let park_timeout = time::Duration::from_millis(
-            config.ssh_handshake_timeout_ms
-                .unwrap_or(DEFAULT_SSH_HANDSHAKE_TIMEOUT_MS));
+            config
+                .ssh_handshake_timeout_ms
+                .unwrap_or(DEFAULT_SSH_HANDSHAKE_TIMEOUT_MS),
+        );
 
         Arc::new(Server {
             config,
@@ -47,8 +99,7 @@ impl Server {
         })
     }
 
-    pub fn serve(server: Arc<Self>, listener: UnixListener) -> anyhow::Result<()>
-    {
+    pub fn serve(server: Arc<Self>, listener: UnixListener) -> anyhow::Result<()> {
         info!("listening on socket");
         test_hooks::emit!("daemon-about-to-listen");
         for stream in listener.incoming() {
@@ -61,10 +112,10 @@ impl Server {
                             error!("handling new connection: {:?}", err)
                         }
                     });
-                }
+                },
                 Err(err) => {
                     error!("accepting stream: {:?}", err);
-                }
+                },
             }
         }
 
@@ -74,34 +125,32 @@ impl Server {
     fn handle_conn(&self, mut stream: UnixStream) -> anyhow::Result<()> {
         info!("handling inbound connection");
         // We want to avoid timing out while blocking the main thread.
-        stream.set_read_timeout(Some(consts::SOCK_STREAM_TIMEOUT))
+        stream
+            .set_read_timeout(Some(consts::SOCK_STREAM_TIMEOUT))
             .context("setting read timout on inbound session")?;
 
-        let header = parse_connect_header(&mut stream)
-            .context("parsing connect header")?;
+        let header = parse_connect_header(&mut stream).context("parsing connect header")?;
 
         // Unset the read timeout before we pass things off to a
         // worker thread because it is perfectly fine for there to
         // be no new data for long periods of time when the users
         // is connected to a shell session.
-        stream.set_read_timeout(None)
+        stream
+            .set_read_timeout(None)
             .context("unsetting read timout on inbound session")?;
 
         match header {
-            protocol::ConnectHeader::Attach(h) =>
-                self.handle_attach(stream, h, false),
-            protocol::ConnectHeader::Detach(r) =>
-                self.handle_detach(stream, r),
-            protocol::ConnectHeader::Kill(r) =>
-                self.handle_kill(stream, r),
-            protocol::ConnectHeader::RemoteCommandLock =>
-                self.handle_remote_command_lock(stream),
-            protocol::ConnectHeader::LocalCommandSetMetadata(r) =>
-                self.handle_local_command_set_metadata(r),
-            protocol::ConnectHeader::List =>
-                self.handle_list(stream),
-            protocol::ConnectHeader::SessionMessage(header) =>
-                self.handle_session_message(stream, header),
+            protocol::ConnectHeader::Attach(h) => self.handle_attach(stream, h, false),
+            protocol::ConnectHeader::Detach(r) => self.handle_detach(stream, r),
+            protocol::ConnectHeader::Kill(r) => self.handle_kill(stream, r),
+            protocol::ConnectHeader::RemoteCommandLock => self.handle_remote_command_lock(stream),
+            protocol::ConnectHeader::LocalCommandSetMetadata(r) => {
+                self.handle_local_command_set_metadata(r)
+            },
+            protocol::ConnectHeader::List => self.handle_list(stream),
+            protocol::ConnectHeader::SessionMessage(header) => {
+                self.handle_session_message(stream, header)
+            },
         }
     }
 
@@ -132,10 +181,13 @@ impl Server {
                     match inner.child_exited.try_recv() {
                         Ok(_) => {
                             return Err(anyhow!("unexpected send on child_exited chan"));
-                        }
+                        },
                         Err(TryRecvError::Empty) => {
                             // the channel is still open so the subshell is still running
-                            info!("handle_attach: taking over existing session inner={:?}", inner);
+                            info!(
+                                "handle_attach: taking over existing session inner={:?}",
+                                inner
+                            );
 
                             // Some ncurses apps get lazy about redrawing if the tty
                             // size has not changed when they get a SIGWINCH, so we
@@ -145,31 +197,41 @@ impl Server {
                                 rows: header.local_tty_size.rows + 1,
                                 cols: header.local_tty_size.cols + 1,
                             };
-                            inner.set_pty_size(&tty_oversize)
+                            inner
+                                .set_pty_size(&tty_oversize)
                                 .context("setting oversized pty size on reattach")?;
 
-                            inner.set_pty_size(&header.local_tty_size)
+                            inner
+                                .set_pty_size(&header.local_tty_size)
                                 .context("resetting pty size on reattach")?;
                             inner.client_stream = Some(stream.try_clone()?);
 
                             // status is already attached
-                        }
+                        },
                         Err(TryRecvError::Disconnected) => {
                             // the channel is closed so we know the subshell exited
-                            info!("handle_attach: stale inner={:?}, clobbering with new subshell", inner);
+                            info!(
+                                "handle_attach: stale inner={:?}, clobbering with new subshell",
+                                inner
+                            );
                             status = protocol::AttachStatus::Created;
-                        }
+                        },
                     }
 
                     // fallthrough to bidi streaming
                 } else {
                     info!("handle_attach: busy shell session, doing nothing");
                     // The stream is busy, so we just inform the client and close the stream.
-                    write_reply(&mut stream, protocol::AttachReplyHeader{
-                        status: protocol::AttachStatus::Busy,
-                    })?;
-                    stream.shutdown(net::Shutdown::Both).context("closing stream")?;
-                    return Ok(())
+                    write_reply(
+                        &mut stream,
+                        protocol::AttachReplyHeader {
+                            status: protocol::AttachStatus::Busy,
+                        },
+                    )?;
+                    stream
+                        .shutdown(net::Shutdown::Both)
+                        .context("closing stream")?;
+                    return Ok(());
                 }
             } else {
                 status = protocol::AttachStatus::Created;
@@ -177,15 +239,18 @@ impl Server {
 
             if status == protocol::AttachStatus::Created {
                 info!("handle_attach: creating new subshell");
-                let (rpc_in, rpc_out, inner) = self.spawn_subshell(
-                    stream, &header, disable_echo)?;
+                let (rpc_in, rpc_out, inner) =
+                    self.spawn_subshell(stream, &header, disable_echo)?;
 
-                shells.insert(header.name.clone(), shell::Session {
-                    rpc_in,
-                    rpc_out,
-                    started_at: time::SystemTime::now(),
-                    inner: Arc::new(Mutex::new(inner)),
-                });
+                shells.insert(
+                    header.name.clone(),
+                    shell::Session {
+                        rpc_in,
+                        rpc_out,
+                        started_at: time::SystemTime::now(),
+                        inner: Arc::new(Mutex::new(inner)),
+                    },
+                );
                 // fallthrough to bidi streaming
             }
 
@@ -199,7 +264,8 @@ impl Server {
             }
         };
 
-        self.link_ssh_auth_sock(&header).context("linking SSH_AUTH_SOCK")?;
+        self.link_ssh_auth_sock(&header)
+            .context("linking SSH_AUTH_SOCK")?;
 
         if let Some(inner) = inner_to_stream {
             let mut child_done = false;
@@ -208,12 +274,10 @@ impl Server {
                 Some(s) => s,
                 None => {
                     return Err(anyhow!("no client stream, should be impossible"));
-                }
+                },
             };
 
-            let reply_status = write_reply(client_stream, protocol::AttachReplyHeader{
-                status,
-            });
+            let reply_status = write_reply(client_stream, protocol::AttachReplyHeader { status });
             if let Err(e) = reply_status {
                 error!("error writing reply status: {:?}", e);
             }
@@ -261,13 +325,19 @@ impl Server {
         fs::create_dir_all(symlink.parent().ok_or(anyhow!("no simlink parent"))?)
             .context("could not create directory for SSH_AUTH_SOCK simlink")?;
         let _ = fs::remove_file(&symlink); // clean up the link if it exists already
-        os::unix::fs::symlink(ssh_auth_sock, &symlink)
-            .context(format!("could not symlink '{:?}' to point to '{:?}'", symlink, ssh_auth_sock))?;
+        os::unix::fs::symlink(ssh_auth_sock, &symlink).context(format!(
+            "could not symlink '{:?}' to point to '{:?}'",
+            symlink, ssh_auth_sock
+        ))?;
 
         Ok(())
     }
 
-    fn handle_detach(&self, mut stream: UnixStream, request: protocol::DetachRequest) -> anyhow::Result<()> {
+    fn handle_detach(
+        &self,
+        mut stream: UnixStream,
+        request: protocol::DetachRequest,
+    ) -> anyhow::Result<()> {
         let mut not_found_sessions = vec![];
         let mut not_attached_sessions = vec![];
         {
@@ -284,15 +354,23 @@ impl Server {
             }
         }
 
-        write_reply(&mut stream, protocol::DetachReply {
-            not_found_sessions,
-            not_attached_sessions,
-        }).context("writing detach reply")?;
+        write_reply(
+            &mut stream,
+            protocol::DetachReply {
+                not_found_sessions,
+                not_attached_sessions,
+            },
+        )
+        .context("writing detach reply")?;
 
         Ok(())
     }
 
-    fn handle_kill(&self, mut stream: UnixStream, request: protocol::KillRequest) -> anyhow::Result<()> {
+    fn handle_kill(
+        &self,
+        mut stream: UnixStream,
+        request: protocol::KillRequest,
+    ) -> anyhow::Result<()> {
         let mut not_found_sessions = vec![];
         {
             let mut shells = self.shells.lock().unwrap();
@@ -308,7 +386,10 @@ impl Server {
                     }
 
                     let inner = s.inner.lock().unwrap();
-                    let pid = inner.pty_master.child_pid().ok_or(anyhow!("no child pid"))?;
+                    let pid = inner
+                        .pty_master
+                        .child_pid()
+                        .ok_or(anyhow!("no child pid"))?;
                     signal::kill(Pid::from_raw(pid), Some(signal::Signal::SIGKILL))
                         .context("sending SIGKILL to child proc")?;
                     // we don't need to wait since the dedicated reaping thread is active
@@ -327,9 +408,8 @@ impl Server {
             }
         }
 
-        write_reply(&mut stream, protocol::KillReply {
-            not_found_sessions,
-        }).context("writing kill reply")?;
+        write_reply(&mut stream, protocol::KillReply { not_found_sessions })
+            .context("writing kill reply")?;
 
         Ok(())
     }
@@ -341,8 +421,10 @@ impl Server {
 
             // if the metadata has expired, clobber it
             let attach_timeout = time::Duration::from_millis(
-                self.config.ssh_handshake_timeout_ms
-                    .unwrap_or(DEFAULT_SSH_HANDSHAKE_TIMEOUT_MS));
+                self.config
+                    .ssh_handshake_timeout_ms
+                    .unwrap_or(DEFAULT_SSH_HANDSHAKE_TIMEOUT_MS),
+            );
             let mut clobber_metadata = false;
             if let Some(md) = &inner.metadata {
                 info!("handle_remote_command_lock: checking to see if existing metadata is valid");
@@ -357,13 +439,19 @@ impl Server {
 
             let metadata = if inner.has_parked_local() {
                 info!("handle_remote_command_lock: there is already a parked local waiting for us");
-                inner.metadata.take().unwrap_or_else(|| ssh_plugin::Metadata::default())
+                inner
+                    .metadata
+                    .take()
+                    .unwrap_or_else(|| ssh_plugin::Metadata::default())
             } else {
                 if inner.has_parked_remote() {
                     info!("handle_remote_command_lock: remote parking slot full");
-                    write_reply(&mut stream, protocol::AttachReplyHeader{
-                        status: protocol::AttachStatus::SshExtensionParkingSlotFull,
-                    })?;
+                    write_reply(
+                        &mut stream,
+                        protocol::AttachReplyHeader {
+                            status: protocol::AttachStatus::SshExtensionParkingSlotFull,
+                        },
+                    )?;
                     return Ok(());
                 }
 
@@ -371,22 +459,32 @@ impl Server {
                 inner.set_has_parked_remote(true);
 
                 let attach_timeout = time::Duration::from_millis(
-                    self.config.ssh_handshake_timeout_ms
-                        .unwrap_or(DEFAULT_SSH_HANDSHAKE_TIMEOUT_MS));
+                    self.config
+                        .ssh_handshake_timeout_ms
+                        .unwrap_or(DEFAULT_SSH_HANDSHAKE_TIMEOUT_MS),
+                );
 
-                let (mut inner, timeout_res) =
-                    self.ssh_extension_parker.cond.wait_timeout_while(
-                        inner, attach_timeout, |inner| inner.metadata.is_none()).unwrap();
+                let (mut inner, timeout_res) = self
+                    .ssh_extension_parker
+                    .cond
+                    .wait_timeout_while(inner, attach_timeout, |inner| inner.metadata.is_none())
+                    .unwrap();
                 if timeout_res.timed_out() {
                     info!("handle_remote_command_lock: timeout");
-                    write_reply(&mut stream, protocol::AttachReplyHeader{
-                        status: protocol::AttachStatus::Timeout,
-                    })?;
-                    return Ok(())
+                    write_reply(
+                        &mut stream,
+                        protocol::AttachReplyHeader {
+                            status: protocol::AttachStatus::Timeout,
+                        },
+                    )?;
+                    return Ok(());
                 }
 
                 inner.set_has_parked_remote(false);
-                inner.metadata.take().unwrap_or_else(|| ssh_plugin::Metadata::default())
+                inner
+                    .metadata
+                    .take()
+                    .unwrap_or_else(|| ssh_plugin::Metadata::default())
             };
 
             self.ssh_extension_parker.cond.notify_one();
@@ -398,18 +496,25 @@ impl Server {
             Err(e) => {
                 warn!("stdin is not a tty, using default size (err: {:?})", e);
                 tty::Size { rows: 24, cols: 80 }
-            }
+            },
         };
 
-        info!("handle_remote_command_lock: becoming an attach with {:?}", metadata);
+        info!(
+            "handle_remote_command_lock: becoming an attach with {:?}",
+            metadata
+        );
         // At this point, we've gotten the name through normal means, so we
         // can just become a normal attach request.
-        self.handle_attach(stream, protocol::AttachHeader {
-            name: metadata.name,
-            term: metadata.term,
-            local_tty_size: tty_size,
-            local_env: vec![], // TODO(ethan): support env-var forwarding for ssh plugin mode
-        }, true)
+        self.handle_attach(
+            stream,
+            protocol::AttachHeader {
+                name: metadata.name,
+                term: metadata.term,
+                local_tty_size: tty_size,
+                local_env: vec![], // TODO(ethan): support env-var forwarding for ssh plugin mode
+            },
+            true,
+        )
     }
 
     fn handle_local_command_set_metadata(
@@ -421,7 +526,10 @@ impl Server {
             let mut inner = self.ssh_extension_parker.inner.lock().unwrap();
 
             if inner.has_parked_remote() {
-                assert!(!inner.has_parked_local(), "local: should never have two threads parked at once");
+                assert!(
+                    !inner.has_parked_local(),
+                    "local: should never have two threads parked at once"
+                );
 
                 info!("handle_local_command_set_metadata: there is a remote thread waiting to be woken");
                 inner.metadata = Some(ssh_plugin::Metadata {
@@ -442,14 +550,21 @@ impl Server {
                 inner.set_has_parked_local(true);
 
                 let attach_timeout = time::Duration::from_millis(
-                    self.config.ssh_handshake_timeout_ms
-                        .unwrap_or(DEFAULT_SSH_HANDSHAKE_TIMEOUT_MS));
+                    self.config
+                        .ssh_handshake_timeout_ms
+                        .unwrap_or(DEFAULT_SSH_HANDSHAKE_TIMEOUT_MS),
+                );
 
-                let (mut inner, timeout_res) = self.ssh_extension_parker.cond
-                    .wait_timeout_while(inner, attach_timeout, |inner| inner.metadata.is_some()).unwrap();
+                let (mut inner, timeout_res) = self
+                    .ssh_extension_parker
+                    .cond
+                    .wait_timeout_while(inner, attach_timeout, |inner| inner.metadata.is_some())
+                    .unwrap();
                 inner.set_has_parked_local(false);
                 if timeout_res.timed_out() {
-                    info!("handle_local_command_set_metadata: timed out waiting for remote command");
+                    info!(
+                        "handle_local_command_set_metadata: timed out waiting for remote command"
+                    );
                     protocol::LocalCommandSetMetadataStatus::Timeout
                 } else {
                     info!("handle_local_command_set_metadata: finished the handshake successfully");
@@ -459,9 +574,11 @@ impl Server {
         };
 
         // write the reply without the lock held to avoid doin IO with a lock held
-        info!("handle_local_command_set_metadata: status={:?} name='{}'",
-              status, header.name);
-        return Ok(())
+        info!(
+            "handle_local_command_set_metadata: status={:?} name='{}'",
+            status, header.name
+        );
+        return Ok(());
     }
 
     fn handle_list(&self, mut stream: UnixStream) -> anyhow::Result<()> {
@@ -474,11 +591,11 @@ impl Server {
             .map(|(k, v)| {
                 Ok(protocol::Session {
                     name: k.to_string(),
-                    started_at_unix_ms: v.started_at
-                                            .duration_since(time::UNIX_EPOCH)?
-                                            .as_millis() as i64,
+                    started_at_unix_ms: v.started_at.duration_since(time::UNIX_EPOCH)?.as_millis()
+                        as i64,
                 })
-            }).collect();
+            })
+            .collect();
         let sessions = sessions.context("collecting running session metadata")?;
 
         write_reply(&mut stream, protocol::ListReply { sessions })?;
@@ -486,7 +603,11 @@ impl Server {
         Ok(())
     }
 
-    fn handle_session_message(&self, mut stream: UnixStream, header: protocol::SessionMessageRequest) -> anyhow::Result<()> {
+    fn handle_session_message(
+        &self,
+        mut stream: UnixStream,
+        header: protocol::SessionMessageRequest,
+    ) -> anyhow::Result<()> {
         info!("handle_session_message: header={:?}", header);
 
         // create a slot to store our reply so we can do
@@ -502,8 +623,7 @@ impl Server {
             }
         }
 
-        write_reply(&mut stream, reply)
-            .context("handle_session_message: writing reply")?;
+        write_reply(&mut stream, reply).context("handle_session_message: writing reply")?;
 
         Ok(())
     }
@@ -516,7 +636,7 @@ impl Server {
     ) -> anyhow::Result<(
         crossbeam_channel::Sender<protocol::SessionMessageRequestPayload>,
         crossbeam_channel::Receiver<protocol::SessionMessageReply>,
-        shell::SessionInner
+        shell::SessionInner,
     )> {
         let user_info = user::info()?;
         let shell = if let Some(s) = &self.config.shell {
@@ -597,10 +717,11 @@ impl Server {
         // proceeded with a "-". You can see sshd doing the
         // same thing if you look in the session.c file of
         // openssh.
-        let shell_basename =
-            Path::new(&shell).file_name()
-                .ok_or(anyhow!("error building login shell indicator"))?
-                .to_str().ok_or(anyhow!("error parsing shell name as utf8"))?;
+        let shell_basename = Path::new(&shell)
+            .file_name()
+            .ok_or(anyhow!("error building login shell indicator"))?
+            .to_str()
+            .ok_or(anyhow!("error parsing shell name as utf8"))?;
         cmd.arg0(format!("-{}", shell_basename));
 
         let fork = pty::fork::Fork::from_ptmx().context("forking pty")?;
@@ -624,13 +745,16 @@ impl Server {
             let _tx = child_exited_tx;
 
             match waitable_child.wait() {
-                Ok(_) => {} // fallthrough
+                Ok(_) => {}, // fallthrough
                 Err(e) => {
                     error!("waiting to reap child shell: {:?}", e);
-                }
+                },
             }
 
-            info!("s({}): reaped child shell: {:?}", session_name, waitable_child);
+            info!(
+                "s({}): reaped child shell: {:?}",
+                session_name, waitable_child
+            );
         });
 
         let (in_tx, in_rx) = crossbeam_channel::unbounded();
@@ -643,41 +767,47 @@ impl Server {
             pty_master: fork,
             client_stream: Some(client_stream),
         };
-        session.set_pty_size(&header.local_tty_size).context("setting initial pty size")?;
+        session
+            .set_pty_size(&header.local_tty_size)
+            .context("setting initial pty size")?;
         Ok((in_tx, out_rx, session))
     }
 
     fn ssh_auth_sock_simlink(&self, session_name: PathBuf) -> PathBuf {
-        self.runtime_dir.join("sessions").join(session_name).join("ssh-auth-sock.socket")
+        self.runtime_dir
+            .join("sessions")
+            .join(session_name)
+            .join("ssh-auth-sock.socket")
     }
 }
 
 fn parse_connect_header(stream: &mut UnixStream) -> anyhow::Result<protocol::ConnectHeader> {
-    let length_prefix = stream.read_u32::<LittleEndian>()
+    let length_prefix = stream
+        .read_u32::<LittleEndian>()
         .context("reading header length prefix")?;
     let mut buf: Vec<u8> = vec![0; length_prefix as usize];
     stream.read_exact(&mut buf).context("reading header buf")?;
 
-    let header: protocol::ConnectHeader =
-        rmp_serde::from_slice(&buf).context("parsing header")?;
+    let header: protocol::ConnectHeader = rmp_serde::from_slice(&buf).context("parsing header")?;
     Ok(header)
 }
 
-fn write_reply<H>(
-    stream: &mut UnixStream,
-    header: H,
-) -> anyhow::Result<()>
-    where H: serde::Serialize
+fn write_reply<H>(stream: &mut UnixStream, header: H) -> anyhow::Result<()>
+where
+    H: serde::Serialize,
 {
-    stream.set_write_timeout(Some(consts::SOCK_STREAM_TIMEOUT))
+    stream
+        .set_write_timeout(Some(consts::SOCK_STREAM_TIMEOUT))
         .context("setting write timout on inbound session")?;
 
     let buf = rmp_serde::to_vec(&header).context("formatting reply header")?;
-    stream.write_u32::<LittleEndian>(buf.len() as u32)
+    stream
+        .write_u32::<LittleEndian>(buf.len() as u32)
         .context("writing reply length prefix")?;
     stream.write_all(&buf).context("writing reply header")?;
 
-    stream.set_write_timeout(None)
+    stream
+        .set_write_timeout(None)
         .context("unsetting write timout on inbound session")?;
     Ok(())
 }

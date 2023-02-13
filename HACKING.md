@@ -82,6 +82,8 @@ $ systemctl --user enable shpool
 $ systemctl --user start shpool
 ```
 
+## Formatting
+
 ## Preserving Logs in Tests
 
 By default, tests will clean up log files emitted by the various

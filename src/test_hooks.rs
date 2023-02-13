@@ -6,27 +6,37 @@
 // sleeps in order to test various scenarios. The basic idea is that
 // we publish a unix socket and then clients can listen for specific
 // named events in order to block until they have occurred.
-use std::os::unix::net::{UnixListener, UnixStream};
-use std::sync::Mutex;
-use std::io::Write;
-use std::time;
+use std::{
+    io::Write,
+    os::unix::net::{
+        UnixListener,
+        UnixStream,
+    },
+    sync::Mutex,
+    time,
+};
 
-use anyhow::{anyhow, Context};
-use log::{info, error};
+use anyhow::{
+    anyhow,
+    Context,
+};
+use log::{
+    error,
+    info,
+};
 
 #[cfg(feature = "test_hooks")]
 #[macro_export]
 macro_rules! emit {
     ($e:expr) => {
         $crate::test_hooks::emit_event_impl($e);
-    }
+    };
 }
 
 #[cfg(not(feature = "test_hooks"))]
 #[macro_export]
 macro_rules! emit {
-    ($e:expr) => {
-    } // no-op
+    ($e:expr) => {}; // no-op
 }
 
 pub(crate) use emit;
@@ -36,13 +46,13 @@ pub(crate) use emit;
 macro_rules! scoped {
     ($name:ident, $e:expr) => {
         let $name = $crate::test_hooks::ScopedEvent::new($e);
-    }
+    };
 }
 
 #[cfg(not(feature = "test_hooks"))]
 #[macro_export]
 macro_rules! scoped {
-    ($name:ident, $e:expr) => {} // no-op
+    ($name:ident, $e:expr) => {}; // no-op
 }
 
 pub(crate) use scoped;
@@ -53,9 +63,7 @@ pub struct ScopedEvent<'a> {
 }
 impl<'a> ScopedEvent<'a> {
     pub fn new(event: &'a str) -> Self {
-        ScopedEvent {
-            event,
-        }
+        ScopedEvent { event }
     }
 }
 impl<'a> std::ops::Drop for ScopedEvent<'a> {
@@ -126,7 +134,7 @@ impl TestHookServer {
                 None => {
                     error!("you must call set_socket_path before calling start");
                     return;
-                }
+                },
             };
         }
 
@@ -145,7 +153,7 @@ impl TestHookServer {
                 Err(e) => {
                     error!("error accepting connection to test hook server: {:?}", e);
                     continue;
-                }
+                },
             };
             let mut clients = self.clients.lock().unwrap();
             clients.push(stream);

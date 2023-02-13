@@ -1,12 +1,30 @@
-use std::path::{PathBuf, Path};
-use std::process::{Command, Stdio};
-use std::{process, time};
-use std::os::unix::net::UnixStream;
+use std::{
+    os::unix::net::UnixStream,
+    path::{
+        Path,
+        PathBuf,
+    },
+    process,
+    process::{
+        Command,
+        Stdio,
+    },
+    time,
+};
 
-use anyhow::{anyhow, Context};
+use anyhow::{
+    anyhow,
+    Context,
+};
 use tempfile::TempDir;
 
-use super::{ssh, events::Events, attach, shpool_bin, testdata_file};
+use super::{
+    attach,
+    events::Events,
+    shpool_bin,
+    ssh,
+    testdata_file,
+};
 
 /// Proc is a helper handle for a `shpool daemon` subprocess.
 /// It kills the subprocess when it goes out of scope.
@@ -21,8 +39,11 @@ pub struct Proc {
 
 impl Proc {
     pub fn new<P: AsRef<Path>>(config: P) -> anyhow::Result<Proc> {
-        let tmp_dir = tempfile::Builder::new().prefix("shpool-test").rand_bytes(20)
-            .tempdir().context("creating tmp dir")?;
+        let tmp_dir = tempfile::Builder::new()
+            .prefix("shpool-test")
+            .rand_bytes(20)
+            .tempdir()
+            .context("creating tmp dir")?;
         let socket_path = tmp_dir.path().join("shpool.socket");
         let test_hook_socket_path = tmp_dir.path().join("shpool-daemon-test-hook.socket");
 
@@ -33,10 +54,13 @@ impl Proc {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .arg("-vv")
-            .arg("--log-file").arg(&log_file)
-            .arg("--socket").arg(&socket_path)
+            .arg("--log-file")
+            .arg(&log_file)
+            .arg("--socket")
+            .arg(&socket_path)
             .arg("daemon")
-            .arg("--config-file").arg(testdata_file(config))
+            .arg("--config-file")
+            .arg(testdata_file(config))
             .env("SHPOOL_TEST_HOOK_SOCKET_PATH", &test_hook_socket_path)
             .spawn()
             .context("spawning daemon process")?;
@@ -64,11 +88,19 @@ impl Proc {
         })
     }
 
-    pub fn attach(&mut self, name: &str, extra_env: Vec<(String, String)>) -> anyhow::Result<attach::Proc> {
+    pub fn attach(
+        &mut self,
+        name: &str,
+        extra_env: Vec<(String, String)>,
+    ) -> anyhow::Result<attach::Proc> {
         let tmp_dir = self.tmp_dir.as_ref().ok_or(anyhow!("missing tmp_dir"))?;
-        let log_file = tmp_dir.path().join(format!("attach_{}_{}.log", name, self.subproc_counter));
-        let test_hook_socket_path = tmp_dir.path()
-            .join(format!("attach_test_hook_{}_{}.socket", name, self.subproc_counter));
+        let log_file = tmp_dir
+            .path()
+            .join(format!("attach_{}_{}.log", name, self.subproc_counter));
+        let test_hook_socket_path = tmp_dir.path().join(format!(
+            "attach_test_hook_{}_{}.socket",
+            name, self.subproc_counter
+        ));
         eprintln!("spawning attach proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
@@ -77,8 +109,10 @@ impl Proc {
             .stderr(Stdio::piped())
             .stdin(Stdio::piped())
             .arg("-v")
-            .arg("--log-file").arg(&log_file)
-            .arg("--socket").arg(&self.socket_path)
+            .arg("--log-file")
+            .arg(&log_file)
+            .arg("--socket")
+            .arg(&self.socket_path)
             .env("SHPOOL_TEST_HOOK_SOCKET_PATH", &test_hook_socket_path)
             .envs(extra_env)
             .arg("attach")
@@ -97,14 +131,18 @@ impl Proc {
 
     pub fn detach(&mut self, sessions: Vec<String>) -> anyhow::Result<process::Output> {
         let tmp_dir = self.tmp_dir.as_ref().ok_or(anyhow!("missing tmp_dir"))?;
-        let log_file = tmp_dir.path().join(format!("detach_{}.log", self.subproc_counter));
+        let log_file = tmp_dir
+            .path()
+            .join(format!("detach_{}.log", self.subproc_counter));
         eprintln!("spawning detach proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
         let mut cmd = Command::new(shpool_bin()?);
         cmd.arg("-vv")
-            .arg("--log-file").arg(&log_file)
-            .arg("--socket").arg(&self.socket_path)
+            .arg("--log-file")
+            .arg(&log_file)
+            .arg("--socket")
+            .arg(&self.socket_path)
             .arg("detach");
         for session in sessions.iter() {
             cmd.arg(session);
@@ -115,14 +153,18 @@ impl Proc {
 
     pub fn kill(&mut self, sessions: Vec<String>) -> anyhow::Result<process::Output> {
         let tmp_dir = self.tmp_dir.as_ref().ok_or(anyhow!("missing tmp_dir"))?;
-        let log_file = tmp_dir.path().join(format!("kill_{}.log", self.subproc_counter));
+        let log_file = tmp_dir
+            .path()
+            .join(format!("kill_{}.log", self.subproc_counter));
         eprintln!("spawning kill proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
         let mut cmd = Command::new(shpool_bin()?);
         cmd.arg("-vv")
-            .arg("--log-file").arg(&log_file)
-            .arg("--socket").arg(&self.socket_path)
+            .arg("--log-file")
+            .arg(&log_file)
+            .arg("--socket")
+            .arg(&self.socket_path)
             .arg("kill");
         for session in sessions.iter() {
             cmd.arg(session);
@@ -133,9 +175,13 @@ impl Proc {
 
     pub fn ssh_remote_cmd(&mut self) -> anyhow::Result<ssh::RemoteCmdProc> {
         let tmp_dir = self.tmp_dir.as_ref().ok_or(anyhow!("missing tmp_dir"))?;
-        let log_file = tmp_dir.path().join(format!("remote_cmd_{}.log", self.subproc_counter));
-        let test_hook_socket_path = tmp_dir.path()
-            .join(format!("remote_cmd_test_hook_{}.socket", self.subproc_counter));
+        let log_file = tmp_dir
+            .path()
+            .join(format!("remote_cmd_{}.log", self.subproc_counter));
+        let test_hook_socket_path = tmp_dir.path().join(format!(
+            "remote_cmd_test_hook_{}.socket",
+            self.subproc_counter
+        ));
         eprintln!("spawning remote cmd proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
@@ -144,8 +190,10 @@ impl Proc {
             .stderr(Stdio::piped())
             .stdin(Stdio::piped())
             .arg("-vv")
-            .arg("--log-file").arg(&log_file)
-            .arg("--socket").arg(&self.socket_path)
+            .arg("--log-file")
+            .arg(&log_file)
+            .arg("--socket")
+            .arg(&self.socket_path)
             .env("SHPOOL_TEST_HOOK_SOCKET_PATH", &test_hook_socket_path)
             .arg("plumbing")
             .arg("ssh-remote-command")
@@ -160,14 +208,15 @@ impl Proc {
         })
     }
 
-    pub fn ssh_set_metadata(
-        &mut self,
-        name: &str,
-    ) -> anyhow::Result<ssh::SetMetadataProc> {
+    pub fn ssh_set_metadata(&mut self, name: &str) -> anyhow::Result<ssh::SetMetadataProc> {
         let tmp_dir = self.tmp_dir.as_ref().ok_or(anyhow!("missing tmp_dir"))?;
-        let log_file = tmp_dir.path().join(format!("set_metadata_{}.log", self.subproc_counter));
-        let test_hook_socket_path = tmp_dir.path()
-            .join(format!("set_metadata_test_hook_{}.socket", self.subproc_counter));
+        let log_file = tmp_dir
+            .path()
+            .join(format!("set_metadata_{}.log", self.subproc_counter));
+        let test_hook_socket_path = tmp_dir.path().join(format!(
+            "set_metadata_test_hook_{}.socket",
+            self.subproc_counter
+        ));
         eprintln!("spawning set metadata proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
@@ -176,8 +225,10 @@ impl Proc {
             .stderr(Stdio::piped())
             .stdin(Stdio::piped())
             .arg("-vv")
-            .arg("--log-file").arg(&log_file)
-            .arg("--socket").arg(&self.socket_path)
+            .arg("--log-file")
+            .arg(&log_file)
+            .arg("--socket")
+            .arg(&self.socket_path)
             .env("SHPOOL_TEST_HOOK_SOCKET_PATH", &test_hook_socket_path)
             .arg("plumbing")
             .arg("ssh-local-command-set-metadata")
@@ -197,14 +248,18 @@ impl Proc {
     /// output and returns it as a string
     pub fn list(&mut self) -> anyhow::Result<process::Output> {
         let tmp_dir = self.tmp_dir.as_ref().ok_or(anyhow!("missing tmp_dir"))?;
-        let log_file = tmp_dir.path().join(format!("list_{}.log", self.subproc_counter));
+        let log_file = tmp_dir
+            .path()
+            .join(format!("list_{}.log", self.subproc_counter));
         eprintln!("spawning list proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
         Command::new(shpool_bin()?)
             .arg("-vv")
-            .arg("--log-file").arg(&log_file)
-            .arg("--socket").arg(&self.socket_path)
+            .arg("--log-file")
+            .arg(&log_file)
+            .arg("--socket")
+            .arg(&self.socket_path)
             .arg("list")
             .output()
             .context("spawning list proc")

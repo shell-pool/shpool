@@ -1,10 +1,12 @@
-use std::path::PathBuf;
-use std::io;
+use std::{
+    io,
+    path::PathBuf,
+};
 
 use anyhow::Context;
-use super::super::protocol;
-
 use log::info;
+
+use super::super::protocol;
 
 pub fn run(session_name: String, term: String, socket: PathBuf) -> anyhow::Result<()> {
     info!("\n\n================ STARTING SSH-LOCAL-COMMAND-SET-METADATA =====================\n\n");
@@ -17,15 +19,17 @@ pub fn run(session_name: String, term: String, socket: PathBuf) -> anyhow::Resul
                 println!("could not connect to daemon");
             }
             return Err(io_err).context("connecting to daemon");
-        }
+        },
     };
 
-    client.write_connect_header(protocol::ConnectHeader::LocalCommandSetMetadata(
-        protocol::SetMetadataRequest{
-            name: session_name.clone(),
-            term,
-        },
-    )).context("writing LocalCommandSetMetadata header")?;
+    client
+        .write_connect_header(protocol::ConnectHeader::LocalCommandSetMetadata(
+            protocol::SetMetadataRequest {
+                name: session_name.clone(),
+                term,
+            },
+        ))
+        .context("writing LocalCommandSetMetadata header")?;
 
     info!("wrote connection header");
 

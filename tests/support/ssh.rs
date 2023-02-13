@@ -1,11 +1,19 @@
-use std::io;
-use std::io::Write;
-use std::os::unix::io::AsRawFd;
-use std::process;
+use std::{
+    io,
+    io::Write,
+    os::unix::io::AsRawFd,
+    process,
+};
 
-use anyhow::{anyhow, Context};
+use anyhow::{
+    anyhow,
+    Context,
+};
 
-use super::{events::Events, line_matcher::LineMatcher};
+use super::{
+    events::Events,
+    line_matcher::LineMatcher,
+};
 
 pub struct RemoteCmdProc {
     pub proc: process::Child,
@@ -13,14 +21,13 @@ pub struct RemoteCmdProc {
 }
 
 impl RemoteCmdProc {
-    pub fn run_cmd(
-        &mut self,
-        cmd: &str,
-    ) -> anyhow::Result<()> {
+    pub fn run_cmd(&mut self, cmd: &str) -> anyhow::Result<()> {
         let stdin = self.proc.stdin.as_mut().ok_or(anyhow!("missing stdin"))?;
 
         let full_cmd = format!("{}\n", cmd);
-        stdin.write_all(full_cmd.as_bytes()).context("writing cmd into remote cmd proc")?;
+        stdin
+            .write_all(full_cmd.as_bytes())
+            .context("writing cmd into remote cmd proc")?;
         stdin.flush().context("flushing cmd")?;
 
         Ok(())
@@ -32,9 +39,12 @@ impl RemoteCmdProc {
         nix::fcntl::fcntl(
             r.as_raw_fd(),
             nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
-        ).context("setting stdin nonblocking")?;
+        )
+        .context("setting stdin nonblocking")?;
 
-        Ok(LineMatcher{ out: io::BufReader::new(r) })
+        Ok(LineMatcher {
+            out: io::BufReader::new(r),
+        })
     }
 }
 
@@ -58,9 +68,12 @@ impl SetMetadataProc {
         nix::fcntl::fcntl(
             r.as_raw_fd(),
             nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
-        ).context("setting stdin nonblocking")?;
+        )
+        .context("setting stdin nonblocking")?;
 
-        Ok(LineMatcher{ out: io::BufReader::new(r) })
+        Ok(LineMatcher {
+            out: io::BufReader::new(r),
+        })
     }
 }
 
