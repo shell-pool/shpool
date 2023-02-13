@@ -2,7 +2,6 @@
 - There is a lot of heartbeat overhead. See if we can reduce that.
 - Get ssh extension mode to be compatible with ssh multiplexing so
   it only requires a single gnubby touch.
-- Reset TERM if someone reattaches from a new terminal type.
 - Reload config if we get a SIGHUP
 - Implement spooling logic to handle subprocesses which generate
   a bunch of output after we have detached.
