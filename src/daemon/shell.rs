@@ -30,7 +30,9 @@ use tracing::{
     debug,
     error,
     info,
+    span,
     trace,
+    Level,
 };
 
 use super::super::{
@@ -57,6 +59,8 @@ impl Session {
         &self,
         arg: protocol::SessionMessageRequestPayload,
     ) -> anyhow::Result<protocol::SessionMessageReply> {
+        let _s = span!(Level::INFO, "Session.rpc_call").entered();
+
         // make a best effort attempt to avoid sending messages
         // to a session with no attached terminal
         match self.inner.try_lock() {
@@ -94,6 +98,8 @@ impl SessionInner {
         &self,
         req: protocol::ResizeRequest,
     ) -> anyhow::Result<protocol::ResizeReply> {
+        let _s = span!(Level::INFO, "SessionInner.handle_resize_rpc").entered();
+
         info!(
             "s({}): handle_resize_rpc: resize {:?} to {:?}",
             self.name, self, &req.tty_size
@@ -116,6 +122,7 @@ impl SessionInner {
     /// the client connection. It returns true if the subprocess
     /// has exited, and false if it is still running.
     pub fn bidi_stream(&mut self) -> anyhow::Result<bool> {
+        let _s = span!(Level::INFO, "SessionInner.bidi_stream").entered();
         test_hooks::emit!("daemon-bidi-stream-enter");
         test_hooks::scoped!(_bidi_stream_test_guard, "daemon-bidi-stream-done");
 
@@ -231,16 +238,20 @@ impl SessionInner {
         pty_master: &'scope pty::fork::Master,
         reader_client_stream: &'scope mut UnixStream,
     ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
+        let _s = span!(Level::INFO, "SessionInner.spawn_client_to_shell").entered();
+
         scope.spawn(|| -> anyhow::Result<()> {
+            let _s = span!(Level::INFO, "client->shell", s = self.name).entered();
+
             let mut master_writer = pty_master.clone();
 
-            info!("s({}): client->shell: spawned", self.name);
+            info!("spawned");
 
             let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
 
             loop {
                 if stop.load(Ordering::Relaxed) {
-                    info!("s({}): client->shell: recvd stop msg (1)", self.name);
+                    info!("recvd stop msg (1)");
                     return Ok(());
                 }
 
@@ -255,7 +266,7 @@ impl SessionInner {
                     Ok(l) => l,
                     Err(e) => {
                         if e.kind() == std::io::ErrorKind::WouldBlock {
-                            trace!("client->shell: read: WouldBlock");
+                            trace!("read: WouldBlock");
                             thread::sleep(consts::PIPE_POLL_DURATION);
                             continue;
                         }
@@ -266,17 +277,14 @@ impl SessionInner {
                     continue;
                 }
 
-                debug!("client->shell: read {} bytes", len);
+                debug!("read {} bytes", len);
 
                 let mut to_write = &buf[0..len];
-                debug!(
-                    "client->shell: created to_write='{}'",
-                    String::from_utf8_lossy(to_write)
-                );
+                debug!("created to_write='{}'", String::from_utf8_lossy(to_write));
 
                 while to_write.len() > 0 {
                     if stop.load(Ordering::Relaxed) {
-                        info!("s({}): client->shell: recvd stop msg (1)", self.name);
+                        info!("recvd stop msg (2)");
                         return Ok(());
                     }
 
@@ -287,19 +295,16 @@ impl SessionInner {
                         Ok(n) => n,
                         Err(e) => {
                             if e.kind() == std::io::ErrorKind::WouldBlock {
-                                trace!("client->shell: write: WouldBlock");
+                                trace!("write: WouldBlock");
                                 thread::sleep(consts::PIPE_POLL_DURATION);
                                 continue;
                             }
                             return Err(e).context("writing client chunk");
                         },
                     };
-                    debug!("client->shell: wrote {} bytes", nwritten);
+                    debug!("wrote {} bytes", nwritten);
                     to_write = &to_write[nwritten..];
-                    trace!(
-                        "client->shell: to_write='{}'",
-                        String::from_utf8_lossy(to_write)
-                    );
+                    trace!("to_write='{}'", String::from_utf8_lossy(to_write));
                 }
 
                 master_writer
@@ -307,7 +312,7 @@ impl SessionInner {
                     .context("flushing input from client to shell")?;
                 test_hooks::emit!("daemon-wrote-client-chunk");
 
-                debug!("client->shell: flushed chunk of len {}", len);
+                debug!("flushed chunk of len {}", len);
             }
         })
     }
@@ -320,8 +325,12 @@ impl SessionInner {
         client_stream_m: &'scope Mutex<UnixStream>,
         client_stream: &'scope mut UnixStream,
     ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
+        let _s = span!(Level::INFO, "SessionInner.spawn_shell_to_client").entered();
+
         scope.spawn(move || -> anyhow::Result<()> {
-            info!("s({}): shell->client: spawned", self.name);
+            let _s1 = span!(Level::INFO, "shell->client", s = self.name).entered();
+
+            info!("spawned");
 
             let mut master_reader = pty_master.clone();
 
@@ -329,7 +338,7 @@ impl SessionInner {
 
             loop {
                 if stop.load(Ordering::Relaxed) {
-                    info!("s({}): shell->client: recvd stop msg", self.name);
+                    info!("recvd stop msg");
                     return Ok(());
                 }
 
@@ -347,7 +356,7 @@ impl SessionInner {
                 ) {
                     Ok(n) => n,
                     Err(nix::errno::Errno::EBADF) => {
-                        info!("s({}): shell->client: shell went down", self.name);
+                        info!("shell went down");
                         return Ok(());
                     },
                     Err(e) => return Err(e).context("selecting on pty master"),
@@ -361,22 +370,16 @@ impl SessionInner {
                         Ok(n) => n,
                         Err(e) => {
                             if e.kind() == std::io::ErrorKind::WouldBlock {
-                                trace!(
-                                    "s({}): shell->client: pty master read: WouldBlock",
-                                    self.name
-                                );
+                                trace!("pty master read: WouldBlock");
                                 thread::sleep(consts::PIPE_POLL_DURATION);
                                 continue;
                             }
-                            info!(
-                                "sh({}): shell->client: error reading from pty: {:?}",
-                                self.name, e
-                            );
+                            info!("error reading from pty: {:?}", e);
                             return Err(e).context("reading pty master chunk");
                         },
                     };
                     if len == 0 {
-                        trace!("s({}): shell->client: 0 stdout bytes, waiting", self.name);
+                        trace!("0 stdout bytes, waiting");
                         thread::sleep(consts::PIPE_POLL_DURATION);
                         continue;
                     }
@@ -386,8 +389,7 @@ impl SessionInner {
                         buf: &buf[..len],
                     };
                     debug!(
-                        "s({}): shell->client: read pty master len={} '{}'",
-                        self.name,
+                        "read pty master len={} '{}'",
                         len,
                         String::from_utf8_lossy(chunk.buf)
                     );
@@ -397,11 +399,7 @@ impl SessionInner {
                             .write_to(&mut *s, &stop)
                             .context("writing stdout chunk to client stream")?;
                     }
-                    debug!(
-                        "s({}): shell->client: wrote {} pty master bytes",
-                        self.name,
-                        chunk.buf.len()
-                    );
+                    debug!("wrote {} pty master bytes", chunk.buf.len());
                 }
 
                 // flush immediately
@@ -416,11 +414,15 @@ impl SessionInner {
         stop: &'scope AtomicBool,
         client_stream_m: &'scope Mutex<UnixStream>,
     ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
+        let _s = span!(Level::INFO, "SessionInner.spawn_heartbeat").entered();
+
         scope.spawn(move || -> anyhow::Result<()> {
+            let _s1 = span!(Level::INFO, "heartbeat", s = self.name).entered();
+
             loop {
-                trace!("s({}): heartbeat: checking stop_rx", self.name);
+                trace!("checking stop_rx");
                 if stop.load(Ordering::Relaxed) {
-                    info!("s({}): heartbeat: recvd stop msg", self.name);
+                    info!("recvd stop msg");
                     return Ok(());
                 }
 
@@ -433,11 +435,11 @@ impl SessionInner {
                     let mut s = client_stream_m.lock().unwrap();
                     match chunk.write_to(&mut *s, &stop) {
                         Ok(_) => {
-                            trace!("s({}): heartbeat: wrote heartbeat", self.name);
+                            trace!("wrote heartbeat");
                         },
                         Err(e) => {
                             if e.kind() == io::ErrorKind::BrokenPipe {
-                                trace!("s({}): heartbeat: client hangup", self.name);
+                                trace!("client hangup");
                                 return Ok(());
                             }
                             return Err(e).context("writing heartbeat")?;
@@ -455,31 +457,28 @@ impl SessionInner {
         child_done: &'scope AtomicBool,
         pty_master: &'scope pty::fork::Master,
     ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
+        let _s = span!(Level::INFO, "SessionInner.spawn_supervisor").entered();
+
         scope.spawn(|| -> anyhow::Result<()> {
+            let _s1 = span!(Level::INFO, "supervisor", s = self.name).entered();
+
             loop {
-                trace!(
-                    "sh({}): supervisor: checking stop_rx (pty_master={})",
-                    self.name,
-                    pty_master.as_raw_fd()
-                );
+                trace!("checking stop_rx (pty_master={})", pty_master.as_raw_fd());
                 if stop.load(Ordering::Relaxed) {
-                    info!("s({}): supervisor: recvd stop msg", self.name);
+                    info!("recvd stop msg");
                     return Ok(());
                 }
 
                 match self.child_exited.recv_timeout(SUPERVISOR_POLL_DUR) {
                     Ok(_) => {
-                        error!(
-                            "s({}): internal error: unexpected send on child_exited chan",
-                            self.name
-                        );
+                        error!("internal error: unexpected send on child_exited chan");
                     },
                     Err(RecvTimeoutError::Timeout) => {
                         // shell is still running, do nothing
-                        trace!("s({}): supervisor: poll timeout", self.name);
+                        trace!("poll timeout");
                     },
                     Err(RecvTimeoutError::Disconnected) => {
-                        info!("s({}): supervisor: child shell exited", self.name);
+                        info!("child shell exited");
                         child_done.store(true, Ordering::Release);
                         return Ok(());
                     },
@@ -493,10 +492,14 @@ impl SessionInner {
         scope: &'scope thread::Scope<'scope, 'env>,
         stop: &'scope AtomicBool,
     ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
+        let _s = span!(Level::INFO, "SessionInner.spawn_rpc").entered();
+
         scope.spawn(|| -> anyhow::Result<()> {
+            let _s1 = span!(Level::INFO, "rpc", s = self.name).entered();
+
             loop {
                 if stop.load(Ordering::Relaxed) {
-                    info!("s({}): rpc: recvd stop msg", self.name);
+                    info!("recvd stop msg");
                     return Ok(());
                 }
 
@@ -507,11 +510,11 @@ impl SessionInner {
                 };
                 let resp = match req {
                     protocol::SessionMessageRequestPayload::Resize(req) => {
-                        debug!("s({}): rpc: handling resize", self.name);
+                        debug!("handling resize");
                         protocol::SessionMessageReply::Resize(self.handle_resize_rpc(req)?)
                     },
                     protocol::SessionMessageRequestPayload::Detach => {
-                        debug!("s({}): rpc: handling detach", self.name);
+                        debug!("handling detach");
                         stop.store(true, Ordering::Relaxed);
                         protocol::SessionMessageReply::Detach(
                             protocol::SessionMessageDetachReply::Ok,

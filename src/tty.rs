@@ -1,11 +1,11 @@
 use std::os::unix::io::RawFd;
 
 use anyhow::Context;
-use tracing::error;
 use serde_derive::{
     Deserialize,
     Serialize,
 };
+use tracing::error;
 
 // see `man ioctl_tty` for info on these ioctl commands
 nix::ioctl_read_bad!(tiocgwinsz, libc::TIOCGWINSZ, libc::winsize);

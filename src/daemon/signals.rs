@@ -8,14 +8,14 @@ use std::{
 };
 
 use anyhow::Context;
-use tracing::{
-    error,
-    info,
-};
 use signal_hook::{
     consts::TERM_SIGNALS,
     flag,
     iterator::*,
+};
+use tracing::{
+    error,
+    info,
 };
 
 pub struct Handler {

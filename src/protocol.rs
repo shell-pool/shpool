@@ -25,14 +25,14 @@ use byteorder::{
     ReadBytesExt,
     WriteBytesExt,
 };
+use serde_derive::{
+    Deserialize,
+    Serialize,
+};
 use tracing::{
     debug,
     info,
     trace,
-};
-use serde_derive::{
-    Deserialize,
-    Serialize,
 };
 
 use super::{

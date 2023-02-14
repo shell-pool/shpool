@@ -43,14 +43,16 @@ use byteorder::{
     WriteBytesExt,
 };
 use crossbeam_channel::TryRecvError;
-use tracing::{
-    error,
-    info,
-    warn,
-};
 use nix::{
     sys::signal,
     unistd::Pid,
+};
+use tracing::{
+    error,
+    info,
+    span,
+    warn,
+    Level,
 };
 
 use super::{
@@ -82,6 +84,8 @@ pub struct Server {
 
 impl Server {
     pub fn new(config: config::Config, runtime_dir: PathBuf) -> Arc<Self> {
+        let _s = span!(Level::INFO, "Server.new").entered();
+
         let park_timeout = time::Duration::from_millis(
             config
                 .ssh_handshake_timeout_ms
@@ -100,7 +104,8 @@ impl Server {
     }
 
     pub fn serve(server: Arc<Self>, listener: UnixListener) -> anyhow::Result<()> {
-        info!("listening on socket");
+        let _s = span!(Level::INFO, "Server.serve").entered();
+
         test_hooks::emit!("daemon-about-to-listen");
         for stream in listener.incoming() {
             info!("socket got a new connection");
@@ -123,7 +128,7 @@ impl Server {
     }
 
     fn handle_conn(&self, mut stream: UnixStream) -> anyhow::Result<()> {
-        info!("handling inbound connection");
+        let _s = span!(Level::INFO, "Server.handle_conn").entered();
         // We want to avoid timing out while blocking the main thread.
         stream
             .set_read_timeout(Some(consts::SOCK_STREAM_TIMEOUT))
@@ -160,6 +165,7 @@ impl Server {
         header: protocol::AttachHeader,
         disable_echo: bool,
     ) -> anyhow::Result<()> {
+        let _s = span!(Level::INFO, "Server.handle_attach").entered();
         info!("handle_attach: header={:?}", header);
 
         let (inner_to_stream, status) = {
@@ -305,6 +311,8 @@ impl Server {
     }
 
     fn link_ssh_auth_sock(&self, header: &protocol::AttachHeader) -> anyhow::Result<()> {
+        let _s = span!(Level::INFO, "Server.link_ssh_auth_sock").entered();
+
         if self.config.nosimlink_ssh_auth_sock.unwrap_or(false) {
             return Ok(());
         }
@@ -338,6 +346,8 @@ impl Server {
         mut stream: UnixStream,
         request: protocol::DetachRequest,
     ) -> anyhow::Result<()> {
+        let _s = span!(Level::INFO, "Server.handle_detach").entered();
+
         let mut not_found_sessions = vec![];
         let mut not_attached_sessions = vec![];
         {
@@ -371,6 +381,8 @@ impl Server {
         mut stream: UnixStream,
         request: protocol::KillRequest,
     ) -> anyhow::Result<()> {
+        let _s = span!(Level::INFO, "Server.handle_kill").entered();
+
         let mut not_found_sessions = vec![];
         {
             let mut shells = self.shells.lock().unwrap();
@@ -415,7 +427,8 @@ impl Server {
     }
 
     fn handle_remote_command_lock(&self, mut stream: UnixStream) -> anyhow::Result<()> {
-        info!("handle_remote_command_lock: enter");
+        let _s = span!(Level::INFO, "Server.handle_remote_command_lock").entered();
+
         let metadata = {
             let mut inner = self.ssh_extension_parker.inner.lock().unwrap();
 
@@ -521,7 +534,8 @@ impl Server {
         &self,
         header: protocol::SetMetadataRequest,
     ) -> anyhow::Result<()> {
-        info!("handle_local_command_set_metadata: header={:?}", header);
+        let _s = span!(Level::INFO, "Server.handle_local_command_set_metadata").entered();
+
         let status = {
             let mut inner = self.ssh_extension_parker.inner.lock().unwrap();
 
@@ -582,7 +596,7 @@ impl Server {
     }
 
     fn handle_list(&self, mut stream: UnixStream) -> anyhow::Result<()> {
-        info!("handle_list: enter");
+        let _s = span!(Level::INFO, "Server.handle_list").entered();
 
         let shells = self.shells.lock().unwrap();
 
@@ -608,7 +622,7 @@ impl Server {
         mut stream: UnixStream,
         header: protocol::SessionMessageRequest,
     ) -> anyhow::Result<()> {
-        info!("handle_session_message: header={:?}", header);
+        let _s = span!(Level::INFO, "Server.handle_session_message").entered();
 
         // create a slot to store our reply so we can do
         // our IO without the lock held.
@@ -638,6 +652,8 @@ impl Server {
         crossbeam_channel::Receiver<protocol::SessionMessageReply>,
         shell::SessionInner,
     )> {
+        let _s = span!(Level::INFO, "Server.spawn_subshell").entered();
+
         let user_info = user::info()?;
         let shell = if let Some(s) = &self.config.shell {
             s.clone()
@@ -782,6 +798,8 @@ impl Server {
 }
 
 fn parse_connect_header(stream: &mut UnixStream) -> anyhow::Result<protocol::ConnectHeader> {
+    let _s = span!(Level::TRACE, "Server.parse_connect_header").entered();
+
     let length_prefix = stream
         .read_u32::<LittleEndian>()
         .context("reading header length prefix")?;
@@ -796,6 +814,8 @@ fn write_reply<H>(stream: &mut UnixStream, header: H) -> anyhow::Result<()>
 where
     H: serde::Serialize,
 {
+    let _s = span!(Level::TRACE, "Server.write_reply").entered();
+
     stream
         .set_write_timeout(Some(consts::SOCK_STREAM_TIMEOUT))
         .context("setting write timout on inbound session")?;

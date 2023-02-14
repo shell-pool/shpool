@@ -5,7 +5,11 @@ use std::{
 };
 
 use anyhow::Context;
-use tracing::info;
+use tracing::{
+    info,
+    span,
+    Level,
+};
 
 mod config;
 mod server;
@@ -20,6 +24,7 @@ pub fn run(
     runtime_dir: PathBuf,
     socket: PathBuf,
 ) -> anyhow::Result<()> {
+    let _s = span!(Level::INFO, "run").entered();
     info!("\n\n======================== STARTING DAEMON ============================\n\n");
 
     let mut config = config::Config::default();
