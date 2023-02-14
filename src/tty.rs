@@ -1,7 +1,7 @@
 use std::os::unix::io::RawFd;
 
 use anyhow::Context;
-use log::error;
+use tracing::error;
 use serde_derive::{
     Deserialize,
     Serialize,

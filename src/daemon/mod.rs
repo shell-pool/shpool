@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::Context;
-use log::info;
+use tracing::info;
 
 mod config;
 mod server;

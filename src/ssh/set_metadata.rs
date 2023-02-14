@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::Context;
-use log::info;
+use tracing::info;
 
 use super::super::protocol;
 

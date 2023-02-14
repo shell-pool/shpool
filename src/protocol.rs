@@ -25,7 +25,7 @@ use byteorder::{
     ReadBytesExt,
     WriteBytesExt,
 };
-use log::{
+use tracing::{
     debug,
     info,
     trace,

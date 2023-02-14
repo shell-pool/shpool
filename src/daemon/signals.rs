@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::Context;
-use log::{
+use tracing::{
     error,
     info,
 };

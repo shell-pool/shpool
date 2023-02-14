@@ -20,7 +20,7 @@ use anyhow::{
     anyhow,
     Context,
 };
-use log::{
+use tracing::{
     error,
     info,
 };

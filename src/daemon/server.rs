@@ -43,7 +43,7 @@ use byteorder::{
     WriteBytesExt,
 };
 use crossbeam_channel::TryRecvError;
-use log::{
+use tracing::{
     error,
     info,
     warn,

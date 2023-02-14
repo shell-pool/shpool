@@ -16,7 +16,7 @@ use clap::{
     Parser,
     Subcommand,
 };
-use log::error;
+use tracing::error;
 use tracing_subscriber::fmt::format::FmtSpan;
 
 mod attach;

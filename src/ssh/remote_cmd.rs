@@ -7,7 +7,7 @@ use anyhow::{
     anyhow,
     Context,
 };
-use log::{
+use tracing::{
     debug,
     info,
 };

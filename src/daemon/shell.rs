@@ -26,7 +26,7 @@ use anyhow::{
     Context,
 };
 use crossbeam_channel::RecvTimeoutError;
-use log::{
+use tracing::{
     debug,
     error,
     info,
