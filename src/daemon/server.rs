@@ -1,8 +1,5 @@
 use std::{
-    collections::{
-        HashMap,
-        HashSet,
-    },
+    collections::HashMap,
     env,
     fs,
     io::{
@@ -293,26 +290,18 @@ impl Server {
             return Ok(());
         }
 
-        let mut ssh_auth_sock = "";
-        for (k, v) in header.local_env.iter() {
-            if k == "SSH_AUTH_SOCK" {
-                ssh_auth_sock = v;
-                break;
-            }
-        }
-        if ssh_auth_sock == "" {
+        if let Some(ssh_auth_sock) = header.local_env_get("SSH_AUTH_SOCK") {
+            let symlink = self.ssh_auth_sock_simlink(PathBuf::from(&header.name));
+            fs::create_dir_all(symlink.parent().ok_or(anyhow!("no simlink parent"))?)
+                .context("could not create directory for SSH_AUTH_SOCK simlink")?;
+            let _ = fs::remove_file(&symlink); // clean up the link if it exists already
+            os::unix::fs::symlink(ssh_auth_sock, &symlink).context(format!(
+                "could not symlink '{:?}' to point to '{:?}'",
+                symlink, ssh_auth_sock
+            ))?;
+        } else {
             info!("no SSH_AUTH_SOCK in client env, leaving it unlinked");
-            return Ok(());
         }
-
-        let symlink = self.ssh_auth_sock_simlink(PathBuf::from(&header.name));
-        fs::create_dir_all(symlink.parent().ok_or(anyhow!("no simlink parent"))?)
-            .context("could not create directory for SSH_AUTH_SOCK simlink")?;
-        let _ = fs::remove_file(&symlink); // clean up the link if it exists already
-        os::unix::fs::symlink(ssh_auth_sock, &symlink).context(format!(
-            "could not symlink '{:?}' to point to '{:?}'",
-            symlink, ssh_auth_sock
-        ))?;
 
         Ok(())
     }
@@ -469,16 +458,6 @@ impl Server {
         };
         info!("spawn_subshell: user_info={:?}", user_info);
 
-        let client_env = if let Some(env) = &self.config.client_env {
-            env.clone()
-        } else {
-            vec![]
-        };
-        let mut client_env_set = HashSet::with_capacity(client_env.len());
-        for var in client_env.into_iter() {
-            client_env_set.insert(var);
-        }
-
         // Build up the command we will exec while allocation is still chill.
         // We will exec this command after a fork, so we want to just inherit
         // stdout/stderr/stdin. The pty crate automatically `dup2`s the file
@@ -505,16 +484,13 @@ impl Server {
             cmd.env("XDG_RUNTIME_DIR", xdg_runtime_dir);
         }
 
-        for (var, value) in header.local_env.iter() {
-            if client_env_set.contains(var) {
-                cmd.env(var, value);
-            }
+        let mut term = String::from("");
+        if let Some(t) = header.local_env_get("TERM") {
+            term = String::from(t);
         }
-
-        let mut term = header.term.to_string();
         if let Some(env) = self.config.env.as_ref() {
             if let Some(t) = env.get("TERM") {
-                term = t.to_string();
+                term = String::from(t);
             }
 
             let filtered_env_pin;

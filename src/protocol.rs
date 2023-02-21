@@ -158,19 +158,27 @@ pub enum ResizeReply {
 pub struct AttachHeader {
     /// The name of the session to create or attach to.
     pub name: String,
-    /// The value of the TERM environment variable in the client's
-    /// shell. This needs to be forwarded so that the remote shell
-    /// can interpret and emit control codes correctly.
-    pub term: String,
     /// The size of the local tty. Passed along so that the remote
     /// pty can be kept in sync (important so curses applications look
     /// right).
     pub local_tty_size: tty::Size,
-    /// The full environment of the shell that `shpool attach` is run
-    /// in. The daemon will filter out vars it isn't interested in, so
-    /// this is a bit inefficient, but it allows us to avoid having to try
-    /// to read the config file from the client.
+    /// A subset of the environment of the shell that `shpool attach` is run
+    /// in. Contains only some variables needed to set up the shell when
+    /// shpool forks off a process. For now the list is just `SSH_AUTH_SOCK`
+    /// and `TERM`.
     pub local_env: Vec<(String, String)>,
+}
+
+impl AttachHeader {
+    pub fn local_env_get<'a>(&'a self, var: &str) -> Option<&'a str> {
+        for (key, val) in self.local_env.iter() {
+            if var == key {
+                return Some(val.as_str());
+            }
+        }
+
+        None
+    }
 }
 
 /// AttachReplyHeader is the blob of metadata that the shpool service prefixes

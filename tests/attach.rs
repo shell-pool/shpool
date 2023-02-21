@@ -1,5 +1,4 @@
 use std::{
-    env,
     fs,
     io::Read,
     time,
@@ -88,24 +87,6 @@ fn config_disable_symlink_ssh_auth_sock() -> anyhow::Result<()> {
 
     attach_proc.run_cmd("ls -l $SSH_AUTH_SOCK")?;
     line_matcher.match_re(r#".*No such file or directory$"#)?;
-
-    Ok(())
-}
-
-#[test]
-fn forward_client_var() -> anyhow::Result<()> {
-    env::set_var("MY_FORWARD_VAR", "forward-var-value");
-
-    let mut daemon_proc =
-        support::daemon::Proc::new("forward_client_env.toml").context("starting daemon proc")?;
-    let mut attach_proc = daemon_proc
-        .attach("sh1", vec![])
-        .context("starting attach proc")?;
-
-    let mut line_matcher = attach_proc.line_matcher()?;
-
-    attach_proc.run_cmd("echo $MY_FORWARD_VAR")?;
-    line_matcher.match_re("forward-var-value$")?;
 
     Ok(())
 }

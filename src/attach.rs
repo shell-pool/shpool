@@ -48,9 +48,14 @@ pub fn run(name: String, socket: PathBuf) -> anyhow::Result<()> {
     client
         .write_connect_header(protocol::ConnectHeader::Attach(protocol::AttachHeader {
             name: name.clone(),
-            term: env::var("TERM").context("resolving local $TERM")?,
             local_tty_size: tty_size,
-            local_env: env::vars().collect::<Vec<(String, String)>>(),
+            local_env: vec!["TERM", "SSH_AUTH_SOCK"]
+                .into_iter()
+                .map(|var| {
+                    let val = env::var(var).context("resolving var")?;
+                    Ok((String::from(var), val))
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?,
         }))
         .context("writing attach header")?;
 

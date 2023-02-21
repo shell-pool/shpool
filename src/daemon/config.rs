@@ -29,12 +29,6 @@ pub struct Config {
     /// a table of environment variables to inject into the
     /// initial shell
     pub env: Option<HashMap<String, String>>,
-    /// a list of environment variables to take from the shell
-    /// where `shpool attach` is run. Vars in this list but not
-    /// in the clients environment are left untouched.
-    /// Overrides `env` vars if they collide. Only applies on
-    /// first attach to the environment.
-    pub client_env: Option<Vec<String>>,
     /// A duration, in milliseconds, that the shpool
     /// daemon should wait for the handshake performed
     /// by the two component threads of the ssh plugin
