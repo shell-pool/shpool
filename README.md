@@ -105,10 +105,7 @@ Kills a named shell session.
 
 By adding a few lines to your `.bashrc` on your remote host, you can have ssh
 automatically attach to a shpool session derived from the `$SSH_TTY` variable.
-`ssh` ensures that this variable is stable across connections from the same
-local terminal, so you will be able to restore the same shpool session by
-simply sshing to your cloudtop from the same local terminal going forward.
-To use shpool in this mode, just add
+To use shpool in this mode, add
 
 ```
 if [[ $- =~ i ]] && [[ -n "$SSH_TTY" ]]; then
@@ -117,6 +114,10 @@ fi
 ```
 
 to the .bashrc on your remote workstation.
+
+Unfortunately, `$SSH_TTY` is only stable across reconnects if you connect
+in the same order each time, which makes using shpool in this way somewhat
+annoying.
 
 ## Bugs
 

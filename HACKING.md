@@ -82,7 +82,30 @@ $ systemctl --user enable shpool
 $ systemctl --user start shpool
 ```
 
+## Experimental ssh plugin mode
+
+In addition to the `$SSH_TTY` mode documented in the README, there is an
+experimental and fairly buggy plugin mode based on editing your ~/.ssh/config.
+To use it, edit the ~/.ssh/config on your local machine with the following
+example
+
+```
+Host = your-ssh-target-name
+    Hostname your.ssh.host.example.com
+
+    RemoteCommand $HOME/.cargo/bin/shpool plumbing ssh-remote-command
+    PermitLocalCommand yes
+    LocalCommand ssh -oPermitLocalCommand=no -oRemoteCommand="$HOME/.cargo/bin/shpool plumbing ssh-local-command-set-metadata '%u@%h:%p$(tty)'" %n
+```
+
+This will require authenticating twice and there are several bugs in the
+experimental plugin mode, so this mode is not very usable but it does
+serve as a good proof of concept.
+
 ## Formatting
+
+Run `cargo +nightly fmt` to ensure that the code matches the expected
+style.
 
 ## Preserving Logs in Tests
 
