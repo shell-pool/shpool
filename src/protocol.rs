@@ -50,17 +50,6 @@ pub enum ConnectHeader {
     ///
     /// Responds with an AttachReplyHeader.
     Attach(AttachHeader),
-    /// Take a global lock for ssh_handshake_timeout_ms,
-    /// waiting for a LocalCommandSetMetadata
-    /// to arrive to release the lock and
-    /// inform us of the session to connect to.
-    ///
-    /// Responds with an AttachReplyHeader.
-    RemoteCommandLock,
-    /// Release a parked RemoteCommandLock thread.
-    ///
-    /// Responds with SetMetadataRequest.
-    LocalCommandSetMetadata(SetMetadataRequest),
     /// List all of the currently active sessions.
     List,
     /// A message for a named, running sessions. This
@@ -182,17 +171,6 @@ pub struct AttachHeader {
     /// this is a bit inefficient, but it allows us to avoid having to try
     /// to read the config file from the client.
     pub local_env: Vec<(String, String)>,
-}
-
-/// SetMetadataRequest releases the lock created by a
-/// ConnectHeader::RemoteCommandLock informing the parked
-/// thread of the name of the session it should try to attach to.
-#[derive(Serialize, Deserialize, Debug)]
-pub struct SetMetadataRequest {
-    /// The name of the session to create or attach to.
-    pub name: String,
-    /// The value of the local TERM environment variable.
-    pub term: String,
 }
 
 /// AttachReplyHeader is the blob of metadata that the shpool service prefixes

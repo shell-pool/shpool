@@ -26,7 +26,6 @@ mod detach;
 mod kill;
 mod list;
 mod protocol;
-mod ssh;
 mod tty;
 
 #[macro_use]
@@ -99,26 +98,6 @@ environment.")]
     },
     #[clap(about = "lists all the running shell sessions")]
     List,
-    #[clap(about = "contains subcommands not meant to be directly invoked")]
-    Plumbing {
-        #[clap(subcommand)]
-        command: PlumbingCommands,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum PlumbingCommands {
-    #[clap(about = r#"a plumbing command used to extend ssh
-
-See shpool documentation on how to edit your /etc/ssh_config or ~/.ssh/config to take
-advantage of this command.
-"#)]
-    SshRemoteCommand,
-    #[clap(about = r#"a plumbing command used to extend ssh
-
-This command is internal to shpool and you should never have to reference it directly, even in your config.
-"#)]
-    SshLocalCommandSetMetadata { session_name: String, term: String },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -190,12 +169,6 @@ fn main() -> anyhow::Result<()> {
         Commands::Detach { sessions } => detach::run(sessions, socket),
         Commands::Kill { sessions } => kill::run(sessions, socket),
         Commands::List => list::run(socket),
-        Commands::Plumbing { command } => match command {
-            PlumbingCommands::SshRemoteCommand => ssh::remote_cmd::run(socket),
-            PlumbingCommands::SshLocalCommandSetMetadata { session_name, term } => {
-                ssh::set_metadata::run(session_name, term, socket)
-            },
-        },
     };
 
     if let Err(err) = res {
