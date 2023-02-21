@@ -103,25 +103,20 @@ Kills a named shell session.
 
 ### (Optional) `ssh` Plugin Mode
 
-`shpool` can be used as an ssh extension to add session persistence to native
-ssh invocations. When used in this mode, shpool will generate a name based
-on the tty number of the terminal you are using and various metadata like your
-username and client hostname. In order to set up the shpool extension for a given
-remote host, edit your `~/.ssh/config` file *on the client machine* to contain
-a block like the following:
+By adding a few lines to your `.bashrc` on your remote host, you can have ssh
+automatically attach to a shpool session derived from the `$SSH_TTY` variable.
+`ssh` ensures that this variable is stable across connections from the same
+local terminal, so you will be able to restore the same shpool session by
+simply sshing to your cloudtop from the same local terminal going forward.
+To use shpool in this mode, just add
 
 ```
-Host = your-ssh-target-name
-    Hostname your.ssh.host.example.com
-
-    RemoteCommand $HOME/.cargo/bin/shpool plumbing ssh-remote-command
-    PermitLocalCommand yes
-    LocalCommand ssh -oPermitLocalCommand=no -oRemoteCommand="$HOME/.cargo/bin/shpool plumbing ssh-local-command-set-metadata '%u@%h:%p$(tty)'" %n
+if [[ $- =~ i ]] && [[ -n "$SSH_TTY" ]]; then
+   exec $HOME/.cargo/bin/shpool attach "ssh-$(basename $SSH_TTY)"
+fi
 ```
 
-Note that due to limitations in the hooks that ssh exposes to us,
-you will need to gnubby touch twice in order to use `shpool` in
-this mode.
+to the .bashrc on your remote workstation.
 
 ## Bugs
 
