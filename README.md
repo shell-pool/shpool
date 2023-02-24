@@ -121,11 +121,8 @@ annoying.
 
 ## Bugs
 
-The TODO file in the root of this repo is the most sophisticated project
-planning tool in use by the shpool project at the moment. It contains
-a list of known bugs and future plans. If you wish to report a bug or
-are having trouble with shpool, feel free to ping me (pailes@) directly
-and I'll add your bug to the file and try to help you work around it.
+You can report a bug
+[here](https://b.corp.google.com/issues/new?component=1320938&template=0).
 
 ## Hacking
 
