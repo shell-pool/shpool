@@ -39,7 +39,10 @@ use byteorder::{
     ReadBytesExt,
     WriteBytesExt,
 };
-use crossbeam_channel::TryRecvError;
+use crossbeam_channel::{
+    RecvTimeoutError,
+    TryRecvError,
+};
 use nix::{
     sys::signal,
     unistd::Pid,
@@ -192,18 +195,6 @@ impl Server {
                                 inner
                             );
 
-                            // Some ncurses apps get lazy about redrawing if the tty
-                            // size has not changed when they get a SIGWINCH, so we
-                            // first set a slightly larger size before setting the
-                            // real size in order to force a redraw.
-                            let tty_oversize = tty::Size {
-                                rows: header.local_tty_size.rows + 1,
-                                cols: header.local_tty_size.cols + 1,
-                            };
-                            inner
-                                .set_pty_size(&tty_oversize)
-                                .context("setting oversized pty size on reattach")?;
-
                             inner
                                 .set_pty_size(&header.local_tty_size)
                                 .context("resetting pty size on reattach")?;
@@ -285,8 +276,66 @@ impl Server {
                 error!("error writing reply status: {:?}", e);
             }
 
+            let local_tty_size = header.local_tty_size.clone();
+            let shells_arc = Arc::clone(&self.shells);
+            let sess_name = header.name.clone();
+            let (spawned_threads_tx, spawned_threads_rx) = crossbeam_channel::bounded(0);
+            thread::spawn(move || {
+                match spawned_threads_rx.recv_timeout(time::Duration::from_secs(2)) {
+                    Ok(()) => {
+                        warn!("unexpected send on spawned_threads chan");
+                        return;
+                    },
+                    Err(RecvTimeoutError::Timeout) => {
+                        warn!("timed out waiting for bidi_stream threads to spawn");
+                        return;
+                    },
+                    // fallthrough because channel closure indicates all threads have
+                    // been spawned and are ready for us
+                    Err(RecvTimeoutError::Disconnected) => {},
+                }
+
+                let tty_oversize = tty::Size {
+                    rows: local_tty_size.rows + 1,
+                    cols: local_tty_size.cols + 1,
+                };
+
+                // For some reason, emacs will correctly re-draw when we jiggle
+                // the tty size via a ResizeRequest RPC call, but directly calling
+                // local_tty_size.set_fd(...) from here does not force the redraw.
+                // This doesn't make any sense because the resize RPC is just a
+                // more convoluted way to make that call as far as I can tell.
+                // It doesn't seem to be a timing issue since I've added some
+                // long sleeps to ensure there is no race causing problems.
+                {
+                    let shells = shells_arc.lock().unwrap();
+
+                    if let Some(session) = shells.get(&sess_name) {
+                        if let Err(e) =
+                            session.rpc_call(protocol::SessionMessageRequestPayload::Resize(
+                                protocol::ResizeRequest {
+                                    tty_size: tty_oversize,
+                                },
+                            ))
+                        {
+                            error!("making oversize resize rpc: {:?}", e);
+                        }
+
+                        if let Err(e) =
+                            session.rpc_call(protocol::SessionMessageRequestPayload::Resize(
+                                protocol::ResizeRequest {
+                                    tty_size: local_tty_size,
+                                },
+                            ))
+                        {
+                            error!("making normal size resize rpc: {:?}", e);
+                        }
+                    }
+                }
+            });
+
             info!("handle_attach: starting bidi stream loop");
-            match inner.bidi_stream() {
+            match inner.bidi_stream(spawned_threads_tx) {
                 Ok(done) => {
                     child_done = done;
                 },
@@ -512,9 +561,7 @@ impl Server {
             protocol::AttachHeader {
                 name: metadata.name,
                 local_tty_size: tty_size,
-                local_env: vec![
-                    (String::from("TERM"), metadata.term),
-                ], // TODO(ethan): support env-var forwarding for ssh plugin mode
+                local_env: vec![(String::from("TERM"), metadata.term)], // TODO(ethan): support env-var forwarding for ssh plugin mode
             },
             true,
         )

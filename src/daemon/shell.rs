@@ -101,8 +101,8 @@ impl SessionInner {
         let _s = span!(Level::INFO, "SessionInner.handle_resize_rpc").entered();
 
         info!(
-            "s({}): handle_resize_rpc: resize {:?} to {:?}",
-            self.name, self, &req.tty_size
+            "handle_resize_rpc: resize {:?} to {:?}",
+            self, &req.tty_size
         );
         self.set_pty_size(&req.tty_size)?;
         Ok(protocol::ResizeReply::Ok)
@@ -121,7 +121,14 @@ impl SessionInner {
     /// bidi_stream shuffles bytes between the subprocess and
     /// the client connection. It returns true if the subprocess
     /// has exited, and false if it is still running.
-    pub fn bidi_stream(&mut self) -> anyhow::Result<bool> {
+    ///
+    /// `spawned_threads` is a channel that gets closed once all the threads
+    /// for servicing the connection have been spawned. It should be a bounded
+    /// unbuffered channel.
+    pub fn bidi_stream(
+        &mut self,
+        spawned_handlers: crossbeam_channel::Sender<()>,
+    ) -> anyhow::Result<bool> {
         let _s = span!(Level::INFO, "SessionInner.bidi_stream").entered();
         test_hooks::emit!("daemon-bidi-stream-enter");
         test_hooks::scoped!(_bidi_stream_test_guard, "daemon-bidi-stream-done");
@@ -177,6 +184,8 @@ impl SessionInner {
 
             // handle SessionMessage RPCs
             let rpc_h = self.spawn_rpc(s, &stop);
+
+            drop(spawned_handlers);
 
             loop {
                 let c_done = child_done.load(Ordering::Acquire);
