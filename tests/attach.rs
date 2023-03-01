@@ -65,6 +65,27 @@ fn symlink_ssh_auth_sock() -> anyhow::Result<()> {
 }
 
 #[test]
+fn missing_ssh_auth_sock() -> anyhow::Result<()> {
+    let mut daemon_proc =
+        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+
+    let tmp_dir = daemon_proc.tmp_dir.as_ref().unwrap();
+    let fake_auth_sock_tgt = tmp_dir.path().join("ssh-auth-sock-target.fake");
+    fs::File::create(&fake_auth_sock_tgt)?;
+
+    let mut attach_proc = daemon_proc
+        .attach("sh1", vec![])
+        .context("starting attach proc")?;
+
+    let mut line_matcher = attach_proc.line_matcher()?;
+
+    attach_proc.run_cmd("ls -l $SSH_AUTH_SOCK")?;
+    line_matcher.match_re(r#".*No such file or directory$"#)?;
+
+    Ok(())
+}
+
+#[test]
 fn config_disable_symlink_ssh_auth_sock() -> anyhow::Result<()> {
     let mut daemon_proc = support::daemon::Proc::new("disable_symlink_ssh_auth_sock.toml")
         .context("starting daemon proc")?;

@@ -51,11 +51,11 @@ pub fn run(name: String, socket: PathBuf) -> anyhow::Result<()> {
             local_tty_size: tty_size,
             local_env: vec!["TERM", "SSH_AUTH_SOCK"]
                 .into_iter()
-                .map(|var| {
-                    let val = env::var(var).context("resolving var")?;
-                    Ok((String::from(var), val))
+                .filter_map(|var| {
+                    let val = env::var(var).context("resolving var").ok()?;
+                    Some((String::from(var), val))
                 })
-                .collect::<anyhow::Result<Vec<_>>>()?,
+                .collect::<Vec<_>>(),
         }))
         .context("writing attach header")?;
 

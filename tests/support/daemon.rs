@@ -1,4 +1,5 @@
 use std::{
+    env,
     os::unix::net::UnixStream,
     path::{
         Path,
@@ -113,6 +114,8 @@ impl Proc {
             .arg(&log_file)
             .arg("--socket")
             .arg(&self.socket_path)
+            .env_clear()
+            .env("XDG_RUNTIME_DIR", env::var("XDG_RUNTIME_DIR")?)
             .env("SHPOOL_TEST_HOOK_SOCKET_PATH", &test_hook_socket_path)
             .envs(extra_env)
             .arg("attach")
