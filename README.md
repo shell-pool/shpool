@@ -103,21 +103,52 @@ Kills a named shell session.
 
 ### (Optional) `ssh` Plugin Mode
 
-By adding a few lines to your `.bashrc` on your remote host, you can have ssh
-automatically attach to a shpool session derived from the `$SSH_TTY` variable.
-To use shpool in this mode, add
+#### Local tty based
+
+To set up your system to automatically generate a shpool session name
+based on your local terminal emulator's tty number, add the following
+line to the .profile or .bashrc on your local machine
 
 ```
-if [[ $- =~ i ]] && [[ -n "$SSH_TTY" ]]; then
-   exec $HOME/.cargo/bin/shpool attach "ssh-$(basename $SSH_TTY)"
+export LC__SHPOOL_SET_SESSION_NAME="ssh-$(basename $(tty))"
+```
+
+then add an entry for the remote machine in your local .ssh/config,
+making sure to add the line `SendEnv LC__SHPOOL_SET_SESSION_NAME`, for example
+
+```
+Host = remote
+    User remoteuser
+    Hostname remote.host.example.com
+    SendEnv LC__SHPOOL_SET_SESSION_NAME
+```
+
+then in your *remote* .bashrc, add an entry to automatically exec into
+a shpool session based on the tty variable we just forwarded
+
+```
+if [[ $- =~ i ]] && [[ -n "$LC__SHPOOL_SET_SESSION_NAME" ]]; then
+   exec $HOME/.cargo/bin/shpool attach "$LC__SHPOOL_SET_SESSION_NAME"
 fi
 ```
 
-to the .bashrc on your remote workstation.
+Note that your remote machine must be configured to allow
+`LC__SHPOOL_SET_SESSION_NAME` to get forwarded (this is why we use
+the `LC_` prefix since it may be more likely to be accepted).
 
-Unfortunately, `$SSH_TTY` is only stable across reconnects if you connect
-in the same order each time, which makes using shpool in this way somewhat
-annoying.
+#### Explicitly named sessions
+
+Rather than derive the session name from the local tty, you may prefer
+to explicitly set the names for your sessions. In this case you
+can instead set up a remote host config per name in your .ssh/config,
+making use of the SetEnv config option. For example, you could have an entry like
+
+```
+Host = remote
+    User remoteuser
+    Hostname remote.host.example.com
+    SetEnv LC__SHPOOL_SET_SESSION_NAME=edit
+```
 
 ## Bugs
 
