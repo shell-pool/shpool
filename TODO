@@ -13,8 +13,11 @@
   this will be the only keybinding. Make it configurable in the toml file
   with at least enough flexibility to allow tmux users to use their normal
   "C-a d" keybinding.
+- Attempt to improve the ssh plugin mode by packing the local tty in $TERM
 - SIGWINCH appears to redraw the shell prompt some of the time, but not
   always on reconnect https://screencast.googleplex.com/cast/NjM5ODM3MzQ1MzEwMzEwNHwzZTRiNjJmYy1iNg shows the problem.
+  - This might be fixed after I got SIGWINCH to start working for emacs. Let's
+    wait to see if other people report improvement.
 - Shpool introduces more lag than it should http://screencast/cast/NjU4Nzk0MTA3MDU2OTQ3MnxkYzhmZjhhZS00Nw
 - I should set up CI/CD (can probably let Nicholas figure it out then copy him)
 - I should do some security hardening (the cidermux docs have some good suggestions here)
