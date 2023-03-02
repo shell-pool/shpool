@@ -299,20 +299,36 @@ impl<'data> Chunk<'data> {
     where
         W: std::io::Write,
     {
-        if stop.load(Ordering::Relaxed) {
-            return Ok(());
+        loop {
+            if stop.load(Ordering::Relaxed) {
+                return Ok(());
+            }
+
+            if let Err(e) = w.write_u8(self.kind as u8) {
+                if e.kind() == std::io::ErrorKind::WouldBlock {
+                    trace!("chunk: writing tag: WouldBlock");
+                    thread::sleep(consts::PIPE_POLL_DURATION);
+                    continue;
+                }
+                return Err(e);
+            }
+            break;
         }
 
-        w.write_u8(self.kind as u8)?;
+        loop {
+            if stop.load(Ordering::Relaxed) {
+                return Ok(());
+            }
 
-        if stop.load(Ordering::Relaxed) {
-            return Ok(());
-        }
-
-        w.write_u32::<LittleEndian>(self.buf.len() as u32)?;
-
-        if stop.load(Ordering::Relaxed) {
-            return Ok(());
+            if let Err(e) = w.write_u32::<LittleEndian>(self.buf.len() as u32) {
+                if e.kind() == std::io::ErrorKind::WouldBlock {
+                    trace!("chunk: writing length prefix: WouldBlock");
+                    thread::sleep(consts::PIPE_POLL_DURATION);
+                    continue;
+                }
+                return Err(e);
+            }
+            break;
         }
 
         let mut to_write = &self.buf[..];
@@ -528,7 +544,16 @@ impl Client {
                                 to_write = &to_write[nwritten..];
                             }
 
-                            stdout.flush().context("flushing stdout")?;
+                            if let Err(e) = stdout.flush() {
+                                if e.kind() == std::io::ErrorKind::WouldBlock {
+                                    // If the fd is busy, we are likely just getting
+                                    // flooded with output and don't need to worry about
+                                    // flushing every last byte. Flushing is really
+                                    // about interactive situations where we want to
+                                    // see echoed bytes immediately.
+                                    continue;
+                                }
+                            }
                             debug!("pipe_bytes: sock->stdout: flushed stdout");
                         },
                     }
