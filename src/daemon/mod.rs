@@ -15,7 +15,6 @@ mod config;
 mod server;
 mod shell;
 mod signals;
-mod ssh_plugin;
 mod systemd;
 mod user;
 

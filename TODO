@@ -13,7 +13,6 @@
   this will be the only keybinding. Make it configurable in the toml file
   with at least enough flexibility to allow tmux users to use their normal
   "C-a d" keybinding.
-- Attempt to improve the ssh plugin mode by packing the local tty in $TERM
 - SIGWINCH appears to redraw the shell prompt some of the time, but not
   always on reconnect https://screencast.googleplex.com/cast/NjM5ODM3MzQ1MzEwMzEwNHwzZTRiNjJmYy1iNg shows the problem.
   - This might be fixed after I got SIGWINCH to start working for emacs. Let's

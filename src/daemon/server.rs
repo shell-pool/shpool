@@ -23,7 +23,6 @@ use std::{
     process,
     sync::{
         Arc,
-        Condvar,
         Mutex,
     },
     thread,
@@ -50,8 +49,8 @@ use nix::{
 use tracing::{
     error,
     info,
-    span,
     warn,
+    span,
     Level,
 };
 
@@ -64,21 +63,13 @@ use super::{
     },
     config,
     shell,
-    ssh_plugin,
     user,
 };
-
-// controls how long we wait on attempted sends and receives
-// when sending a message to a running session
-const DEFAULT_SSH_HANDSHAKE_TIMEOUT_MS: u64 = 30 * 1000;
 
 pub struct Server {
     config: config::Config,
     /// A map from shell session names to session descriptors.
     shells: Arc<Mutex<HashMap<String, shell::Session>>>,
-    /// Syncronization primitives allowing us make sure that only
-    /// one thread at a time attaches using the ssh extension mechanism.
-    ssh_extension_parker: Arc<ssh_plugin::Parker>,
     runtime_dir: PathBuf,
 }
 
@@ -86,19 +77,9 @@ impl Server {
     pub fn new(config: config::Config, runtime_dir: PathBuf) -> Arc<Self> {
         let _s = span!(Level::INFO, "Server.new").entered();
 
-        let park_timeout = time::Duration::from_millis(
-            config
-                .ssh_handshake_timeout_ms
-                .unwrap_or(DEFAULT_SSH_HANDSHAKE_TIMEOUT_MS),
-        );
-
         Arc::new(Server {
             config,
             shells: Arc::new(Mutex::new(HashMap::new())),
-            ssh_extension_parker: Arc::new(ssh_plugin::Parker {
-                inner: Mutex::new(ssh_plugin::ParkerInner::new(None, park_timeout)),
-                cond: Condvar::new(),
-            }),
             runtime_dir,
         })
     }
@@ -148,10 +129,6 @@ impl Server {
             protocol::ConnectHeader::Attach(h) => self.handle_attach(stream, h, false),
             protocol::ConnectHeader::Detach(r) => self.handle_detach(stream, r),
             protocol::ConnectHeader::Kill(r) => self.handle_kill(stream, r),
-            protocol::ConnectHeader::RemoteCommandLock => self.handle_remote_command_lock(stream),
-            protocol::ConnectHeader::LocalCommandSetMetadata(r) => {
-                self.handle_local_command_set_metadata(r)
-            },
             protocol::ConnectHeader::List => self.handle_list(stream),
             protocol::ConnectHeader::SessionMessage(header) => {
                 self.handle_session_message(stream, header)
@@ -462,174 +439,6 @@ impl Server {
             .context("writing kill reply")?;
 
         Ok(())
-    }
-
-    fn handle_remote_command_lock(&self, mut stream: UnixStream) -> anyhow::Result<()> {
-        let _s = span!(Level::INFO, "Server.handle_remote_command_lock").entered();
-
-        let metadata = {
-            let mut inner = self.ssh_extension_parker.inner.lock().unwrap();
-
-            // if the metadata has expired, clobber it
-            let attach_timeout = time::Duration::from_millis(
-                self.config
-                    .ssh_handshake_timeout_ms
-                    .unwrap_or(DEFAULT_SSH_HANDSHAKE_TIMEOUT_MS),
-            );
-            let mut clobber_metadata = false;
-            if let Some(md) = &inner.metadata {
-                info!("handle_remote_command_lock: checking to see if existing metadata is valid");
-                if time::Instant::now().duration_since(md.set_at) > attach_timeout {
-                    clobber_metadata = true;
-                }
-            }
-            if clobber_metadata {
-                info!("handle_remote_command_lock: clobbering metadata");
-                inner.metadata = None;
-            }
-
-            let metadata = if inner.has_parked_local() {
-                info!("handle_remote_command_lock: there is already a parked local waiting for us");
-                inner
-                    .metadata
-                    .take()
-                    .unwrap_or_else(|| ssh_plugin::Metadata::default())
-            } else {
-                if inner.has_parked_remote() {
-                    info!("handle_remote_command_lock: remote parking slot full");
-                    write_reply(
-                        &mut stream,
-                        protocol::AttachReplyHeader {
-                            status: protocol::AttachStatus::SshExtensionParkingSlotFull,
-                        },
-                    )?;
-                    return Ok(());
-                }
-
-                info!("handle_remote_command_lock: about to park");
-                inner.set_has_parked_remote(true);
-
-                let attach_timeout = time::Duration::from_millis(
-                    self.config
-                        .ssh_handshake_timeout_ms
-                        .unwrap_or(DEFAULT_SSH_HANDSHAKE_TIMEOUT_MS),
-                );
-
-                let (mut inner, timeout_res) = self
-                    .ssh_extension_parker
-                    .cond
-                    .wait_timeout_while(inner, attach_timeout, |inner| inner.metadata.is_none())
-                    .unwrap();
-                if timeout_res.timed_out() {
-                    info!("handle_remote_command_lock: timeout");
-                    write_reply(
-                        &mut stream,
-                        protocol::AttachReplyHeader {
-                            status: protocol::AttachStatus::Timeout,
-                        },
-                    )?;
-                    return Ok(());
-                }
-
-                inner.set_has_parked_remote(false);
-                inner
-                    .metadata
-                    .take()
-                    .unwrap_or_else(|| ssh_plugin::Metadata::default())
-            };
-
-            self.ssh_extension_parker.cond.notify_one();
-            metadata
-        };
-
-        let tty_size = match tty::Size::from_fd(0) {
-            Ok(s) => s,
-            Err(e) => {
-                warn!("stdin is not a tty, using default size (err: {:?})", e);
-                tty::Size { rows: 24, cols: 80 }
-            },
-        };
-
-        info!(
-            "handle_remote_command_lock: becoming an attach with {:?}",
-            metadata
-        );
-        // At this point, we've gotten the name through normal means, so we
-        // can just become a normal attach request.
-        self.handle_attach(
-            stream,
-            protocol::AttachHeader {
-                name: metadata.name,
-                local_tty_size: tty_size,
-                local_env: vec![(String::from("TERM"), metadata.term)], // TODO(ethan): support env-var forwarding for ssh plugin mode
-            },
-            true,
-        )
-    }
-
-    fn handle_local_command_set_metadata(
-        &self,
-        header: protocol::SetMetadataRequest,
-    ) -> anyhow::Result<()> {
-        let _s = span!(Level::INFO, "Server.handle_local_command_set_metadata").entered();
-
-        let status = {
-            let mut inner = self.ssh_extension_parker.inner.lock().unwrap();
-
-            if inner.has_parked_remote() {
-                assert!(
-                    !inner.has_parked_local(),
-                    "local: should never have two threads parked at once"
-                );
-
-                info!("handle_local_command_set_metadata: there is a remote thread waiting to be woken");
-                inner.metadata = Some(ssh_plugin::Metadata {
-                    name: header.name.clone(),
-                    term: header.term.clone(),
-                    set_at: time::Instant::now(),
-                });
-                self.ssh_extension_parker.cond.notify_one();
-
-                protocol::LocalCommandSetMetadataStatus::Ok
-            } else {
-                info!("handle_local_command_set_metadata: no remote thread, we will have to wait ourselves");
-                inner.metadata = Some(ssh_plugin::Metadata {
-                    name: header.name.clone(),
-                    term: header.term.clone(),
-                    set_at: time::Instant::now(),
-                });
-                inner.set_has_parked_local(true);
-
-                let attach_timeout = time::Duration::from_millis(
-                    self.config
-                        .ssh_handshake_timeout_ms
-                        .unwrap_or(DEFAULT_SSH_HANDSHAKE_TIMEOUT_MS),
-                );
-
-                let (mut inner, timeout_res) = self
-                    .ssh_extension_parker
-                    .cond
-                    .wait_timeout_while(inner, attach_timeout, |inner| inner.metadata.is_some())
-                    .unwrap();
-                inner.set_has_parked_local(false);
-                if timeout_res.timed_out() {
-                    info!(
-                        "handle_local_command_set_metadata: timed out waiting for remote command"
-                    );
-                    protocol::LocalCommandSetMetadataStatus::Timeout
-                } else {
-                    info!("handle_local_command_set_metadata: finished the handshake successfully");
-                    protocol::LocalCommandSetMetadataStatus::Ok
-                }
-            }
-        };
-
-        // write the reply without the lock held to avoid doin IO with a lock held
-        info!(
-            "handle_local_command_set_metadata: status={:?} name='{}'",
-            status, header.name
-        );
-        return Ok(());
     }
 
     fn handle_list(&self, mut stream: UnixStream) -> anyhow::Result<()> {
