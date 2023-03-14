@@ -27,6 +27,8 @@ impl Handler {
     }
 
     pub fn spawn(self) -> anyhow::Result<()> {
+        info!("spawning signal handler thread");
+
         // This sets us up to shutdown immediately if someone
         // mashes ^C so we don't get stuck attempting a graceful
         // shutdown.
@@ -42,7 +44,6 @@ impl Handler {
         }
 
         let mut signals = Signals::new(TERM_SIGNALS).context("creating signal iterator")?;
-
         thread::spawn(move || {
             for signal in &mut signals {
                 match signal as libc::c_int {

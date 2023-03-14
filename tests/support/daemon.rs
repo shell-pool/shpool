@@ -30,7 +30,7 @@ use super::{
 /// Proc is a helper handle for a `shpool daemon` subprocess.
 /// It kills the subprocess when it goes out of scope.
 pub struct Proc {
-    proc: process::Child,
+    pub proc: process::Child,
     subproc_counter: usize,
     log_file: PathBuf,
     pub tmp_dir: Option<TempDir>,

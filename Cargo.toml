@@ -31,7 +31,11 @@ libc = "0.2" # basic libc types
 systemd = "0.10" # socket activation
 log = "0.4" # logging facade (not used directly, but required if we have tracing-log enabled)
 tracing = "0.1" # logging and performance monitoring facade
-tracing-subscriber = { version = "0.3.16", features = ["tracing-log"] } # tracing implementation
+
+[dependencies.tracing-subscriber]
+version = "0.3.16"
+default-features = false
+features = ["std", "fmt", "tracing-log", "smallvec"]
 
 [dev-dependencies]
 tempfile = "3" # keeping tests hermetic

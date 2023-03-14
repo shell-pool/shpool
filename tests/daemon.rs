@@ -9,6 +9,7 @@ use std::{
         net::UnixListener,
         process::CommandExt,
     },
+    path,
     process::{
         Command,
         Stdio,
@@ -20,7 +21,16 @@ use anyhow::{
     anyhow,
     Context,
 };
-use nix::unistd::ForkResult;
+use nix::{
+    sys::signal::{
+        self,
+        Signal,
+    },
+    unistd::{
+        ForkResult,
+        Pid,
+    },
+};
 
 mod support;
 
@@ -85,7 +95,7 @@ fn systemd_activation() -> anyhow::Result<()> {
     let mut cmd = Command::new(support::shpool_bin()?);
     cmd.stdout(Stdio::piped())
         .stderr(child_stderr_pipe)
-        .env("LISTEN_FDS", "1")// format!("{}", activation_sock.as_raw_fd()))
+        .env("LISTEN_FDS", "1")
         .env("LISTEN_FDNAMES", sock_path)
         .arg("daemon");
 
@@ -197,5 +207,18 @@ fn config() -> anyhow::Result<()> {
         .context("slurping stderr")?;
     assert!(stderr_str.contains("STARTING DAEMON"));
 
+    Ok(())
+}
+
+#[test]
+fn cleanup_socket() -> anyhow::Result<()> {
+    let mut daemon_proc =
+        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+
+    signal::kill(Pid::from_raw(daemon_proc.proc.id() as i32), Signal::SIGINT)?;
+
+    daemon_proc.proc.wait()?;
+
+    assert!(!path::Path::new(&daemon_proc.socket_path).exists());
     Ok(())
 }

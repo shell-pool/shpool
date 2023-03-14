@@ -46,10 +46,10 @@ pub fn run(
             UnixListener::bind(&socket).context("binding to socket")?
         },
     };
-    server::Server::serve(server, listener)?;
-
     // spawn the signal handler thread in the background
     signals::Handler::new(cleanup_socket.clone()).spawn()?;
+
+    server::Server::serve(server, listener)?;
 
     if let Some(sock) = cleanup_socket {
         std::fs::remove_file(sock).context("cleaning up socket on exit")?;

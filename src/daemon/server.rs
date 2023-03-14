@@ -49,8 +49,8 @@ use nix::{
 use tracing::{
     error,
     info,
-    warn,
     span,
+    warn,
     Level,
 };
 
