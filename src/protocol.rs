@@ -365,15 +365,11 @@ impl Client {
     }
 
     pub fn write_connect_header(&mut self, header: ConnectHeader) -> anyhow::Result<()> {
-        let buf = rmp_serde::to_vec(&header).context("formatting reply header")?;
-        debug!("writing connect header length prefix={}", buf.len());
-        self.stream
-            .write_u32::<LittleEndian>(buf.len() as u32)
-            .context("writing reply length prefix")?;
-        debug!("writing connect header");
-        self.stream
-            .write_all(&buf)
-            .context("writing reply header")?;
+        let serialize_stream = self
+            .stream
+            .try_clone()
+            .context("cloning stream for reply")?;
+        bincode::serialize_into(serialize_stream, &header).context("writing reply")?;
 
         Ok(())
     }
@@ -382,16 +378,7 @@ impl Client {
     where
         R: serde::de::DeserializeOwned,
     {
-        let length_prefix = self
-            .stream
-            .read_u32::<LittleEndian>()
-            .context("reading header length prefix")?;
-        let mut buf: Vec<u8> = vec![0; length_prefix as usize];
-        self.stream
-            .read_exact(&mut buf)
-            .context("reading header buf")?;
-
-        let reply: R = rmp_serde::from_read(&*buf).context("parsing header")?;
+        let reply: R = bincode::deserialize_from(&mut self.stream).context("parsing header")?;
         Ok(reply)
     }
 

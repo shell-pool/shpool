@@ -30,6 +30,7 @@ atty = "0.2" # checking if we are connected to a terminal
 libc = "0.2" # basic libc types
 log = "0.4" # logging facade (not used directly, but required if we have tracing-log enabled)
 tracing = "0.1" # logging and performance monitoring facade
+bincode = "1"
 
 [dependencies.tracing-subscriber]
 version = "0.3.16"

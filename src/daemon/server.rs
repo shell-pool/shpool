@@ -2,10 +2,6 @@ use std::{
     collections::HashMap,
     env,
     fs,
-    io::{
-        Read,
-        Write,
-    },
     net,
     os,
     os::unix::{
@@ -32,11 +28,6 @@ use std::{
 use anyhow::{
     anyhow,
     Context,
-};
-use byteorder::{
-    LittleEndian,
-    ReadBytesExt,
-    WriteBytesExt,
 };
 use crossbeam_channel::{
     RecvTimeoutError,
@@ -633,13 +624,8 @@ impl Server {
 fn parse_connect_header(stream: &mut UnixStream) -> anyhow::Result<protocol::ConnectHeader> {
     let _s = span!(Level::TRACE, "Server.parse_connect_header").entered();
 
-    let length_prefix = stream
-        .read_u32::<LittleEndian>()
-        .context("reading header length prefix")?;
-    let mut buf: Vec<u8> = vec![0; length_prefix as usize];
-    stream.read_exact(&mut buf).context("reading header buf")?;
-
-    let header: protocol::ConnectHeader = rmp_serde::from_slice(&buf).context("parsing header")?;
+    let header: protocol::ConnectHeader =
+        bincode::deserialize_from(stream).context("parsing header")?;
     Ok(header)
 }
 
@@ -653,11 +639,8 @@ where
         .set_write_timeout(Some(consts::SOCK_STREAM_TIMEOUT))
         .context("setting write timout on inbound session")?;
 
-    let buf = rmp_serde::to_vec(&header).context("formatting reply header")?;
-    stream
-        .write_u32::<LittleEndian>(buf.len() as u32)
-        .context("writing reply length prefix")?;
-    stream.write_all(&buf).context("writing reply header")?;
+    let serializeable_stream = stream.try_clone().context("cloning stream handle")?;
+    bincode::serialize_into(serializeable_stream, &header).context("writing reply")?;
 
     stream
         .set_write_timeout(None)
