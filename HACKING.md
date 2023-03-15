@@ -49,12 +49,6 @@ $ source "$HOME/.cargo/env"
 
 in your `.profile` file should do the trick.
 
-### Install systemd dependencies
-
-```
-$ sudo apt install libsystemd-dev
-```
-
 ### Build `shpool`
 
 To build and install `shpool` run

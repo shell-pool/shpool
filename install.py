@@ -289,7 +289,7 @@ def _check_install_dependencies(shpool_checkout_dir: str) -> None:
   """Installs required dependencies if not already present."""
   _log_banner("Installing dependencies ...", sep="-")
   _execute_command(
-    "sudo apt-get install -y git git-remote-google libsystemd-dev",
+    "sudo apt-get install -y git git-remote-google",
     env={
           **os.environ, "DEBIAN_FRONTEND": "noninteractive"
     }, quiet=True)

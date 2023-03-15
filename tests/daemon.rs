@@ -138,7 +138,6 @@ fn systemd_activation() -> anyhow::Result<()> {
             cmd.env("LISTEN_PID", pid_buf);
 
             let err = cmd.exec();
-            ();
             eprintln!("exec err: {:?}", err);
             std::process::exit(1);
         },
