@@ -297,9 +297,6 @@ impl SessionInner {
                         return Ok(());
                     }
 
-                    // TODO(ethan): will we even get an EWOULDBLOCK return code anymore?
-                    //              the pty master file descriptor does not allow us to
-                    //              mark it nonblocking.
                     let nwritten = match master_writer.write(&to_write) {
                         Ok(n) => n,
                         Err(e) => {
