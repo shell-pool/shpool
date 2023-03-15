@@ -1,7 +1,5 @@
 
 - There is a lot of heartbeat overhead. See if we can reduce that.
-- Get ssh extension mode to be compatible with ssh multiplexing so
-  it only requires a single gnubby touch.
 - Reload config if we get a SIGHUP
 - Implement spooling logic to handle subprocesses which generate
   a bunch of output after we have detached.
@@ -21,8 +19,3 @@
 - I should set up CI/CD (can probably let Nicholas figure it out then copy him)
 - I should do some security hardening (the cidermux docs have some good suggestions here)
 
-There is a cool pair of signals that might be useful for dealing with IO
-from the shell after a network drop. SIGTIN/SIGTOUT suspend a background
-process if they try to read or write to the termianl. It causes them
-to pause and wait for a SIGCONT just like ^Z does. This might present an
-alternative approach instead of spooling the output.
