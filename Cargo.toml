@@ -30,7 +30,7 @@ tracing = "0.1" # logging and performance monitoring facade
 bincode = "1"
 
 [dependencies.tracing-subscriber]
-version = "0.3.16"
+version = "0.3"
 default-features = false
 features = ["std", "fmt", "tracing-log", "smallvec"]
 
