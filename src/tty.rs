@@ -1,8 +1,8 @@
 use std::{
     io,
-    os::{
-        fd::AsRawFd,
-        unix::io::RawFd,
+    os::unix::io::{
+        AsRawFd,
+        RawFd,
     },
 };
 
