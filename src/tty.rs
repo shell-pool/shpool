@@ -1,6 +1,25 @@
-use std::os::unix::io::RawFd;
+use std::{
+    io,
+    os::{
+        fd::AsRawFd,
+        unix::io::RawFd,
+    },
+};
 
 use anyhow::Context;
+use nix::{
+    sys::{
+        termios,
+        termios::{
+            ControlFlags,
+            InputFlags,
+            LocalFlags,
+            OutputFlags,
+            SetArg,
+        },
+    },
+    unistd::isatty,
+};
 use serde_derive::{
     Deserialize,
     Serialize,
@@ -56,42 +75,49 @@ impl Size {
     }
 }
 
-pub fn disable_echo(fd: RawFd) -> std::io::Result<()> {
-    use termios::*;
+pub fn disable_echo(fd: RawFd) -> anyhow::Result<()> {
+    let mut term = termios::tcgetattr(fd).context("grabbing term flags")?;
+    term.local_flags &= !LocalFlags::ECHO;
 
-    let mut term = Termios::from_fd(fd)?;
-    term.c_lflag &= !ECHO;
+    termios::tcsetattr(fd, SetArg::TCSANOW, &term)?;
 
-    tcsetattr(fd, TCSANOW, &term)
+    Ok(())
 }
 
 pub fn set_attach_flags() -> anyhow::Result<AttachFlagsGuard> {
-    // TODO(ethan): it seems like we may be able to drop the termios
-    //              dep and just use nix. See nix::sys::termios::Termios.
-    use termios::*;
-
     let fd = 0;
 
-    if atty::isnt(atty::Stream::Stdout)
-        || atty::isnt(atty::Stream::Stdin)
-        || atty::isnt(atty::Stream::Stderr)
+    if !isatty(io::stdin().as_raw_fd())?
+        || !isatty(io::stdout().as_raw_fd())?
+        || !isatty(io::stderr().as_raw_fd())?
     {
         // We are not attached to a terminal, so don't futz with its flags.
         return Ok(AttachFlagsGuard { fd, old: None });
     }
 
     // grab settings from the stdin terminal
-    let old = Termios::from_fd(fd).context("grabbing term flags")?;
+    let old = termios::tcgetattr(fd).context("grabbing term flags")?;
 
     // Set the input terminal to raw mode so we immediately get the input chars.
     // The terminal for the remote shell is the one that will apply all the logic.
     let mut new = old.clone();
-    new.c_iflag &= !(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON);
-    new.c_oflag &= !OPOST;
-    new.c_lflag &= !(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
-    new.c_cflag &= !(CSIZE | PARENB);
-    new.c_cflag |= CS8;
-    tcsetattr(fd, TCSANOW, &new)?;
+    new.input_flags &= !(InputFlags::IGNBRK
+        | InputFlags::BRKINT
+        | InputFlags::PARMRK
+        | InputFlags::ISTRIP
+        | InputFlags::INLCR
+        | InputFlags::IGNCR
+        | InputFlags::ICRNL
+        | InputFlags::IXON);
+    new.output_flags &= !OutputFlags::OPOST;
+    new.local_flags &= !(LocalFlags::ECHO
+        | LocalFlags::ECHONL
+        | LocalFlags::ICANON
+        | LocalFlags::ISIG
+        | LocalFlags::IEXTEN);
+    new.control_flags &= !(ControlFlags::CSIZE | ControlFlags::PARENB);
+    new.control_flags |= ControlFlags::CS8;
+    termios::tcsetattr(fd, SetArg::TCSANOW, &new)?;
 
     Ok(AttachFlagsGuard { fd, old: Some(old) })
 }
@@ -102,8 +128,8 @@ pub struct AttachFlagsGuard {
 }
 impl std::ops::Drop for AttachFlagsGuard {
     fn drop(&mut self) {
-        if let Some(old) = self.old {
-            if let Err(e) = termios::tcsetattr(self.fd, termios::TCSANOW, &old) {
+        if let Some(old) = &self.old {
+            if let Err(e) = termios::tcsetattr(self.fd, SetArg::TCSANOW, old) {
                 error!("error restoring terminal settings: {:?}", e);
             }
         }
