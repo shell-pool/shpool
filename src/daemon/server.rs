@@ -57,6 +57,8 @@ use super::{
     user,
 };
 
+const SHELL_KILL_TIMEOUT: time::Duration = time::Duration::from_millis(500);
+
 pub struct Server {
     config: config::Config,
     /// A map from shell session names to session descriptors.
@@ -201,18 +203,9 @@ impl Server {
 
             if status == protocol::AttachStatus::Created {
                 info!("handle_attach: creating new subshell");
-                let (rpc_in, rpc_out, inner) =
-                    self.spawn_subshell(stream, &header, disable_echo)?;
+                let session = self.spawn_subshell(stream, &header, disable_echo)?;
 
-                shells.insert(
-                    header.name.clone(),
-                    shell::Session {
-                        rpc_in,
-                        rpc_out,
-                        started_at: time::SystemTime::now(),
-                        inner: Arc::new(Mutex::new(inner)),
-                    },
-                );
+                shells.insert(header.name.clone(), session);
                 // fallthrough to bidi streaming
             }
 
@@ -408,8 +401,23 @@ impl Server {
                         .pty_master
                         .child_pid()
                         .ok_or(anyhow!("no child pid"))?;
-                    signal::kill(Pid::from_raw(pid), Some(signal::Signal::SIGKILL))
+
+                    // SIGHUP is a signal to indicate that the terminal has disconnected
+                    // from a process. We can't use the normal SIGTERM graceful-shutdown
+                    // signal since shells just forward those to their child process,
+                    // but for shells SIGHUP serves as the graceful shutdown signal.
+                    signal::kill(Pid::from_raw(pid), Some(signal::Signal::SIGHUP))
                         .context("sending SIGKILL to child proc")?;
+
+                    match inner.child_exited.recv_timeout(SHELL_KILL_TIMEOUT) {
+                        Ok(_) => error!("internal error: unexpected send on child_exited chan"),
+                        Err(RecvTimeoutError::Timeout) => {
+                            signal::kill(Pid::from_raw(pid), Some(signal::Signal::SIGKILL))
+                                .context("sending SIGKILL to child proc")?;
+                        },
+                        Err(_) => {}, // fallthrough
+                    }
+
                     // we don't need to wait since the dedicated reaping thread is active
                     // even when a tty is not attached
                     to_remove.push(session);
@@ -484,11 +492,7 @@ impl Server {
         client_stream: UnixStream,
         header: &protocol::AttachHeader,
         disable_echo: bool,
-    ) -> anyhow::Result<(
-        crossbeam_channel::Sender<protocol::SessionMessageRequestPayload>,
-        crossbeam_channel::Receiver<protocol::SessionMessageReply>,
-        shell::SessionInner,
-    )> {
+    ) -> anyhow::Result<shell::Session> {
         let _s = span!(Level::INFO, "Server.spawn_subshell").entered();
 
         let user_info = user::info()?;
@@ -610,7 +614,12 @@ impl Server {
         session
             .set_pty_size(&header.local_tty_size)
             .context("setting initial pty size")?;
-        Ok((in_tx, out_rx, session))
+        Ok(shell::Session {
+            rpc_in: in_tx,
+            rpc_out: out_rx,
+            started_at: time::SystemTime::now(),
+            inner: Arc::new(Mutex::new(session)),
+        })
     }
 
     fn ssh_auth_sock_simlink(&self, session_name: PathBuf) -> PathBuf {
