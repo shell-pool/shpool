@@ -36,12 +36,17 @@ use tracing::{
     Level,
 };
 
-use super::super::{
+use crate::{
     consts,
     protocol,
     test_hooks,
     tty,
+    daemon::{
+        config,
+        keybindings,
+    },
 };
+
 
 const SUPERVISOR_POLL_DUR: time::Duration = time::Duration::from_millis(300);
 const RPC_LOOP_POLL_DUR: time::Duration = time::Duration::from_millis(300);
@@ -96,6 +101,7 @@ pub struct SessionInner {
     pub child_exited: crossbeam_channel::Receiver<()>,
     pub pty_master: pty::fork::Fork,
     pub client_stream: Option<UnixStream>,
+    pub config: config::Config,
 }
 
 impl SessionInner {
@@ -122,7 +128,7 @@ impl SessionInner {
     /// the client connection. It returns true if the subprocess
     /// has exited, and false if it is still running.
     ///
-    /// `spawned_threads` is a channel that gets closed once all the threads
+    /// `spawned_handlers` is a channel that gets closed once all the threads
     /// for servicing the connection have been spawned. It should be a bounded
     /// unbuffered channel.
     #[instrument(skip_all, fields(s = self.name))]
@@ -248,8 +254,19 @@ impl SessionInner {
         pty_master: &'scope pty::fork::Master,
         reader_client_stream: &'scope mut UnixStream,
     ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
+        let empty_bindings = vec![];
+        let bindings = keybindings::Bindings::new(
+            self.config
+                .keybindings
+                .as_ref()
+                .unwrap_or(&empty_bindings)
+                .iter()
+                .map(|binding| (binding.binding.as_str(), binding.action)),
+        );
+
         scope.spawn(|| -> anyhow::Result<()> {
             let _s = span!(Level::INFO, "client->shell", s = self.name).entered();
+            let mut bindings = bindings.context("compiling keybindings engine")?;
 
             let mut master_writer = pty_master.clone();
 
@@ -306,6 +323,14 @@ impl SessionInner {
                     debug!("wrote {} bytes", nwritten);
                     to_write = &to_write[nwritten..];
                     trace!("to_write='{}'", String::from_utf8_lossy(to_write));
+                }
+
+                // TODO(ethan): perform keybinding scanning in a background
+                //              thread
+                for byte in buf[0..len].into_iter() {
+                    if let Some(action) = bindings.transition(*byte) {
+                        info!("keybinding for {:?} fired", action);
+                    }
                 }
 
                 master_writer

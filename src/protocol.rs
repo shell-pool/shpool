@@ -415,6 +415,7 @@ impl Client {
                         "pipe_bytes: stdin->sock: created to_write='{}'",
                         String::from_utf8_lossy(to_write)
                     );
+
                     while to_write.len() > 0 {
                         if stop.load(Ordering::Relaxed) {
                             info!("pipe_bytes: stdin->sock: recvd stop msg (2)");

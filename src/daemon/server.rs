@@ -668,6 +668,7 @@ impl Server {
             child_exited: child_exited_rx,
             pty_master: fork,
             client_stream: Some(client_stream),
+            config: self.config.clone(),
         };
         session
             .set_pty_size(&header.local_tty_size)

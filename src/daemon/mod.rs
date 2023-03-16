@@ -11,6 +11,7 @@ use tracing::{
 };
 
 mod config;
+mod keybindings;
 mod server;
 mod shell;
 mod signals;

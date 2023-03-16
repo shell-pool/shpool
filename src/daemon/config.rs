@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use serde_derive::Deserialize;
 
-#[derive(Deserialize, Default, Debug)]
+use super::keybindings;
+
+#[derive(Deserialize, Default, Debug, Clone)]
 pub struct Config {
     /// norc makes it so that new shells do not load rc files
     /// when they spawn. Only works with bash.
@@ -39,4 +41,16 @@ pub struct Config {
     /// by the two component threads of the ssh plugin
     /// to complete. 30 seconds by default.
     pub ssh_handshake_timeout_ms: Option<u64>,
+
+    /// The user supplied keybindings.
+    pub keybindings: Option<Vec<Keybinding>>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct Keybinding {
+    /// The keybinding to map to an action. The syntax for these keybindings
+    /// is described in src/daemon/keybindings.rs.
+    pub binding: String,
+    /// The action to perform in response to the keybinding.
+    pub action: keybindings::Action,
 }
