@@ -88,10 +88,9 @@ environment.")]
     #[clap(about = "kill the given sessions
 
 This detaches the session if it is attached and kills the underlying
-shell with a SIGKILL. To more gracefully remove a shell, attach to
-it and run 'exit' yourself. If no session name is provided
-$SHPOOL_SESSION_NAME will be used if it is present in the
-environment.")]
+shell with a SIGHUP followed by a SIGKILL if the shell fails to exit
+quickly enough. If no session name is provided $SHPOOL_SESSION_NAME
+will be used if it is present in the environment.")]
     Kill {
         #[clap(multiple = true, help = "sessions to kill")]
         sessions: Vec<String>,
