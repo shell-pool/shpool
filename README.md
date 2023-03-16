@@ -49,6 +49,23 @@ systemctl --user enable shpool
 systemctl --user start shpool
 ```
 
+### Shell Config
+
+#### bash
+
+If you use bash, you may want to ensure that the `huponexit` option
+is set to make sure that child processes exit when you leave a
+shell. Without this setting, background processes you have
+spawned over the course of your shell session will stick around
+in the shpool daemon's process tree and eat up memory. To set
+this option add
+
+```
+shopt -s huponexit
+```
+
+to your `~/.bashrc`.
+
 ## Usage
 
 Generally `shpool` is used to provide persistent sessions when

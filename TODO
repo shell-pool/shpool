@@ -18,5 +18,4 @@
 - Shpool introduces more lag than it should http://screencast/cast/NjU4Nzk0MTA3MDU2OTQ3MnxkYzhmZjhhZS00Nw
 - I should set up CI/CD (can probably let Nicholas figure it out then copy him)
 - I should do some security hardening (the cidermux docs have some good suggestions here)
-- Figure out why shpool leaves zombie processes around
 
