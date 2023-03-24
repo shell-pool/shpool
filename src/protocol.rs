@@ -229,12 +229,9 @@ pub enum AttachStatus {
     /// name, but another `shpool attach` session is currently connected to
     /// it, so the connection attempt was rejected.
     Busy,
-    /// Timeouted out waiting for a session to attach to. Only happens in
-    /// response to a RemoteCommandLock style attach attempt.
-    Timeout,
-    /// Indicates that the parking slot for an inbound ssh-extension style
-    /// attach is occupied, and the user should try to reconnect again later.
-    SshExtensionParkingSlotFull,
+    /// Forbidden indicates that the daemon has rejected the connection
+    /// attempt for security reasons.
+    Forbidden(String),
     /// Some unexpected error
     UnexpectedError(String),
 }

@@ -66,19 +66,15 @@ pub fn run(name: String, socket: PathBuf) -> anyhow::Result<()> {
             println!("session '{}' already has a terminal attached", name);
             return Ok(());
         },
+        protocol::AttachStatus::Forbidden(reason) => {
+            println!("forbidden: {}", reason);
+            return Ok(());
+        },
         protocol::AttachStatus::Attached => {
             info!("attached to an existing session: '{}'", name);
         },
         protocol::AttachStatus::Created => {
             info!("created a new session: '{}'", name);
-        },
-        protocol::AttachStatus::Timeout => {
-            return Err(anyhow!("BUG: unexpected timeout (should be impossible)"))
-        },
-        protocol::AttachStatus::SshExtensionParkingSlotFull => {
-            return Err(anyhow!(
-                "BUG: unexpected parking lot full status (should be impossible)"
-            ))
         },
         protocol::AttachStatus::UnexpectedError(err) => {
             return Err(anyhow!(

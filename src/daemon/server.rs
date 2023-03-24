@@ -84,7 +84,21 @@ impl Server {
         for stream in listener.incoming() {
             info!("socket got a new connection");
             match stream {
-                Ok(stream) => {
+                Ok(mut stream) => {
+                    if let Err(err) = check_peer(&stream) {
+                        warn!("bad peer: {:?}", err);
+                        write_reply(
+                            &mut stream,
+                            protocol::AttachReplyHeader {
+                                status: protocol::AttachStatus::Forbidden(format!("{:?}", err)),
+                            },
+                        )?;
+                        stream
+                            .shutdown(net::Shutdown::Both)
+                            .context("closing stream")?;
+                        continue;
+                    }
+
                     let server = Arc::clone(&server);
                     thread::spawn(move || {
                         if let Err(err) = server.handle_conn(stream) {
@@ -655,4 +669,39 @@ where
         .set_write_timeout(None)
         .context("unsetting write timout on inbound session")?;
     Ok(())
+}
+
+/// check_peer makes sure that a process dialing in on the shpool
+/// control socket has the same UID as the current user and that
+/// both have the same executable path.
+fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
+    use nix::{
+        sys::socket,
+        unistd,
+    };
+
+    let peer_creds = socket::getsockopt(sock.as_raw_fd(), socket::sockopt::PeerCredentials)
+        .context("could not get peer creds from socket")?;
+    let peer_uid = unistd::Uid::from_raw(peer_creds.uid());
+    let self_uid = unistd::getuid();
+    if peer_uid != self_uid {
+        return Err(anyhow!("shpool cannot connect to sessions across users"));
+    }
+
+    let peer_pid = unistd::Pid::from_raw(peer_creds.pid());
+    let self_pid = unistd::getpid();
+    let peer_exe = exe_for_pid(peer_pid).context("could not resolve exe from the pid")?;
+    let self_exe = exe_for_pid(self_pid).context("could not resolve our own exe")?;
+    if peer_exe != self_exe {
+        return Err(anyhow!(
+            "shpool must only connect to the daemon with the same exe"
+        ));
+    }
+
+    Ok(())
+}
+
+fn exe_for_pid(pid: Pid) -> anyhow::Result<PathBuf> {
+    let path = std::fs::read_link(format!("/proc/{}/exe", pid))?;
+    Ok(path)
 }
