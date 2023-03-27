@@ -85,21 +85,7 @@ impl Server {
         for stream in listener.incoming() {
             info!("socket got a new connection");
             match stream {
-                Ok(mut stream) => {
-                    if let Err(err) = check_peer(&stream) {
-                        warn!("bad peer: {:?}", err);
-                        write_reply(
-                            &mut stream,
-                            protocol::AttachReplyHeader {
-                                status: protocol::AttachStatus::Forbidden(format!("{:?}", err)),
-                            },
-                        )?;
-                        stream
-                            .shutdown(net::Shutdown::Both)
-                            .context("closing stream")?;
-                        continue;
-                    }
-
+                Ok(stream) => {
                     let server = Arc::clone(&server);
                     thread::spawn(move || {
                         if let Err(err) = server.handle_conn(stream) {
@@ -124,6 +110,21 @@ impl Server {
             .context("setting read timout on inbound session")?;
 
         let header = parse_connect_header(&mut stream).context("parsing connect header")?;
+
+        if let Err(err) = check_peer(&stream) {
+            if let protocol::ConnectHeader::Attach(_) = header {
+                write_reply(
+                    &mut stream,
+                    protocol::AttachReplyHeader {
+                        status: protocol::AttachStatus::Forbidden(format!("{:?}", err)),
+                    },
+                )?;
+            }
+            stream
+                .shutdown(net::Shutdown::Both)
+                .context("closing stream")?;
+            return Err(err).context("bad peer")?;
+        }
 
         // Unset the read timeout before we pass things off to a
         // worker thread because it is perfectly fine for there to
