@@ -5,6 +5,7 @@ use std::{
     net,
     os,
     os::unix::{
+        fs::PermissionsExt,
         io::AsRawFd,
         net::{
             UnixListener,
@@ -342,6 +343,19 @@ impl Server {
             let symlink = self.ssh_auth_sock_simlink(PathBuf::from(&header.name));
             fs::create_dir_all(symlink.parent().ok_or(anyhow!("no simlink parent"))?)
                 .context("could not create directory for SSH_AUTH_SOCK simlink")?;
+
+            let sessions_dir = symlink
+                .parent()
+                .and_then(|d| d.parent())
+                .ok_or(anyhow!("no sessions dir"))?;
+            let sessions_meta = fs::metadata(sessions_dir).context("stating sessions dir")?;
+            let mut sessions_perm = sessions_meta.permissions();
+            if sessions_perm.mode() != 0o700 {
+                sessions_perm.set_mode(0o700);
+                fs::set_permissions(sessions_dir, sessions_perm)
+                    .context("locking down permissions for sessions dir")?;
+            }
+
             let _ = fs::remove_file(&symlink); // clean up the link if it exists already
             os::unix::fs::symlink(ssh_auth_sock, &symlink).context(format!(
                 "could not symlink '{:?}' to point to '{:?}'",

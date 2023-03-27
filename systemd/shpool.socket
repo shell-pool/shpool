@@ -3,6 +3,7 @@ Description=Shpool Shell Session Pooler
 
 [Socket]
 ListenStream=%t/shpool/shpool.socket
+SocketMode=0600
 
 [Install]
 WantedBy=sockets.target
