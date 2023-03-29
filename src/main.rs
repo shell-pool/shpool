@@ -38,20 +38,20 @@ struct Args {
         short,
         long,
         action,
-        long_help = "the file to write logs to
+        long_help = "The file to write logs to
 
 In most modes logs are discarded by default, but if shpool is
 running in daemon mode, the logs will go to stderr by default."
     )]
     log_file: Option<String>,
     #[clap(short, long, action = clap::ArgAction::Count,
-           help = "show more in logs, may be provided multiple times")]
+           help = "Show more in logs, may be provided multiple times")]
     verbose: u8,
     #[clap(
         short,
         long,
         action,
-        long_help = "the path for the unix socket to listen on
+        long_help = "The path for the unix socket to listen on
 
 This defaults to $XDG_RUNTIME_DIR/shpool/shpool.socket or ~/.shpool/shpool.socket
 if XDG_RUNTIME_DIR is unset.
@@ -66,17 +66,23 @@ the daemon is launched by systemd."
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    #[clap(about = "starts running a daemon that holds a pool of shells")]
+    #[clap(about = "Starts running a daemon that holds a pool of shells")]
     Daemon {
         #[clap(short, long, action, help = "a toml file containing configuration")]
         config_file: Option<String>,
     },
-    #[clap(about = "creates or attaches to an existing shell session")]
+    #[clap(about = "Creates or attaches to an existing shell session")]
     Attach {
-        #[clap(help = "the name of the shell session to create or attach to")]
+        #[clap(
+            short,
+            long,
+            help = "If a tty is already attached to the session, detach it first"
+        )]
+        force: bool,
+        #[clap(help = "The name of the shell session to create or attach to")]
         name: String,
     },
-    #[clap(about = "make the given session detach from shpool
+    #[clap(about = "Make the given session detach from shpool
 
 This does not close the shell. If no session name is provided
 $SHPOOL_SESSION_NAME will be used if it is present in the
@@ -85,7 +91,7 @@ environment.")]
         #[clap(multiple = true, help = "sessions to detach")]
         sessions: Vec<String>,
     },
-    #[clap(about = "kill the given sessions
+    #[clap(about = "Kill the given sessions
 
 This detaches the session if it is attached and kills the underlying
 shell with a SIGHUP followed by a SIGKILL if the shell fails to exit
@@ -164,14 +170,14 @@ fn main() -> anyhow::Result<()> {
 
     let res: anyhow::Result<()> = match args.command {
         Commands::Daemon { config_file } => daemon::run(config_file, runtime_dir, socket),
-        Commands::Attach { name } => attach::run(name, socket),
+        Commands::Attach { force, name } => attach::run(name, force, socket),
         Commands::Detach { sessions } => detach::run(sessions, socket),
         Commands::Kill { sessions } => kill::run(sessions, socket),
         Commands::List => list::run(socket),
     };
 
     if let Err(err) = res {
-        error!("shpool: {:?}", err);
+        error!("{:?}", err);
         std::process::exit(1);
     }
 

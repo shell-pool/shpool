@@ -92,6 +92,7 @@ impl Proc {
     pub fn attach(
         &mut self,
         name: &str,
+        force: bool,
         extra_env: Vec<(String, String)>,
     ) -> anyhow::Result<attach::Proc> {
         let tmp_dir = self.tmp_dir.as_ref().ok_or(anyhow!("missing tmp_dir"))?;
@@ -105,8 +106,8 @@ impl Proc {
         eprintln!("spawning attach proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
-        let proc = Command::new(shpool_bin()?)
-            .stdout(Stdio::piped())
+        let mut cmd = Command::new(shpool_bin()?);
+        cmd.stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::piped())
             .arg("-v")
@@ -118,7 +119,11 @@ impl Proc {
             .env("XDG_RUNTIME_DIR", env::var("XDG_RUNTIME_DIR")?)
             .env("SHPOOL_TEST_HOOK_SOCKET_PATH", &test_hook_socket_path)
             .envs(extra_env)
-            .arg("attach")
+            .arg("attach");
+        if force {
+            cmd.arg("-f");
+        }
+        let proc = cmd
             .arg(name)
             .spawn()
             .context(format!("spawning attach proc for {}", name))?;
