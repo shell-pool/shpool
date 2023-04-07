@@ -7,8 +7,7 @@ use std::{
 use anyhow::Context;
 use tracing::{
     info,
-    span,
-    Level,
+    instrument,
 };
 
 mod config;
@@ -18,12 +17,12 @@ mod signals;
 mod systemd;
 mod user;
 
+#[instrument(skip_all)]
 pub fn run(
     config_file: Option<String>,
     runtime_dir: PathBuf,
     socket: PathBuf,
 ) -> anyhow::Result<()> {
-    let _s = span!(Level::INFO, "run").entered();
     info!("\n\n======================== STARTING DAEMON ============================\n\n");
 
     let mut config = config::Config::default();
@@ -34,16 +33,17 @@ pub fn run(
 
     let server = server::Server::new(config, runtime_dir);
 
-    let mut cleanup_socket = None;
-    let listener = match systemd::activation_socket() {
+    let (cleanup_socket, listener) = match systemd::activation_socket() {
         Ok(l) => {
             info!("using systemd activation socket");
-            l
+            (None, l)
         },
         Err(e) => {
             info!("no systemd activation socket: {:?}", e);
-            cleanup_socket = Some(socket.clone());
-            UnixListener::bind(&socket).context("binding to socket")?
+            (
+                Some(socket.clone()),
+                UnixListener::bind(&socket).context("binding to socket")?,
+            )
         },
     };
     // spawn the signal handler thread in the background

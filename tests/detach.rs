@@ -42,10 +42,10 @@ fn single_not_running() -> anyhow::Result<()> {
     assert!(!out.status.success(), "successful");
 
     let stderr = String::from_utf8_lossy(&out.stderr[..]);
-    assert_eq!(stderr.len(), 0, "expected no stderr");
+    assert!(stderr.contains("not found: sh1"));
 
     let stdout = String::from_utf8_lossy(&out.stdout[..]);
-    assert!(stdout.contains("not found: sh1"), "expected no stdout");
+    assert_eq!(stdout.len(), 0, "expected no stderr");
 
     Ok(())
 }
@@ -61,8 +61,8 @@ fn no_daemon() -> anyhow::Result<()> {
 
     assert!(!out.status.success(), "detach proc exited successfully");
 
-    let stdout = String::from_utf8_lossy(&out.stdout[..]);
-    assert!(stdout.contains("could not connect to daemon"));
+    let stderr = String::from_utf8_lossy(&out.stderr[..]);
+    assert!(stderr.contains("could not connect to daemon"));
 
     Ok(())
 }
@@ -195,11 +195,11 @@ fn multiple_mixed() -> anyhow::Result<()> {
     let out = daemon_proc.detach(vec![String::from("sh1"), String::from("sh2")])?;
     assert!(!out.status.success(), "unexpectedly successful");
 
-    let stderr = String::from_utf8_lossy(&out.stderr[..]);
-    assert_eq!(stderr.len(), 0, "expected no stderr");
-
     let stdout = String::from_utf8_lossy(&out.stdout[..]);
-    assert!(stdout.contains("not found: sh2"), "expected not found");
+    assert_eq!(stdout.len(), 0, "expected no stdout");
+
+    let stderr = String::from_utf8_lossy(&out.stderr[..]);
+    assert!(stderr.contains("not found: sh2"), "expected not found");
 
     daemon_proc.events = Some(waiter.wait_final_event("daemon-bidi-stream-done")?);
 
@@ -224,23 +224,23 @@ fn double_tap() -> anyhow::Result<()> {
     let out1 = daemon_proc.detach(vec![String::from("sh1")])?;
     assert!(out1.status.success(), "not successful");
 
-    let stderr1 = String::from_utf8_lossy(&out1.stderr[..]);
-    assert_eq!(stderr1.len(), 0, "expected no stderr");
-
     let stdout1 = String::from_utf8_lossy(&out1.stdout[..]);
     assert_eq!(stdout1.len(), 0, "expected no stdout");
+
+    let stderr1 = String::from_utf8_lossy(&out1.stderr[..]);
+    assert_eq!(stderr1.len(), 0);
 
     daemon_proc.events = Some(waiter.wait_final_event("daemon-bidi-stream-done")?);
 
     let out2 = daemon_proc.detach(vec![String::from("sh1")])?;
     assert!(!out2.status.success(), "unexpectedly successful");
 
-    let stderr2 = String::from_utf8_lossy(&out2.stderr[..]);
-    assert_eq!(stderr2.len(), 0, "expected no stderr");
-
     let stdout2 = String::from_utf8_lossy(&out2.stdout[..]);
+    assert_eq!(stdout2.len(), 0, "expected no stdout");
+
+    let stderr2 = String::from_utf8_lossy(&out2.stderr[..]);
     assert!(
-        stdout2.contains("not attached: sh1"),
+        stderr2.contains("not attached: sh1"),
         "expected not attached"
     );
 

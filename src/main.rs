@@ -20,16 +20,15 @@ use tracing::error;
 use tracing_subscriber::fmt::format::FmtSpan;
 
 mod attach;
+mod common;
 mod consts;
 mod daemon;
 mod detach;
 mod kill;
 mod list;
 mod protocol;
-mod tty;
-
-#[macro_use]
 mod test_hooks;
+mod tty;
 
 #[derive(Parser, Debug)]
 #[clap(version, author, about)]
@@ -44,9 +43,15 @@ In most modes logs are discarded by default, but if shpool is
 running in daemon mode, the logs will go to stderr by default."
     )]
     log_file: Option<String>,
-    #[clap(short, long, action = clap::ArgAction::Count,
-           help = "Show more in logs, may be provided multiple times")]
+
+    #[clap(
+        short,
+        long,
+        action = clap::ArgAction::Count,
+        help = "Show more in logs, may be provided multiple times",
+    )]
     verbose: u8,
+
     #[clap(
         short,
         long,
@@ -60,6 +65,7 @@ This flag gets overridden by systemd socket activation when
 the daemon is launched by systemd."
     )]
     socket: Option<String>,
+
     #[clap(subcommand)]
     command: Commands,
 }
@@ -71,6 +77,7 @@ enum Commands {
         #[clap(short, long, action, help = "a toml file containing configuration")]
         config_file: Option<String>,
     },
+
     #[clap(about = "Creates or attaches to an existing shell session")]
     Attach {
         #[clap(
@@ -82,6 +89,7 @@ enum Commands {
         #[clap(help = "The name of the shell session to create or attach to")]
         name: String,
     },
+
     #[clap(about = "Make the given session detach from shpool
 
 This does not close the shell. If no session name is provided
@@ -91,6 +99,7 @@ environment.")]
         #[clap(multiple = true, help = "sessions to detach")]
         sessions: Vec<String>,
     },
+
     #[clap(about = "Kill the given sessions
 
 This detaches the session if it is attached and kills the underlying
@@ -101,6 +110,7 @@ will be used if it is present in the environment.")]
         #[clap(multiple = true, help = "sessions to kill")]
         sessions: Vec<String>,
     },
+
     #[clap(about = "lists all the running shell sessions")]
     List,
 }
@@ -120,6 +130,7 @@ fn main() -> anyhow::Result<()> {
         tracing_subscriber::fmt()
             .with_max_level(trace_level)
             .with_thread_ids(true)
+            .with_target(false)
             .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
             .with_writer(Mutex::new(file))
             .init();
@@ -127,6 +138,7 @@ fn main() -> anyhow::Result<()> {
         tracing_subscriber::fmt()
             .with_max_level(trace_level)
             .with_thread_ids(true)
+            .with_target(false)
             .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
             .with_writer(io::stderr)
             .init();

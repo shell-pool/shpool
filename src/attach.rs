@@ -19,6 +19,10 @@ use tracing::{
 
 use super::{
     protocol,
+    protocol::{
+        AttachHeader,
+        ConnectHeader,
+    },
     test_hooks,
     tty,
 };
@@ -27,7 +31,7 @@ const MAX_FORCE_RETRIES: usize = 20;
 
 pub fn run(name: String, force: bool, socket: PathBuf) -> anyhow::Result<()> {
     info!("\n\n======================== STARTING ATTACH ============================\n\n");
-    test_hooks::emit!("attach-startup");
+    test_hooks::emit("attach-startup");
     SignalHandler::new(name.clone(), socket.clone()).spawn()?;
 
     let mut detached = false;
@@ -42,11 +46,9 @@ pub fn run(name: String, force: bool, socket: PathBuf) -> anyhow::Result<()> {
                 if !detached {
                     let mut client = dial_client(&socket)?;
                     client
-                        .write_connect_header(protocol::ConnectHeader::Detach(
-                            protocol::DetachRequest {
-                                sessions: vec![name.clone()],
-                            },
-                        ))
+                        .write_connect_header(ConnectHeader::Detach(protocol::DetachRequest {
+                            sessions: vec![name.clone()],
+                        }))
                         .context("writing detach request header")?;
                     let detach_reply: protocol::DetachReply =
                         client.read_reply().context("reading reply")?;
@@ -92,7 +94,7 @@ fn do_attach(name: &str, socket: &PathBuf) -> anyhow::Result<()> {
     };
 
     client
-        .write_connect_header(protocol::ConnectHeader::Attach(protocol::AttachHeader {
+        .write_connect_header(ConnectHeader::Attach(AttachHeader {
             name: String::from(name),
             local_tty_size: tty_size,
             local_env: vec!["TERM", "SSH_AUTH_SOCK"]
@@ -107,27 +109,32 @@ fn do_attach(name: &str, socket: &PathBuf) -> anyhow::Result<()> {
 
     let attach_resp: protocol::AttachReplyHeader =
         client.read_reply().context("reading attach reply")?;
-    match attach_resp.status {
-        protocol::AttachStatus::Busy => {
-            return Err(BusyError.into());
-        },
-        protocol::AttachStatus::Forbidden(reason) => {
-            eprintln!("forbidden: {}", reason);
-            return Err(anyhow!("forbidden: {}", reason));
-        },
-        protocol::AttachStatus::Attached => {
-            info!("attached to an existing session: '{}'", name);
-        },
-        protocol::AttachStatus::Created => {
-            info!("created a new session: '{}'", name);
-        },
-        protocol::AttachStatus::UnexpectedError(err) => {
-            return Err(anyhow!(
-                "BUG: unexpected error attaching to '{}': {}",
-                name,
-                err
-            ))
-        },
+    info!("attach_resp.status={:?}", attach_resp.status);
+
+    {
+        use protocol::AttachStatus::*;
+        match attach_resp.status {
+            Busy => {
+                return Err(BusyError.into());
+            },
+            Forbidden(reason) => {
+                eprintln!("forbidden: {}", reason);
+                return Err(anyhow!("forbidden: {}", reason));
+            },
+            Attached => {
+                info!("attached to an existing session: '{}'", name);
+            },
+            Created => {
+                info!("created a new session: '{}'", name);
+            },
+            UnexpectedError(err) => {
+                return Err(anyhow!(
+                    "BUG: unexpected error attaching to '{}': {}",
+                    name,
+                    err
+                ))
+            },
+        }
     }
 
     let _tty_guard = tty::set_attach_flags();
@@ -156,6 +163,7 @@ struct SignalHandler {
     session_name: String,
     socket: PathBuf,
 }
+
 impl SignalHandler {
     fn new(session_name: String, socket: PathBuf) -> Self {
         SignalHandler {
@@ -175,7 +183,7 @@ impl SignalHandler {
 
         thread::spawn(move || {
             for signal in &mut signals {
-                let res = match signal as libc::c_int {
+                let res = match signal {
                     SIGWINCH => self.handle_sigwinch(),
                     sig => {
                         error!("unknown signal: {}", sig);

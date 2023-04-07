@@ -1,7 +1,7 @@
 norc = true
 noecho = true
 shell = "/bin/bash"
-nosimlink_ssh_auth_sock = true
+nosymlink_ssh_auth_sock = true
 
 [env]
 PS1 = "prompt> "

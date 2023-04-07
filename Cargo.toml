@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Ethan Pailes <pailes@google.com>", "Cloudtop Connectivity Team"]
 description = '''
 shpool is a mechanism for establishing lightweight persistant shell
-sessions to gracefully handle network disconnects
+sessions to gracefully handle network disconnects.
 '''
 
 [features]

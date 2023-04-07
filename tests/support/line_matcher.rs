@@ -1,7 +1,6 @@
 use std::{
     io,
     io::BufRead,
-    process,
     time,
 };
 
@@ -14,10 +13,14 @@ use regex::Regex;
 const CMD_READ_TIMEOUT: time::Duration = time::Duration::from_secs(3);
 const CMD_READ_SLEEP_DUR: time::Duration = time::Duration::from_millis(20);
 
-pub struct LineMatcher {
-    pub out: io::BufReader<process::ChildStdout>,
+pub struct LineMatcher<R> {
+    pub out: io::BufReader<R>,
 }
-impl LineMatcher {
+
+impl<R> LineMatcher<R>
+where
+    R: std::io::Read,
+{
     pub fn match_re(&mut self, re: &str) -> anyhow::Result<()> {
         match self.capture_re(re) {
             Ok(_) => Ok(()),

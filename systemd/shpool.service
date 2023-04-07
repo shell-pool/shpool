@@ -6,9 +6,8 @@ Requires=shpool.socket
 Type=simple
 ExecStart=%h/.cargo/bin/shpool daemon
 KillMode=mixed
-TimeoutStopSpec=2s
+TimeoutStopSec=2s
 SendSIGHUP=yes
-Restart=on-failure
 
 [Install]
 WantedBy=default.target

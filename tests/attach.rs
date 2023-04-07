@@ -305,14 +305,19 @@ fn force_attach() -> anyhow::Result<()> {
     let mut tty1 = daemon_proc
         .attach("sh1", false, vec![])
         .context("attaching from tty1")?;
+    let mut line_matcher1 = tty1.line_matcher()?;
     tty1.run_cmd("export MYVAR='set_from_tty1'")?;
+    tty1.run_cmd("echo $MYVAR")?;
+    // read some output to make sure the var is set by the time
+    // we force-attach
+    line_matcher1.match_re("set_from_tty1$")?;
 
     let mut tty2 = daemon_proc
         .attach("sh1", true, vec![])
         .context("attaching from tty2")?;
     let mut line_matcher2 = tty2.line_matcher()?;
     tty2.run_cmd("echo $MYVAR")?;
-    line_matcher2.match_re("prompt> |set_from_tty1$")?;
+    line_matcher2.match_re("set_from_tty1$")?;
 
     Ok(())
 }
@@ -325,12 +330,14 @@ fn busy() -> anyhow::Result<()> {
     let mut tty1 = daemon_proc
         .attach("sh1", false, vec![])
         .context("attaching from tty1")?;
+    let mut line_matcher1 = tty1.line_matcher()?;
     tty1.run_cmd("echo foo")?; // make sure the shell is up and running
+    line_matcher1.match_re("foo$")?;
 
     let mut tty2 = daemon_proc
         .attach("sh1", false, vec![])
         .context("attaching from tty2")?;
-    let mut line_matcher2 = tty2.line_matcher()?;
+    let mut line_matcher2 = tty2.stderr_line_matcher()?;
     line_matcher2.match_re("already has a terminal attached$")?;
 
     Ok(())

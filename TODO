@@ -1,6 +1,5 @@
 
 - There is a lot of heartbeat overhead. See if we can reduce that.
-- Reload config if we get a SIGHUP
 - Implement spooling logic to handle subprocesses which generate
   a bunch of output after we have detached.
 - Fix echo bug in ssh plugin mode. For some reason the tty echo seems
@@ -16,8 +15,9 @@
   - This might be fixed after I got SIGWINCH to start working for emacs. Let's
     wait to see if other people report improvement.
 - Shpool introduces more lag than it should http://screencast/cast/NjU4Nzk0MTA3MDU2OTQ3MnxkYzhmZjhhZS00Nw
-- I should set up CI/CD (can probably let Nicholas figure it out then copy him)
+- I should set up CI/CD (can probably let Nicolas figure it out then copy him)
 - I should do some security hardening (the cidermux docs have some good suggestions here)
 - Exit with a success error code when a session gets manually detached (either
   via shpool detach or with the upcoming detach keybinding).
+- Allow users to specify a command to run instead of their default shell.
 

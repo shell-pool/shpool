@@ -1,0 +1,4 @@
+[toolchain]
+channel = "stable"
+components = ["rust-docs", "rust-src", "rust-analyzer"]
+profile = "minimal"

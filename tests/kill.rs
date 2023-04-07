@@ -18,8 +18,8 @@ fn no_daemon() -> anyhow::Result<()> {
 
     assert!(!out.status.success(), "kill proc exited successfully");
 
-    let stdout = String::from_utf8_lossy(&out.stdout[..]);
-    assert!(stdout.contains("could not connect to daemon"));
+    let stderr = String::from_utf8_lossy(&out.stderr[..]);
+    assert!(stderr.contains("could not connect to daemon"));
 
     Ok(())
 }
@@ -34,9 +34,9 @@ fn empty() -> anyhow::Result<()> {
     let out = daemon_proc.kill(vec![])?;
     assert!(!out.status.success());
 
-    let stdout = String::from_utf8_lossy(&out.stdout[..]);
-    eprintln!("stdout: {}", stdout);
-    assert!(stdout.contains("no session to kill"));
+    let stderr = String::from_utf8_lossy(&out.stderr[..]);
+    eprintln!("stderr: {}", stderr);
+    assert!(stderr.contains("no session to kill"));
 
     Ok(())
 }
@@ -286,8 +286,8 @@ fn missing() -> anyhow::Result<()> {
     let out = daemon_proc.kill(vec![String::from("missing")])?;
     assert!(!out.status.success());
 
-    let stdout = String::from_utf8_lossy(&out.stdout[..]);
-    assert!(stdout.contains("not found: missing"));
+    let stderr = String::from_utf8_lossy(&out.stderr[..]);
+    assert!(stderr.contains("not found: missing"));
 
     Ok(())
 }

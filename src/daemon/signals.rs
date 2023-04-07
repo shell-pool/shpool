@@ -11,7 +11,7 @@ use anyhow::Context;
 use signal_hook::{
     consts::TERM_SIGNALS,
     flag,
-    iterator::*,
+    iterator::Signals,
 };
 use tracing::{
     error,
@@ -46,22 +46,17 @@ impl Handler {
         let mut signals = Signals::new(TERM_SIGNALS).context("creating signal iterator")?;
         thread::spawn(move || {
             for signal in &mut signals {
-                match signal as libc::c_int {
-                    term_sig => {
-                        assert!(TERM_SIGNALS.contains(&term_sig));
+                assert!(TERM_SIGNALS.contains(&signal));
 
-                        info!("term sig handler: cleaning up socket");
-                        if let Some(sock) = self.sock {
-                            if let Err(e) = std::fs::remove_file(sock).context("cleaning up socket")
-                            {
-                                error!("error cleaning up socket file: {}", e);
-                            }
-                        }
-
-                        info!("term sig handler: exiting");
-                        std::process::exit(0);
-                    },
+                info!("term sig handler: cleaning up socket");
+                if let Some(sock) = self.sock {
+                    if let Err(e) = std::fs::remove_file(sock).context("cleaning up socket") {
+                        error!("error cleaning up socket file: {}", e);
+                    }
                 }
+
+                info!("term sig handler: exiting");
+                std::process::exit(0);
             }
         });
 

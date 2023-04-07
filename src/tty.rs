@@ -35,6 +35,7 @@ pub struct Size {
     pub rows: u16,
     pub cols: u16,
 }
+
 impl Size {
     /// from_fd returns the terminal size for the given terminal.
     pub fn from_fd(fd: RawFd) -> anyhow::Result<Size> {
@@ -126,6 +127,7 @@ pub struct AttachFlagsGuard {
     fd: RawFd,
     old: Option<termios::Termios>,
 }
+
 impl std::ops::Drop for AttachFlagsGuard {
     fn drop(&mut self) {
         if let Some(old) = &self.old {

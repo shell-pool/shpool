@@ -30,6 +30,7 @@ use tracing::{
     debug,
     error,
     info,
+    instrument,
     span,
     trace,
     Level,
@@ -47,20 +48,23 @@ const RPC_LOOP_POLL_DUR: time::Duration = time::Duration::from_millis(300);
 const SESSION_MESSAGE_TIMEOUT: time::Duration = time::Duration::from_secs(10);
 
 /// Session represent a shell session
+#[derive(Debug)]
 pub struct Session {
     pub started_at: time::SystemTime,
     pub rpc_in: crossbeam_channel::Sender<protocol::SessionMessageRequestPayload>,
     pub rpc_out: crossbeam_channel::Receiver<protocol::SessionMessageReply>,
+    /// Mutable state with the lock held by the servicing handle_attach thread
+    /// while a tty is attached to the session. Probing the mutex can be used
+    /// to determine if someone is currently attached to the session.
     pub inner: Arc<Mutex<SessionInner>>,
 }
 
 impl Session {
+    #[instrument(skip_all)]
     pub fn rpc_call(
         &self,
         arg: protocol::SessionMessageRequestPayload,
     ) -> anyhow::Result<protocol::SessionMessageReply> {
-        let _s = span!(Level::INFO, "Session.rpc_call").entered();
-
         // make a best effort attempt to avoid sending messages
         // to a session with no attached terminal
         match self.inner.try_lock() {
@@ -93,17 +97,13 @@ pub struct SessionInner {
     pub pty_master: pty::fork::Fork,
     pub client_stream: Option<UnixStream>,
 }
+
 impl SessionInner {
+    #[instrument(skip_all)]
     pub fn handle_resize_rpc(
         &self,
         req: protocol::ResizeRequest,
     ) -> anyhow::Result<protocol::ResizeReply> {
-        let _s = span!(Level::INFO, "SessionInner.handle_resize_rpc").entered();
-
-        info!(
-            "handle_resize_rpc: resize {:?} to {:?}",
-            self, &req.tty_size
-        );
         self.set_pty_size(&req.tty_size)?;
         Ok(protocol::ResizeReply::Ok)
     }
@@ -125,13 +125,13 @@ impl SessionInner {
     /// `spawned_threads` is a channel that gets closed once all the threads
     /// for servicing the connection have been spawned. It should be a bounded
     /// unbuffered channel.
+    #[instrument(skip_all, fields(s = self.name))]
     pub fn bidi_stream(
         &mut self,
         spawned_handlers: crossbeam_channel::Sender<()>,
     ) -> anyhow::Result<bool> {
-        let _s = span!(Level::INFO, "SessionInner.bidi_stream").entered();
-        test_hooks::emit!("daemon-bidi-stream-enter");
-        test_hooks::scoped!(_bidi_stream_test_guard, "daemon-bidi-stream-done");
+        test_hooks::emit("daemon-bidi-stream-enter");
+        let _bidi_stream_test_guard = test_hooks::scoped("daemon-bidi-stream-done");
 
         // we take the client stream so that it gets closed when this routine
         // returns
@@ -148,11 +148,11 @@ impl SessionInner {
         let mut reader_client_stream = client_stream
             .try_clone()
             .context("creating reader client stream")?;
-        let client_stream_m = Mutex::new(
+        let client_stream_m = Mutex::new(io::BufWriter::new(
             client_stream
                 .try_clone()
-                .context("wrapping a stream handle in mutex")?,
-        );
+                .context("wrapping stream in bufwriter")?,
+        ));
 
         let pty_master = self
             .pty_master
@@ -240,15 +240,14 @@ impl SessionInner {
         Ok(c_done)
     }
 
-    fn spawn_client_to_shell<'scope, 'env>(
+    #[instrument(skip_all)]
+    fn spawn_client_to_shell<'scope>(
         &'scope self,
-        scope: &'scope thread::Scope<'scope, 'env>,
+        scope: &'scope thread::Scope<'scope, '_>,
         stop: &'scope AtomicBool,
         pty_master: &'scope pty::fork::Master,
         reader_client_stream: &'scope mut UnixStream,
     ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
-        let _s = span!(Level::INFO, "SessionInner.spawn_client_to_shell").entered();
-
         scope.spawn(|| -> anyhow::Result<()> {
             let _s = span!(Level::INFO, "client->shell", s = self.name).entered();
 
@@ -269,18 +268,16 @@ impl SessionInner {
                 // to the shell subprocess, vs the two output streams we need
                 // to handle coming back the other way.
                 //
-                // Also, not that we don't access through the mutex because reads
+                // Also, note that we don't access through the mutex because reads
                 // don't need to be excluded from trampling on writes.
                 let len = match reader_client_stream.read(&mut buf) {
                     Ok(l) => l,
-                    Err(e) => {
-                        if e.kind() == std::io::ErrorKind::WouldBlock {
-                            trace!("read: WouldBlock");
-                            thread::sleep(consts::PIPE_POLL_DURATION);
-                            continue;
-                        }
-                        return Err(e).context("reading client chunk");
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        trace!("read: WouldBlock");
+                        thread::sleep(consts::PIPE_POLL_DURATION);
+                        continue;
                     },
+                    Err(e) => return Err(e).context("reading client chunk"),
                 };
                 if len == 0 {
                     continue;
@@ -299,14 +296,12 @@ impl SessionInner {
 
                     let nwritten = match master_writer.write(&to_write) {
                         Ok(n) => n,
-                        Err(e) => {
-                            if e.kind() == std::io::ErrorKind::WouldBlock {
-                                trace!("write: WouldBlock");
-                                thread::sleep(consts::PIPE_POLL_DURATION);
-                                continue;
-                            }
-                            return Err(e).context("writing client chunk");
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            trace!("read: WouldBlock");
+                            thread::sleep(consts::PIPE_POLL_DURATION);
+                            continue;
                         },
+                        Err(e) => return Err(e).context("writing client chunk"),
                     };
                     debug!("wrote {} bytes", nwritten);
                     to_write = &to_write[nwritten..];
@@ -316,23 +311,22 @@ impl SessionInner {
                 master_writer
                     .flush()
                     .context("flushing input from client to shell")?;
-                test_hooks::emit!("daemon-wrote-client-chunk");
+                test_hooks::emit("daemon-wrote-client-chunk");
 
                 debug!("flushed chunk of len {}", len);
             }
         })
     }
 
-    fn spawn_shell_to_client<'scope, 'env>(
+    #[instrument(skip_all)]
+    fn spawn_shell_to_client<'scope>(
         &'scope self,
-        scope: &'scope thread::Scope<'scope, 'env>,
+        scope: &'scope thread::Scope<'scope, '_>,
         stop: &'scope AtomicBool,
         pty_master: &'scope pty::fork::Master,
-        client_stream_m: &'scope Mutex<UnixStream>,
+        client_stream_m: &'scope Mutex<io::BufWriter<UnixStream>>,
         client_stream: &'scope mut UnixStream,
     ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
-        let _s = span!(Level::INFO, "SessionInner.spawn_shell_to_client").entered();
-
         scope.spawn(move || -> anyhow::Result<()> {
             let _s1 = span!(Level::INFO, "shell->client", s = self.name).entered();
 
@@ -374,12 +368,12 @@ impl SessionInner {
                 if fdset.contains(master_reader.as_raw_fd()) {
                     let len = match master_reader.read(&mut buf) {
                         Ok(n) => n,
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            trace!("pty master read: WouldBlock");
+                            thread::sleep(consts::PIPE_POLL_DURATION);
+                            continue;
+                        },
                         Err(e) => {
-                            if e.kind() == std::io::ErrorKind::WouldBlock {
-                                trace!("pty master read: WouldBlock");
-                                thread::sleep(consts::PIPE_POLL_DURATION);
-                                continue;
-                            }
                             info!("error reading from pty: {:?}", e);
                             return Err(e).context("reading pty master chunk");
                         },
@@ -403,6 +397,7 @@ impl SessionInner {
                         let mut s = client_stream_m.lock().unwrap();
                         chunk
                             .write_to(&mut *s, &stop)
+                            .and_then(|_| s.flush())
                             .context("writing stdout chunk to client stream")?;
                     }
                     debug!("wrote {} pty master bytes", chunk.buf.len());
@@ -414,14 +409,13 @@ impl SessionInner {
         })
     }
 
-    fn spawn_heartbeat<'scope, 'env>(
+    #[instrument(skip_all)]
+    fn spawn_heartbeat<'scope>(
         &'scope self,
-        scope: &'scope thread::Scope<'scope, 'env>,
+        scope: &'scope thread::Scope<'scope, '_>,
         stop: &'scope AtomicBool,
-        client_stream_m: &'scope Mutex<UnixStream>,
+        client_stream_m: &'scope Mutex<io::BufWriter<UnixStream>>,
     ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
-        let _s = span!(Level::INFO, "SessionInner.spawn_heartbeat").entered();
-
         scope.spawn(move || -> anyhow::Result<()> {
             let _s1 = span!(Level::INFO, "heartbeat", s = self.name).entered();
 
@@ -439,15 +433,15 @@ impl SessionInner {
                 };
                 {
                     let mut s = client_stream_m.lock().unwrap();
-                    match chunk.write_to(&mut *s, &stop) {
+                    match chunk.write_to(&mut *s, &stop).and_then(|_| s.flush()) {
                         Ok(_) => {
                             trace!("wrote heartbeat");
                         },
+                        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {
+                            trace!("client hangup");
+                            return Ok(());
+                        },
                         Err(e) => {
-                            if e.kind() == io::ErrorKind::BrokenPipe {
-                                trace!("client hangup");
-                                return Ok(());
-                            }
                             return Err(e).context("writing heartbeat")?;
                         },
                     }
@@ -456,15 +450,14 @@ impl SessionInner {
         })
     }
 
-    fn spawn_supervisor<'scope, 'env>(
+    #[instrument(skip_all)]
+    fn spawn_supervisor<'scope>(
         &'scope self,
-        scope: &'scope thread::Scope<'scope, 'env>,
+        scope: &'scope thread::Scope<'scope, '_>,
         stop: &'scope AtomicBool,
         child_done: &'scope AtomicBool,
         pty_master: &'scope pty::fork::Master,
     ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
-        let _s = span!(Level::INFO, "SessionInner.spawn_supervisor").entered();
-
         scope.spawn(|| -> anyhow::Result<()> {
             let _s1 = span!(Level::INFO, "supervisor", s = self.name).entered();
 
@@ -493,13 +486,12 @@ impl SessionInner {
         })
     }
 
-    fn spawn_rpc<'scope, 'env>(
+    #[instrument(skip_all)]
+    fn spawn_rpc<'scope>(
         &'scope self,
-        scope: &'scope thread::Scope<'scope, 'env>,
+        scope: &'scope thread::Scope<'scope, '_>,
         stop: &'scope AtomicBool,
     ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
-        let _s = span!(Level::INFO, "SessionInner.spawn_rpc").entered();
-
         scope.spawn(|| -> anyhow::Result<()> {
             let _s1 = span!(Level::INFO, "rpc", s = self.name).entered();
 

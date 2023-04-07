@@ -1,12 +1,6 @@
-use std::{
-    ffi::CStr,
-    process,
-};
+use std::ffi::CStr;
 
-use anyhow::{
-    anyhow,
-    Context,
-};
+use anyhow::anyhow;
 
 #[derive(Debug)]
 pub struct Info {
@@ -16,53 +10,29 @@ pub struct Info {
 }
 
 pub fn info() -> anyhow::Result<Info> {
-    let out = process::Command::new("/bin/sh")
-        .arg("-c")
-        .arg("cd ; echo \"$SHELL|$PWD\"")
-        .output()
-        .context("spawning subshell to determine default shell")?;
-    if !out.status.success() {
-        return Err(anyhow!(
-            "bad status checking for default shell: {}",
-            out.status
-        ));
-    }
-    if out.stderr.len() != 0 {
-        return Err(anyhow!(
-            "unexpected stderr when checking for default shell: {}",
-            String::from_utf8_lossy(&out.stderr)
-        ));
-    }
-
-    let parts = String::from_utf8(out.stdout.clone())
-        .context("parsing default shell as utf8")?
-        .trim()
-        .split("|")
-        .map(String::from)
-        .collect::<Vec<String>>();
-    if parts.len() != 2 {
-        return Err(anyhow!(
-            "could not parse output: '{}'",
-            String::from_utf8_lossy(&out.stdout)
-        ));
-    }
-
-    // Unfortunately, I couldn't find a safe way to get the current username
-    // without shelling out to another binary or relying on $USER being in
-    // the environment, which it does not seem to be, at least in a test
-    // environment.
-    //
     // Saftey: we immediately copy the data into an owned buffer and don't
     //         use it subsequently.
-    let username = unsafe {
-        String::from(String::from_utf8_lossy(
-            CStr::from_ptr(libc::getlogin()).to_bytes(),
-        ))
-    };
+    unsafe {
+        *libc::__errno_location() = 0;
+        let passwd = libc::getpwuid(libc::getuid());
+        let errno = nix::errno::errno();
+        if errno != 0 {
+            return Err(anyhow!(
+                "error getting passwd: {:?}",
+                nix::errno::from_i32(errno)
+            ));
+        }
 
-    Ok(Info {
-        default_shell: parts[0].clone(),
-        home_dir: parts[1].clone(),
-        user: username,
-    })
+        Ok(Info {
+            default_shell: String::from(String::from_utf8_lossy(
+                CStr::from_ptr((*passwd).pw_shell).to_bytes(),
+            )),
+            home_dir: String::from(String::from_utf8_lossy(
+                CStr::from_ptr((*passwd).pw_dir).to_bytes(),
+            )),
+            user: String::from(String::from_utf8_lossy(
+                CStr::from_ptr((*passwd).pw_name).to_bytes(),
+            )),
+        })
+    }
 }

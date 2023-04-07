@@ -32,8 +32,8 @@ fn no_daemon() -> anyhow::Result<()> {
 
     assert!(!out.status.success(), "list proc exited successfully");
 
-    let stdout = String::from_utf8_lossy(&out.stdout[..]);
-    assert!(stdout.contains("could not connect to daemon"));
+    let stderr = String::from_utf8_lossy(&out.stderr[..]);
+    assert!(stderr.contains("could not connect to daemon"));
 
     Ok(())
 }

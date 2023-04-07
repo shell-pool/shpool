@@ -1,4 +1,5 @@
 use std::{
+    convert::TryFrom,
     io,
     io::{
         Read,
@@ -56,7 +57,10 @@ pub enum ConnectHeader {
     /// provides a mechanism for RPC-like calls to be
     /// made to running sessions. Messages are only
     /// delivered if there is currently a client attached
-    /// to the session.
+    /// to the session because we need a servicing thread
+    /// with access to the SessionInner to respond to requests
+    /// (we could implement a mailbox system or something
+    /// for detached threads, but so far we have not needed to).
     SessionMessage(SessionMessageRequest),
     /// A message to request that a list of running
     /// sessions get detached from.
@@ -67,7 +71,7 @@ pub enum ConnectHeader {
 }
 
 /// KillRequest represents a request to kill
-/// from the given named sessions.
+/// the given named sessions.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct KillRequest {
     /// The sessions to detach
@@ -89,7 +93,10 @@ pub struct DetachRequest {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DetachReply {
+    /// sessions that are not even in the session table
     pub not_found_sessions: Vec<String>,
+    /// sessions that are in the session table, but have no
+    /// tty attached
     pub not_attached_sessions: Vec<String>,
 }
 
@@ -170,14 +177,11 @@ pub struct AttachHeader {
 }
 
 impl AttachHeader {
-    pub fn local_env_get<'a>(&'a self, var: &str) -> Option<&'a str> {
-        for (key, val) in self.local_env.iter() {
-            if var == key {
-                return Some(val.as_str());
-            }
-        }
-
-        None
+    pub fn local_env_get(&self, var: &str) -> Option<&str> {
+        self.local_env
+            .iter()
+            .find(|(k, _)| k == var)
+            .map(|(_, v)| v.as_str())
     }
 }
 
@@ -190,30 +194,16 @@ pub struct AttachReplyHeader {
 }
 
 /// ListReply is contains a list of active sessions to be displayed to the user.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ListReply {
     pub sessions: Vec<Session>,
 }
 
 /// Session describes an active session.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Session {
     pub name: String,
     pub started_at_unix_ms: i64,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct LocalCommandSetMetadataReply {
-    pub status: LocalCommandSetMetadataStatus,
-}
-#[derive(Serialize, Deserialize, Debug)]
-pub enum LocalCommandSetMetadataStatus {
-    /// Indicates we timed out waiting to link up with the remote command
-    /// thread.
-    Timeout,
-    /// We successfully released the lock and allowed the attach
-    /// process to proceed.
-    Ok,
 }
 
 /// AttachStatus indicates what happened during an attach attempt.
@@ -226,7 +216,7 @@ pub enum AttachStatus {
     /// given name, so `shpool` created a new one.
     Created,
     /// Busy indicates that there is an existing shell session with the given
-    /// name, but another `shpool attach` session is currently connected to
+    /// name, but another shpool session is currently connected to
     /// it, so the connection attempt was rejected.
     Busy,
     /// Forbidden indicates that the daemon has rejected the connection
@@ -236,7 +226,7 @@ pub enum AttachStatus {
     UnexpectedError(String),
 }
 
-/// FrameKind is a tag that indicates what type of frame is being transmitted
+/// ChunkKind is a tag that indicates what type of frame is being transmitted
 /// through the socket.
 #[derive(Copy, Clone, Debug)]
 pub enum ChunkKind {
@@ -244,12 +234,14 @@ pub enum ChunkKind {
     Heartbeat = 1,
 }
 
-impl ChunkKind {
-    fn from_u8(v: u8) -> anyhow::Result<Self> {
+impl TryFrom<u8> for ChunkKind {
+    type Error = anyhow::Error;
+
+    fn try_from(v: u8) -> anyhow::Result<Self> {
         match v {
             0 => Ok(ChunkKind::Data),
             1 => Ok(ChunkKind::Heartbeat),
-            _ => Err(anyhow!("unknown FrameKind {}", v)),
+            _ => Err(anyhow!("unknown ChunkKind {}", v)),
         }
     }
 }
@@ -314,14 +306,12 @@ impl<'data> Chunk<'data> {
 
             let nwritten = match w.write(&to_write) {
                 Ok(n) => n,
-                Err(e) => {
-                    if e.kind() == std::io::ErrorKind::WouldBlock {
-                        trace!("chunk: writing buffer: WouldBlock");
-                        thread::sleep(consts::PIPE_POLL_DURATION);
-                        continue;
-                    }
-                    return Err(e);
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    trace!("chunk: writing buffer: WouldBlock");
+                    thread::sleep(consts::PIPE_POLL_DURATION);
+                    continue;
                 },
+                Err(e) => return Err(e),
             };
             to_write = &to_write[nwritten..];
         }
@@ -345,7 +335,7 @@ impl<'data> Chunk<'data> {
         r.read_exact(&mut buf[..len])?;
 
         Ok(Chunk {
-            kind: ChunkKind::from_u8(kind)?,
+            kind: ChunkKind::try_from(kind)?,
             buf: &buf[..len],
         })
     }
@@ -410,14 +400,12 @@ impl Client {
 
                     let nread = match stdin.read(&mut buf) {
                         Ok(n) => n,
-                        Err(e) => {
-                            if e.kind() == std::io::ErrorKind::WouldBlock {
-                                trace!("pipe_bytes: stdin->sock: read: WouldBlock");
-                                thread::sleep(consts::PIPE_POLL_DURATION);
-                                continue;
-                            }
-                            return Err(e).context("reading stdin from user");
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            trace!("pipe_bytes: stdin->sock: read: WouldBlock");
+                            thread::sleep(consts::PIPE_POLL_DURATION);
+                            continue;
                         },
+                        Err(e) => return Err(e).context("reading stdin from user"),
                     };
 
                     debug!("pipe_bytes: stdin->sock: read {} bytes", nread);

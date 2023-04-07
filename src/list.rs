@@ -6,7 +6,13 @@ use std::{
 
 use anyhow::Context;
 
-use super::protocol;
+use super::{
+    protocol,
+    protocol::{
+        ConnectHeader,
+        ListReply,
+    },
+};
 
 pub fn run(socket: PathBuf) -> anyhow::Result<()> {
     let mut client = match protocol::Client::new(socket) {
@@ -14,16 +20,16 @@ pub fn run(socket: PathBuf) -> anyhow::Result<()> {
         Err(err) => {
             let io_err = err.downcast::<io::Error>()?;
             if io_err.kind() == io::ErrorKind::NotFound {
-                println!("could not connect to daemon");
+                eprintln!("could not connect to daemon");
             }
             return Err(io_err).context("connecting to daemon");
         },
     };
 
     client
-        .write_connect_header(protocol::ConnectHeader::List)
+        .write_connect_header(ConnectHeader::List)
         .context("sending list connect header")?;
-    let reply: protocol::ListReply = client.read_reply().context("reading reply")?;
+    let reply: ListReply = client.read_reply().context("reading reply")?;
 
     println!("NAME\tSTARTED_AT");
     for session in reply.sessions.iter() {

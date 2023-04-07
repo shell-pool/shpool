@@ -24,7 +24,6 @@ pub mod attach;
 pub mod daemon;
 pub mod events;
 pub mod line_matcher;
-pub mod ssh;
 
 pub fn testdata_file<P: AsRef<Path>>(file: P) -> PathBuf {
     let mut dir = cargo_dir();

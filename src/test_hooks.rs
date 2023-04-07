@@ -26,56 +26,42 @@ use tracing::{
 };
 
 #[cfg(feature = "test_hooks")]
-#[macro_export]
-macro_rules! emit {
-    ($e:expr) => {
-        $crate::test_hooks::emit_event_impl($e);
-    };
+pub fn emit(event: &str) {
+    let sock_path = TEST_HOOK_SERVER.sock_path.lock().unwrap();
+    if sock_path.is_some() {
+        TEST_HOOK_SERVER.emit_event(event);
+    }
 }
 
 #[cfg(not(feature = "test_hooks"))]
-#[macro_export]
-macro_rules! emit {
-    ($e:expr) => {}; // no-op
+pub fn emit(_event: &str) {
+    // a no-op normally
 }
-
-pub(crate) use emit;
 
 #[cfg(feature = "test_hooks")]
-#[macro_export]
-macro_rules! scoped {
-    ($name:ident, $e:expr) => {
-        let $name = $crate::test_hooks::ScopedEvent::new($e);
-    };
+pub fn scoped(event: &str) -> ScopedEvent {
+    ScopedEvent::new(event)
 }
 
 #[cfg(not(feature = "test_hooks"))]
-#[macro_export]
-macro_rules! scoped {
-    ($name:ident, $e:expr) => {}; // no-op
+pub fn scoped(_event: &str) -> () {
+    ()
 }
-
-pub(crate) use scoped;
 
 /// ScopedEvent emits an event when it goes out of scope
 pub struct ScopedEvent<'a> {
     event: &'a str,
 }
+
 impl<'a> ScopedEvent<'a> {
     pub fn new(event: &'a str) -> Self {
         ScopedEvent { event }
     }
 }
+
 impl<'a> std::ops::Drop for ScopedEvent<'a> {
     fn drop(&mut self) {
-        emit_event_impl(self.event);
-    }
-}
-
-pub fn emit_event_impl(event: &str) {
-    let sock_path = TEST_HOOK_SERVER.sock_path.lock().unwrap();
-    if sock_path.is_some() {
-        TEST_HOOK_SERVER.emit_event(event);
+        emit(self.event);
     }
 }
 

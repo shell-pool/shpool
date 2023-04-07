@@ -23,7 +23,6 @@ use super::{
     attach,
     events::Events,
     shpool_bin,
-    ssh,
     testdata_file,
 };
 
@@ -179,77 +178,6 @@ impl Proc {
         }
 
         cmd.output().context("spawning kill proc")
-    }
-
-    pub fn ssh_remote_cmd(&mut self) -> anyhow::Result<ssh::RemoteCmdProc> {
-        let tmp_dir = self.tmp_dir.as_ref().ok_or(anyhow!("missing tmp_dir"))?;
-        let log_file = tmp_dir
-            .path()
-            .join(format!("remote_cmd_{}.log", self.subproc_counter));
-        let test_hook_socket_path = tmp_dir.path().join(format!(
-            "remote_cmd_test_hook_{}.socket",
-            self.subproc_counter
-        ));
-        eprintln!("spawning remote cmd proc with log {:?}", &log_file);
-        self.subproc_counter += 1;
-
-        let proc = Command::new(shpool_bin()?)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .stdin(Stdio::piped())
-            .arg("-vv")
-            .arg("--log-file")
-            .arg(&log_file)
-            .arg("--socket")
-            .arg(&self.socket_path)
-            .env("SHPOOL_TEST_HOOK_SOCKET_PATH", &test_hook_socket_path)
-            .arg("plumbing")
-            .arg("ssh-remote-command")
-            .spawn()
-            .context(format!("spawning remote cmd proc"))?;
-
-        let events = Events::new(&test_hook_socket_path)?;
-
-        Ok(ssh::RemoteCmdProc {
-            proc,
-            events: Some(events),
-        })
-    }
-
-    pub fn ssh_set_metadata(&mut self, name: &str) -> anyhow::Result<ssh::SetMetadataProc> {
-        let tmp_dir = self.tmp_dir.as_ref().ok_or(anyhow!("missing tmp_dir"))?;
-        let log_file = tmp_dir
-            .path()
-            .join(format!("set_metadata_{}.log", self.subproc_counter));
-        let test_hook_socket_path = tmp_dir.path().join(format!(
-            "set_metadata_test_hook_{}.socket",
-            self.subproc_counter
-        ));
-        eprintln!("spawning set metadata proc with log {:?}", &log_file);
-        self.subproc_counter += 1;
-
-        let proc = Command::new(shpool_bin()?)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .stdin(Stdio::piped())
-            .arg("-vv")
-            .arg("--log-file")
-            .arg(&log_file)
-            .arg("--socket")
-            .arg(&self.socket_path)
-            .env("SHPOOL_TEST_HOOK_SOCKET_PATH", &test_hook_socket_path)
-            .arg("plumbing")
-            .arg("ssh-local-command-set-metadata")
-            .arg(name)
-            .spawn()
-            .context(format!("spawning remote cmd proc"))?;
-
-        let events = Events::new(&test_hook_socket_path)?;
-
-        Ok(ssh::SetMetadataProc {
-            proc,
-            events: Some(events),
-        })
     }
 
     /// list launches a `shpool list` process, collects the

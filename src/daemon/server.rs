@@ -41,9 +41,8 @@ use nix::{
 use tracing::{
     error,
     info,
-    span,
+    instrument,
     warn,
-    Level,
 };
 
 use super::{
@@ -59,18 +58,24 @@ use super::{
 };
 
 const SHELL_KILL_TIMEOUT: time::Duration = time::Duration::from_millis(500);
+const STDERR_FD: i32 = 2;
 
+#[derive(Debug)]
 pub struct Server {
     config: config::Config,
     /// A map from shell session names to session descriptors.
+    /// We wrap this in Arc<Mutex<_>> so that we can get at the
+    /// table from different threads such as the SIGWINCH thread
+    /// that is spawned during the attach process, and so that
+    /// handle_conn can delegate to worker threads and quickly allow
+    /// the main thread to become available to accept new connections.
     shells: Arc<Mutex<HashMap<String, shell::Session>>>,
     runtime_dir: PathBuf,
 }
 
 impl Server {
+    #[instrument(skip_all)]
     pub fn new(config: config::Config, runtime_dir: PathBuf) -> Arc<Self> {
-        let _s = span!(Level::INFO, "Server.new").entered();
-
         Arc::new(Server {
             config,
             shells: Arc::new(Mutex::new(HashMap::new())),
@@ -78,10 +83,9 @@ impl Server {
         })
     }
 
+    #[instrument(skip_all)]
     pub fn serve(server: Arc<Self>, listener: UnixListener) -> anyhow::Result<()> {
-        let _s = span!(Level::INFO, "Server.serve").entered();
-
-        test_hooks::emit!("daemon-about-to-listen");
+        test_hooks::emit("daemon-about-to-listen");
         for stream in listener.incoming() {
             info!("socket got a new connection");
             match stream {
@@ -102,8 +106,8 @@ impl Server {
         Ok(())
     }
 
+    #[instrument(skip_all)]
     fn handle_conn(&self, mut stream: UnixStream) -> anyhow::Result<()> {
-        let _s = span!(Level::INFO, "Server.handle_conn").entered();
         // We want to avoid timing out while blocking the main thread.
         stream
             .set_read_timeout(Some(consts::SOCK_STREAM_TIMEOUT))
@@ -145,41 +149,45 @@ impl Server {
         }
     }
 
+    #[instrument(skip_all)]
     fn handle_attach(
         &self,
         mut stream: UnixStream,
         header: protocol::AttachHeader,
         disable_echo: bool,
     ) -> anyhow::Result<()> {
-        let _s = span!(Level::INFO, "Server.handle_attach").entered();
-        info!("handle_attach: header={:?}", header);
-
         let (inner_to_stream, status) = {
-            // we unwrap to propigate the poison as an unwind
+            // we unwrap to propagate the poison as an unwind
             let mut shells = self.shells.lock().unwrap();
 
-            info!("handle_attach: locked shells table");
+            info!("locked shells table");
 
             let mut status = protocol::AttachStatus::Attached;
             if let Some(session) = shells.get(&header.name) {
-                info!("handle_attach: found entry for '{}'", header.name);
+                info!("found entry for '{}'", header.name);
                 if let Ok(mut inner) = session.inner.try_lock() {
-                    info!("handle_attach: session '{}': locked inner", header.name);
+                    info!("session '{}': locked inner", header.name);
                     // We have an existing session in our table, but the subshell
-                    // proc might have exited in the mean time, for example if the
+                    // proc might have exited in the meantime, for example if the
                     // user typed `exit` right before the connection dropped there
                     // could be a zombie entry in our session table. We need to
                     // re-check whether the subshell has exited before taking this over.
+                    //
+                    // N.B. this is still technically a race, but in practice it does
+                    // not ever cause problems, and there is no real way to avoid some
+                    // sort of race without just always creating a new session when
+                    // a shell exits, which would break `exit` typed at the shell prompt.
+                    //
+                    // TODO(ethan): plumb shell hangups back to the client
+                    //              somehow and have the client print out
+                    //              "Session terminated because the shell exited".
                     match inner.child_exited.try_recv() {
                         Ok(_) => {
                             return Err(anyhow!("unexpected send on child_exited chan"));
                         },
                         Err(TryRecvError::Empty) => {
                             // the channel is still open so the subshell is still running
-                            info!(
-                                "handle_attach: taking over existing session inner={:?}",
-                                inner
-                            );
+                            info!("taking over existing session inner={:?}", inner);
 
                             inner
                                 .set_pty_size(&header.local_tty_size)
@@ -190,17 +198,14 @@ impl Server {
                         },
                         Err(TryRecvError::Disconnected) => {
                             // the channel is closed so we know the subshell exited
-                            info!(
-                                "handle_attach: stale inner={:?}, clobbering with new subshell",
-                                inner
-                            );
+                            info!("stale inner={:?}, clobbering with new subshell", inner);
                             status = protocol::AttachStatus::Created;
                         },
                     }
 
                     // fallthrough to bidi streaming
                 } else {
-                    info!("handle_attach: busy shell session, doing nothing");
+                    info!("busy shell session, doing nothing");
                     // The stream is busy, so we just inform the client and close the stream.
                     write_reply(
                         &mut stream,
@@ -218,7 +223,7 @@ impl Server {
             }
 
             if status == protocol::AttachStatus::Created {
-                info!("handle_attach: creating new subshell");
+                info!("creating new subshell");
                 let session = self.spawn_subshell(stream, &header, disable_echo)?;
 
                 shells.insert(header.name.clone(), session);
@@ -253,65 +258,9 @@ impl Server {
                 error!("error writing reply status: {:?}", e);
             }
 
-            let local_tty_size = header.local_tty_size.clone();
-            let shells_arc = Arc::clone(&self.shells);
-            let sess_name = header.name.clone();
-            let (spawned_threads_tx, spawned_threads_rx) = crossbeam_channel::bounded(0);
-            thread::spawn(move || {
-                match spawned_threads_rx.recv_timeout(time::Duration::from_secs(2)) {
-                    Ok(()) => {
-                        warn!("unexpected send on spawned_threads chan");
-                        return;
-                    },
-                    Err(RecvTimeoutError::Timeout) => {
-                        warn!("timed out waiting for bidi_stream threads to spawn");
-                        return;
-                    },
-                    // fallthrough because channel closure indicates all threads have
-                    // been spawned and are ready for us
-                    Err(RecvTimeoutError::Disconnected) => {},
-                }
+            let spawned_threads_tx = self.send_sigwinch_after_attach(&header)?;
 
-                let tty_oversize = tty::Size {
-                    rows: local_tty_size.rows + 1,
-                    cols: local_tty_size.cols + 1,
-                };
-
-                // For some reason, emacs will correctly re-draw when we jiggle
-                // the tty size via a ResizeRequest RPC call, but directly calling
-                // local_tty_size.set_fd(...) from here does not force the redraw.
-                // This doesn't make any sense because the resize RPC is just a
-                // more convoluted way to make that call as far as I can tell.
-                // It doesn't seem to be a timing issue since I've added some
-                // long sleeps to ensure there is no race causing problems.
-                {
-                    let shells = shells_arc.lock().unwrap();
-
-                    if let Some(session) = shells.get(&sess_name) {
-                        if let Err(e) =
-                            session.rpc_call(protocol::SessionMessageRequestPayload::Resize(
-                                protocol::ResizeRequest {
-                                    tty_size: tty_oversize,
-                                },
-                            ))
-                        {
-                            error!("making oversize resize rpc: {:?}", e);
-                        }
-
-                        if let Err(e) =
-                            session.rpc_call(protocol::SessionMessageRequestPayload::Resize(
-                                protocol::ResizeRequest {
-                                    tty_size: local_tty_size,
-                                },
-                            ))
-                        {
-                            error!("making normal size resize rpc: {:?}", e);
-                        }
-                    }
-                }
-            });
-
-            info!("handle_attach: starting bidi stream loop");
+            info!("starting bidi stream loop");
             match inner.bidi_stream(spawned_threads_tx) {
                 Ok(done) => {
                     child_done = done;
@@ -333,23 +282,87 @@ impl Server {
         Ok(())
     }
 
-    fn link_ssh_auth_sock(&self, header: &protocol::AttachHeader) -> anyhow::Result<()> {
-        let _s = span!(Level::INFO, "Server.link_ssh_auth_sock").entered();
+    fn send_sigwinch_after_attach(
+        &self,
+        header: &protocol::AttachHeader,
+    ) -> anyhow::Result<crossbeam_channel::Sender<()>> {
+        use protocol::SessionMessageRequestPayload;
 
-        if self.config.nosimlink_ssh_auth_sock.unwrap_or(false) {
+        let local_tty_size = header.local_tty_size.clone();
+        let shells_arc = Arc::clone(&self.shells);
+        let sess_name = header.name.clone();
+        let (spawned_threads_tx, spawned_threads_rx) = crossbeam_channel::bounded(0);
+        thread::spawn(move || {
+            match spawned_threads_rx.recv_timeout(time::Duration::from_secs(2)) {
+                Ok(()) => {
+                    warn!("unexpected send on spawned_threads chan");
+                    return;
+                },
+                Err(RecvTimeoutError::Timeout) => {
+                    warn!("timed out waiting for bidi_stream threads to spawn");
+                    return;
+                },
+                // fallthrough because channel closure indicates all threads have
+                // been spawned and are ready for us
+                Err(RecvTimeoutError::Disconnected) => {},
+            }
+
+            let tty_oversize = tty::Size {
+                rows: local_tty_size.rows + 1,
+                cols: local_tty_size.cols + 1,
+            };
+
+            // For some reason, emacs will correctly re-draw when we jiggle
+            // the tty size via a ResizeRequest RPC call, but directly calling
+            // local_tty_size.set_fd(...) from here does not force the redraw.
+            // This doesn't make any sense because the resize RPC is just a
+            // more convoluted way to make that call as far as I can tell.
+            // It doesn't seem to be a timing issue since I've added some
+            // long sleeps to ensure there is no race causing problems.
+            {
+                let shells = shells_arc.lock().unwrap();
+
+                if let Some(session) = shells.get(&sess_name) {
+                    if let Err(e) = session.rpc_call(SessionMessageRequestPayload::Resize(
+                        protocol::ResizeRequest {
+                            tty_size: tty_oversize,
+                        },
+                    )) {
+                        error!("making oversize resize rpc: {:?}", e);
+                    }
+
+                    if let Err(e) = session.rpc_call(SessionMessageRequestPayload::Resize(
+                        protocol::ResizeRequest {
+                            tty_size: local_tty_size,
+                        },
+                    )) {
+                        error!("making normal size resize rpc: {:?}", e);
+                    }
+                }
+            }
+        });
+
+        Ok(spawned_threads_tx)
+    }
+
+    #[instrument(skip_all)]
+    fn link_ssh_auth_sock(&self, header: &protocol::AttachHeader) -> anyhow::Result<()> {
+        if self.config.nosymlink_ssh_auth_sock.unwrap_or(false) {
             return Ok(());
         }
 
         if let Some(ssh_auth_sock) = header.local_env_get("SSH_AUTH_SOCK") {
-            let symlink = self.ssh_auth_sock_simlink(PathBuf::from(&header.name));
-            fs::create_dir_all(symlink.parent().ok_or(anyhow!("no simlink parent"))?)
-                .context("could not create directory for SSH_AUTH_SOCK simlink")?;
+            let symlink = self.ssh_auth_sock_symlink(PathBuf::from(&header.name));
+            fs::create_dir_all(symlink.parent().ok_or(anyhow!("no symlink parent dir"))?)
+                .context("could not create directory for SSH_AUTH_SOCK symlink")?;
 
             let sessions_dir = symlink
                 .parent()
                 .and_then(|d| d.parent())
                 .ok_or(anyhow!("no sessions dir"))?;
             let sessions_meta = fs::metadata(sessions_dir).context("stating sessions dir")?;
+
+            // set RWX bits for user and no one else
             let mut sessions_perm = sessions_meta.permissions();
             if sessions_perm.mode() != 0o700 {
                 sessions_perm.set_mode(0o700);
@@ -369,13 +382,12 @@ impl Server {
         Ok(())
     }
 
+    #[instrument(skip_all)]
     fn handle_detach(
         &self,
         mut stream: UnixStream,
         request: protocol::DetachRequest,
     ) -> anyhow::Result<()> {
-        let _s = span!(Level::INFO, "Server.handle_detach").entered();
-
         let mut not_found_sessions = vec![];
         let mut not_attached_sessions = vec![];
         {
@@ -404,13 +416,12 @@ impl Server {
         Ok(())
     }
 
+    #[instrument(skip_all)]
     fn handle_kill(
         &self,
         mut stream: UnixStream,
         request: protocol::KillRequest,
     ) -> anyhow::Result<()> {
-        let _s = span!(Level::INFO, "Server.handle_kill").entered();
-
         let mut not_found_sessions = vec![];
         {
             let mut shells = self.shells.lock().unwrap();
@@ -435,6 +446,16 @@ impl Server {
                     // from a process. We can't use the normal SIGTERM graceful-shutdown
                     // signal since shells just forward those to their child process,
                     // but for shells SIGHUP serves as the graceful shutdown signal.
+                    //
+                    // TODO(ethan): this hangup sequence could use some work. I should
+                    //              make the wait time configurable, then make the
+                    //              signal sequence SIGHUP -> SIGTERM -> SIGKILL.
+                    //              SIGTERM -> SIGKILL to be polite, and SIGHUP first
+                    //              because SIGTERM doesn't really work on shells
+                    //              and SIGHUP means "tty disconnected" which is exactly
+                    //              what is going on here. There is also the systemd
+                    //              shutdown usecase to consider, where systemd will
+                    //              send SIGTERM -> SIGHUP -> SIGKILL for us.
                     signal::kill(Pid::from_raw(pid), Some(signal::Signal::SIGHUP))
                         .context("sending SIGKILL to child proc")?;
 
@@ -444,7 +465,7 @@ impl Server {
                             signal::kill(Pid::from_raw(pid), Some(signal::Signal::SIGKILL))
                                 .context("sending SIGKILL to child proc")?;
                         },
-                        Err(_) => {}, // fallthrough
+                        Err(_) => {},
                     }
 
                     // we don't need to wait since the dedicated reaping thread is active
@@ -459,7 +480,7 @@ impl Server {
                 shells.remove(session);
             }
             if to_remove.len() > 0 {
-                test_hooks::emit!("daemon-handle-kill-removed-shells");
+                test_hooks::emit("daemon-handle-kill-removed-shells");
             }
         }
 
@@ -469,9 +490,8 @@ impl Server {
         Ok(())
     }
 
+    #[instrument(skip_all)]
     fn handle_list(&self, mut stream: UnixStream) -> anyhow::Result<()> {
-        let _s = span!(Level::INFO, "Server.handle_list").entered();
-
         let shells = self.shells.lock().unwrap();
 
         let sessions: anyhow::Result<Vec<protocol::Session>> = shells
@@ -491,46 +511,42 @@ impl Server {
         Ok(())
     }
 
+    #[instrument(skip_all)]
     fn handle_session_message(
         &self,
         mut stream: UnixStream,
         header: protocol::SessionMessageRequest,
     ) -> anyhow::Result<()> {
-        let _s = span!(Level::INFO, "Server.handle_session_message").entered();
-
         // create a slot to store our reply so we can do
         // our IO without the lock held.
-        let reply: protocol::SessionMessageReply;
-
-        {
+        let reply = {
             let shells = self.shells.lock().unwrap();
             if let Some(session) = shells.get(&header.session_name) {
-                reply = session.rpc_call(header.payload)?;
+                session.rpc_call(header.payload)?
             } else {
-                reply = protocol::SessionMessageReply::NotFound;
+                protocol::SessionMessageReply::NotFound
             }
-        }
+        };
 
         write_reply(&mut stream, reply).context("handle_session_message: writing reply")?;
 
         Ok(())
     }
 
+    #[instrument(skip_all)]
     fn spawn_subshell(
         &self,
         client_stream: UnixStream,
         header: &protocol::AttachHeader,
         disable_echo: bool,
     ) -> anyhow::Result<shell::Session> {
-        let _s = span!(Level::INFO, "Server.spawn_subshell").entered();
-
         let user_info = user::info()?;
         let shell = if let Some(s) = &self.config.shell {
             s.clone()
         } else {
             user_info.default_shell.clone()
         };
-        info!("spawn_subshell: user_info={:?}", user_info);
+        info!("user_info={:?}", user_info);
 
         // Build up the command we will exec while allocation is still chill.
         // We will exec this command after a fork, so we want to just inherit
@@ -549,7 +565,7 @@ impl Server {
             .env("HOME", user_info.home_dir)
             .env("SHPOOL_SESSION_NAME", &header.name)
             .env("USER", user_info.user)
-            .env("SSH_AUTH_SOCK", self.ssh_auth_sock_simlink(PathBuf::from(&header.name)));
+            .env("SSH_AUTH_SOCK", self.ssh_auth_sock_symlink(PathBuf::from(&header.name)));
         if self.config.norc.unwrap_or(false) && shell == "/bin/bash" {
             cmd.arg("--norc").arg("--noprofile");
         }
@@ -558,17 +574,30 @@ impl Server {
             cmd.env("XDG_RUNTIME_DIR", xdg_runtime_dir);
         }
 
-        let mut term = String::from("");
+        // Most of the time, use the TERM that the user sent along in
+        // the attach header. If they have an explicit TERM value set
+        // in their config file, use that instead. If they have a blank
+        // term in their config, don't set TERM in the spawned shell at
+        // all.
+        let mut term = None;
         if let Some(t) = header.local_env_get("TERM") {
-            term = String::from(t);
+            term = Some(String::from(t));
         }
         if let Some(env) = self.config.env.as_ref() {
-            if let Some(t) = env.get("TERM") {
-                term = String::from(t);
-            }
+            term = match env.get("TERM") {
+                None => None,
+                Some(t) if t.is_empty() => None,
+                Some(t) => Some(String::from(t)),
+            };
 
+            // If the user has configured a term of "", we want
+            // to make sure not to set it at all in the environment.
+            // An unset TERM variable can produce a shell that generates
+            // output which is easier to parse and interact with for
+            // another machine. This is particularly useful for testing
+            // shpool itself.
             let filtered_env_pin;
-            let env = if term == "" {
+            let env = if term.is_none() {
                 let mut e = env.clone();
                 e.remove("TERM");
                 filtered_env_pin = Some(e);
@@ -581,8 +610,8 @@ impl Server {
                 cmd.envs(env);
             }
         }
-        if term != "" {
-            cmd.env("TERM", term);
+        if let Some(t) = term {
+            cmd.env("TERM", t);
         }
 
         // spawn the shell as a login shell by setting
@@ -602,6 +631,9 @@ impl Server {
             if disable_echo || self.config.noecho.unwrap_or(false) {
                 tty::disable_echo(slave.as_raw_fd()).unwrap();
             }
+            for fd in STDERR_FD + 1..(nix::unistd::SysconfVar::OPEN_MAX as i32) {
+                let _ = nix::unistd::close(fd);
+            }
             let err = cmd.exec();
             eprintln!("shell exec err: {:?}", err);
             std::process::exit(1);
@@ -617,11 +649,8 @@ impl Server {
             // this thread exits, closing the channel.
             let _tx = child_exited_tx;
 
-            match waitable_child.wait() {
-                Ok(_) => {}, // fallthrough
-                Err(e) => {
-                    error!("waiting to reap child shell: {:?}", e);
-                },
+            if let Err(e) = waitable_child.wait() {
+                error!("waiting to reap child shell: {:?}", e);
             }
 
             info!(
@@ -651,7 +680,7 @@ impl Server {
         })
     }
 
-    fn ssh_auth_sock_simlink(&self, session_name: PathBuf) -> PathBuf {
+    fn ssh_auth_sock_symlink(&self, session_name: PathBuf) -> PathBuf {
         self.runtime_dir
             .join("sessions")
             .join(session_name)
@@ -659,20 +688,18 @@ impl Server {
     }
 }
 
+#[instrument(skip_all)]
 fn parse_connect_header(stream: &mut UnixStream) -> anyhow::Result<protocol::ConnectHeader> {
-    let _s = span!(Level::TRACE, "Server.parse_connect_header").entered();
-
     let header: protocol::ConnectHeader =
         bincode::deserialize_from(stream).context("parsing header")?;
     Ok(header)
 }
 
+#[instrument(skip_all)]
 fn write_reply<H>(stream: &mut UnixStream, header: H) -> anyhow::Result<()>
 where
     H: serde::Serialize,
 {
-    let _s = span!(Level::TRACE, "Server.write_reply").entered();
-
     stream
         .set_write_timeout(Some(consts::SOCK_STREAM_TIMEOUT))
         .context("setting write timout on inbound session")?;
@@ -700,7 +727,7 @@ fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
     let peer_uid = unistd::Uid::from_raw(peer_creds.uid());
     let self_uid = unistd::getuid();
     if peer_uid != self_uid {
-        return Err(anyhow!("shpool cannot connect to sessions across users"));
+        return Err(anyhow!("shpool prohibits connections across users"));
     }
 
     let peer_pid = unistd::Pid::from_raw(peer_creds.pid());
@@ -709,7 +736,7 @@ fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
     let self_exe = exe_for_pid(self_pid).context("could not resolve our own exe")?;
     if peer_exe != self_exe {
         return Err(anyhow!(
-            "shpool must only connect to the daemon with the same exe"
+            "shpool prohibits connecting to a daemon with a different exe"
         ));
     }
 
