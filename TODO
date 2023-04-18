@@ -12,7 +12,6 @@
   "C-a d" keybinding.
 - Shpool introduces more lag than it should http://screencast/cast/NjU4Nzk0MTA3MDU2OTQ3MnxkYzhmZjhhZS00Nw
 - I should set up CI/CD (can probably let Nicolas figure it out then copy him)
-- I should do some security hardening (the cidermux docs have some good suggestions here)
 - Exit with a success error code when a session gets manually detached (either
   via shpool detach or with the upcoming detach keybinding).
 - Allow users to specify a command to run instead of their default shell.
