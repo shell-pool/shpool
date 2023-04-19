@@ -1,0 +1,10 @@
+[package]
+authors = ["The wasm-bindgen Developers"]
+description = "Shared support between wasm-bindgen and wasm-bindgen cli, an internal\ndependency.\n"
+documentation = "https://docs.rs/wasm-bindgen-shared"
+edition = "2018"
+homepage = "https://rustwasm.github.io/wasm-bindgen/"
+license = "MIT/Apache-2.0"
+name = "wasm-bindgen-shared"
+repository = "https://github.com/rustwasm/wasm-bindgen/tree/master/crates/shared"
+version = "0.2.83"

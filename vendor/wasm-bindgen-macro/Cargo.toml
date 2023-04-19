@@ -1,0 +1,33 @@
+[dependencies.quote]
+version = "1.0"
+
+[dependencies.wasm-bindgen-macro-support]
+version = "=0.2.83"
+[dev-dependencies.trybuild]
+version = "1.0"
+
+[dev-dependencies.wasm-bindgen]
+version = "0.2.83"
+
+[dev-dependencies.wasm-bindgen-futures]
+version = "0.4.33"
+
+[features]
+spans = ["wasm-bindgen-macro-support/spans"]
+strict-macro = ["wasm-bindgen-macro-support/strict-macro"]
+xxx_debug_only_print_generated_code = []
+
+[lib]
+proc-macro = true
+
+[package]
+authors = ["The wasm-bindgen Developers"]
+description = "Definition of the `#[wasm_bindgen]` attribute, an internal dependency\n"
+documentation = "https://docs.rs/wasm-bindgen"
+edition = "2018"
+homepage = "https://rustwasm.github.io/wasm-bindgen/"
+license = "MIT/Apache-2.0"
+name = "wasm-bindgen-macro"
+readme = "README.md"
+repository = "https://github.com/rustwasm/wasm-bindgen/tree/master/crates/macro"
+version = "0.2.83"

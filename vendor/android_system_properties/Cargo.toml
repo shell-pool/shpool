@@ -1,0 +1,17 @@
+[dependencies.libc]
+version = "0.2.126"
+
+[package]
+authors = ["Nicolas Silva <nical@fastmail.com>"]
+description = "Minimal Android system properties wrapper"
+documentation = "https://docs.rs/android_system_properties"
+edition = "2018"
+homepage = "https://github.com/nical/android_system_properties"
+keywords = ["android"]
+license = "MIT/Apache-2.0"
+name = "android_system_properties"
+readme = "README.md"
+repository = "https://github.com/nical/android_system_properties"
+version = "0.1.5"
+[package.metadata.docs.rs]
+targets = ["arm-linux-androideabi", "armv7-linux-androideabi", "aarch64-linux-android", "i686-linux-android", "x86_64-linux-android", "x86_64-unknown-linux-gnu"]

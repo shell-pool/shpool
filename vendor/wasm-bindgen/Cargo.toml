@@ -1,0 +1,57 @@
+[dependencies.cfg-if]
+version = "1.0.0"
+
+[dependencies.serde]
+optional = true
+version = "1.0"
+
+[dependencies.serde_json]
+optional = true
+version = "1.0"
+
+[dependencies.wasm-bindgen-macro]
+version = "=0.2.83"
+
+[features]
+default = ["spans", "std"]
+enable-interning = ["std"]
+serde-serialize = ["serde", "serde_json", "std"]
+spans = ["wasm-bindgen-macro/spans"]
+std = []
+strict-macro = ["wasm-bindgen-macro/strict-macro"]
+xxx_debug_only_print_generated_code = ["wasm-bindgen-macro/xxx_debug_only_print_generated_code"]
+
+[lib]
+test = false
+
+[package]
+authors = ["The wasm-bindgen Developers"]
+categories = ["wasm"]
+description = "Easy support for interacting between JS and Rust.\n"
+documentation = "https://docs.rs/wasm-bindgen"
+edition = "2018"
+homepage = "https://rustwasm.github.io/"
+license = "MIT/Apache-2.0"
+name = "wasm-bindgen"
+readme = "README.md"
+repository = "https://github.com/rustwasm/wasm-bindgen"
+version = "0.2.83"
+[package.metadata.docs.rs]
+features = ["serde-serialize"]
+[target."cfg(target_arch = \"wasm32\")".dev-dependencies.js-sys]
+version = "0.3.60"
+
+[target."cfg(target_arch = \"wasm32\")".dev-dependencies.serde_derive]
+version = "1.0"
+
+[target."cfg(target_arch = \"wasm32\")".dev-dependencies.wasm-bindgen-futures]
+version = "=0.4.33"
+
+[target."cfg(target_arch = \"wasm32\")".dev-dependencies.wasm-bindgen-test]
+version = "=0.3.33"
+
+[target."cfg(target_arch = \"wasm32\")".dev-dependencies.wasm-bindgen-test-crate-a]
+version = "0.1"
+
+[target."cfg(target_arch = \"wasm32\")".dev-dependencies.wasm-bindgen-test-crate-b]
+version = "0.1"

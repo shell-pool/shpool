@@ -49,6 +49,10 @@ $ source "$HOME/.cargo/env"
 
 in your `.profile` file should do the trick.
 
+In addition to the standard rust toolchain, shpool uses the
+`cargo-vendor-filterer` tool, so you should install it with
+`cargo install cargo-vendor-filterer`.
+
 ### Build `shpool`
 
 To build and install `shpool` run
@@ -76,25 +80,16 @@ $ systemctl --user enable shpool
 $ systemctl --user start shpool
 ```
 
-## Experimental ssh plugin mode
+## Adding or updating a dependency
 
-In addition to the `$SSH_TTY` mode documented in the README, there is an
-experimental and fairly buggy plugin mode based on editing your ~/.ssh/config.
-To use it, edit the ~/.ssh/config on your local machine with the following
-example
+Since shpool uses `cargo-vendor-filterer`, adding or updating a dependency requires
+an extra step. After you edit `Cargo.toml` to reflect the change you want
+to make as normal. If you have not already installed `cargo-vendor-filterer`
+you can do so with `cargo install cargo-vendor-filterer`. Then run the command
 
 ```
-Host = your-ssh-target-name
-    Hostname your.ssh.host.example.com
-
-    RemoteCommand $HOME/.cargo/bin/shpool plumbing ssh-remote-command
-    PermitLocalCommand yes
-    LocalCommand ssh -oPermitLocalCommand=no -oRemoteCommand="$HOME/.cargo/bin/shpool plumbing ssh-local-command-set-metadata '%u@%h:%p$(tty)'" %n
+cargo vendor-filterer --platform=x86_64-unknown-linux-gnu
 ```
-
-This will require authenticating twice and there are several bugs in the
-experimental plugin mode, so this mode is not very usable but it does
-serve as a good proof of concept.
 
 ## Formatting
 

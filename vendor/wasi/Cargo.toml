@@ -1,0 +1,32 @@
+[badges.maintenance]
+status = "experimental"
+[dependencies.compiler_builtins]
+optional = true
+version = "0.1"
+
+[dependencies.core]
+optional = true
+package = "rustc-std-workspace-core"
+version = "1.0"
+
+[dependencies.rustc-std-workspace-alloc]
+optional = true
+version = "1.0"
+
+[features]
+default = ["std"]
+rustc-dep-of-std = ["compiler_builtins", "core", "rustc-std-workspace-alloc"]
+std = []
+
+[package]
+authors = ["The Cranelift Project Developers"]
+categories = ["no-std", "wasm"]
+description = "Experimental WASI API bindings for Rust"
+documentation = "https://docs.rs/wasi"
+edition = "2018"
+keywords = ["webassembly", "wasm"]
+license = "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT"
+name = "wasi"
+readme = "README.md"
+repository = "https://github.com/bytecodealliance/wasi"
+version = "0.10.0+wasi-snapshot-preview1"

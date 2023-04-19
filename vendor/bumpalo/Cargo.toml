@@ -1,0 +1,34 @@
+[dev-dependencies.criterion]
+version = "0.3.6"
+
+[dev-dependencies.quickcheck]
+version = "1.0.3"
+
+[dev-dependencies.rand]
+version = "0.8.5"
+
+[features]
+allocator_api = []
+boxed = []
+collections = []
+default = []
+
+[lib]
+bench = false
+path = "src/lib.rs"
+
+[package]
+authors = ["Nick Fitzgerald <fitzgen@gmail.com>"]
+categories = ["memory-management", "rust-patterns", "no-std"]
+description = "A fast bump allocation arena for Rust."
+documentation = "https://docs.rs/bumpalo"
+edition = "2021"
+exclude = ["/.github/*", "/benches", "/tests", "valgrind.supp", "bumpalo.png"]
+license = "MIT/Apache-2.0"
+name = "bumpalo"
+readme = "README.md"
+repository = "https://github.com/fitzgen/bumpalo"
+resolver = "2"
+version = "3.11.0"
+[package.metadata.docs.rs]
+all-features = true

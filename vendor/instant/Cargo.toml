@@ -1,0 +1,71 @@
+[dependencies.cfg-if]
+version = "1.0"
+[dev-dependencies.wasm-bindgen-test]
+version = "0.3"
+
+[features]
+inaccurate = []
+now = []
+wasm-bindgen = ["js-sys", "wasm-bindgen_rs", "web-sys"]
+
+[package]
+authors = ["sebcrozet <developer@crozet.re>"]
+description = "A partial replacement for std::time::Instant that works on WASM too."
+edition = "2018"
+keywords = ["time", "wasm"]
+license = "BSD-3-Clause"
+name = "instant"
+readme = "README.md"
+repository = "https://github.com/sebcrozet/instant"
+version = "0.1.12"
+[target.asmjs-unknown-emscripten.dependencies.js-sys]
+optional = true
+version = "0.3"
+
+[target.asmjs-unknown-emscripten.dependencies.stdweb]
+optional = true
+version = "0.4"
+
+[target.asmjs-unknown-emscripten.dependencies.wasm-bindgen_rs]
+optional = true
+package = "wasm-bindgen"
+version = "0.2"
+
+[target.asmjs-unknown-emscripten.dependencies.web-sys]
+features = ["Window", "Performance", "PerformanceTiming"]
+optional = true
+version = "0.3"
+[target.wasm32-unknown-emscripten.dependencies.js-sys]
+optional = true
+version = "0.3"
+
+[target.wasm32-unknown-emscripten.dependencies.stdweb]
+optional = true
+version = "0.4"
+
+[target.wasm32-unknown-emscripten.dependencies.wasm-bindgen_rs]
+optional = true
+package = "wasm-bindgen"
+version = "0.2"
+
+[target.wasm32-unknown-emscripten.dependencies.web-sys]
+features = ["Window", "Performance", "PerformanceTiming"]
+optional = true
+version = "0.3"
+[target.wasm32-unknown-unknown.dependencies.js-sys]
+optional = true
+version = "0.3"
+
+[target.wasm32-unknown-unknown.dependencies.stdweb]
+optional = true
+version = "0.4"
+
+[target.wasm32-unknown-unknown.dependencies.wasm-bindgen_rs]
+optional = true
+package = "wasm-bindgen"
+version = "0.2"
+
+[target.wasm32-unknown-unknown.dependencies.web-sys]
+features = ["Window", "Performance", "PerformanceTiming"]
+optional = true
+version = "0.3"
