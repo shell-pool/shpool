@@ -38,15 +38,14 @@ use tracing::{
 
 use crate::{
     consts,
-    protocol,
-    test_hooks,
-    tty,
     daemon::{
         config,
         keybindings,
     },
+    protocol,
+    test_hooks,
+    tty,
 };
-
 
 const SUPERVISOR_POLL_DUR: time::Duration = time::Duration::from_millis(300);
 const RPC_LOOP_POLL_DUR: time::Duration = time::Duration::from_millis(300);
