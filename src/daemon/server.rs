@@ -139,7 +139,7 @@ impl Server {
             .context("unsetting read timout on inbound session")?;
 
         match header {
-            protocol::ConnectHeader::Attach(h) => self.handle_attach(stream, h, false),
+            protocol::ConnectHeader::Attach(h) => self.handle_attach(stream, h),
             protocol::ConnectHeader::Detach(r) => self.handle_detach(stream, r),
             protocol::ConnectHeader::Kill(r) => self.handle_kill(stream, r),
             protocol::ConnectHeader::List => self.handle_list(stream),
@@ -154,7 +154,6 @@ impl Server {
         &self,
         mut stream: UnixStream,
         header: protocol::AttachHeader,
-        disable_echo: bool,
     ) -> anyhow::Result<()> {
         let (inner_to_stream, status) = {
             // we unwrap to propagate the poison as an unwind
@@ -224,7 +223,7 @@ impl Server {
 
             if status == protocol::AttachStatus::Created {
                 info!("creating new subshell");
-                let session = self.spawn_subshell(stream, &header, disable_echo)?;
+                let session = self.spawn_subshell(stream, &header)?;
 
                 shells.insert(header.name.clone(), session);
                 // fallthrough to bidi streaming
@@ -538,7 +537,6 @@ impl Server {
         &self,
         client_stream: UnixStream,
         header: &protocol::AttachHeader,
-        disable_echo: bool,
     ) -> anyhow::Result<shell::Session> {
         let user_info = user::info()?;
         let shell = if let Some(s) = &self.config.shell {
@@ -628,7 +626,7 @@ impl Server {
 
         let fork = pty::fork::Fork::from_ptmx().context("forking pty")?;
         if let Ok(slave) = fork.is_child() {
-            if disable_echo || self.config.noecho.unwrap_or(false) {
+            if self.config.noecho.unwrap_or(false) {
                 tty::disable_echo(slave.as_raw_fd()).unwrap();
             }
             for fd in STDERR_FD + 1..(nix::unistd::SysconfVar::OPEN_MAX as i32) {

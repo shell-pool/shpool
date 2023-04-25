@@ -96,6 +96,61 @@ cargo vendor-filterer --platform=x86_64-unknown-linux-gnu
 Run `cargo +nightly fmt` to ensure that the code matches the expected
 style.
 
+## Measuring Latency
+
+To check e2e latency, you can use the
+[sshping](https://github.com/spook/sshping) tool to compare latency
+between a raw ssh connection and one using shpool. First, get the
+baseline measurement by running
+
+```
+sshping -H $REMOTE_HOST
+```
+
+on your local machine. Now get a comparison by shelling into your
+remote host and starting a shpool session called `sshping` with
+`shpool attach sshping`. In this session, run `cat > /dev/null`
+to set up a tty that will just echo back chars. Now on your local
+machine, run
+
+```
+sshping -H -e '/path/to/shpool attach -f sshping' $REMOTE_HOST
+```
+
+to collect latency measurements with shpool in the loop.
+
+Some latency measurements I collected this way are:
+
+```
+$ sshping -H $REMOTE_HOST
+ssh-Login-Time:               3.99  s
+Minimum-Latency:              24.2 ms
+Median-Latency:               26.6 ms
+Average-Latency:              27.1 ms
+Average-Deviation:            7.85 ms
+Maximum-Latency:               180 ms
+Echo-Count:                  1.00 kB
+Upload-Size:                 8.00 MB
+Upload-Rate:                 5.41 MB/s
+Download-Size:               8.00 MB
+Download-Rate:               7.06 MB/s
+$ sshping -H -e '/path/to/shpool attach -f sshping' $REMOTE_HOST
+ssh-Login-Time:               6.07  s
+Minimum-Latency:              72.7 ms
+Median-Latency:               100.0 m
+Average-Latency:               100 ms
+Average-Deviation:            5.54 ms
+Maximum-Latency:               228 ms
+Echo-Count:                  1.00 kB
+Upload-Size:                 8.00 MB
+Upload-Rate:                 5.32 MB/s
+Download-Size:               8.00 MB
+Download-Rate:               6.62 MB/s
+```
+
+We've got some work to do, that's way more extra latency than we should be
+introducing.
+
 ## Preserving Logs in Tests
 
 By default, tests will clean up log files emitted by the various
@@ -109,5 +164,3 @@ leave log files in place you might run
 ```
 $ SHPOOL_LEAVE_TEST_LOGS=true cargo test --test attach happy_path -- --nocapture
 ```
-
-

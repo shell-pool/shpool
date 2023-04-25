@@ -38,3 +38,4 @@ features = ["std", "fmt", "tracing-log", "smallvec"]
 tempfile = "3" # keeping tests hermetic
 regex = "1" # test assertions
 serde_json = "1" # json parsing
+rand = "0.8" # generating tmp dirs

@@ -18,6 +18,7 @@ use anyhow::{
     Context,
 };
 use tempfile::TempDir;
+use rand::Rng;
 
 use super::{
     attach,
@@ -32,22 +33,37 @@ pub struct Proc {
     pub proc: process::Child,
     subproc_counter: usize,
     log_file: PathBuf,
-    pub tmp_dir: Option<TempDir>,
+    local_tmp_dir: Option<TempDir>,
+    pub tmp_dir: PathBuf,
     pub events: Option<Events>,
     pub socket_path: PathBuf,
 }
 
 impl Proc {
     pub fn new<P: AsRef<Path>>(config: P) -> anyhow::Result<Proc> {
-        let tmp_dir = tempfile::Builder::new()
+        let local_tmp_dir = tempfile::Builder::new()
             .prefix("shpool-test")
             .rand_bytes(20)
             .tempdir()
             .context("creating tmp dir")?;
-        let socket_path = tmp_dir.path().join("shpool.socket");
-        let test_hook_socket_path = tmp_dir.path().join("shpool-daemon-test-hook.socket");
+        let tmp_dir = if let Ok(base) = std::env::var("KOKORO_ARTIFACTS_DIR") {
+            let mut dir = PathBuf::from(base);
+            let rand_blob: String = rand::thread_rng()
+                .sample_iter(&rand::distributions::Alphanumeric)
+                .take(20)
+                .map(char::from)
+                .collect();
+            dir.push(format!("shpool-test{}", rand_blob));
+            std::fs::create_dir(&dir)?;
+            dir
+        } else {
+            local_tmp_dir.path().to_path_buf()
+        };
 
-        let log_file = tmp_dir.path().join("daemon.log");
+        let socket_path = tmp_dir.join("shpool.socket");
+        let test_hook_socket_path = tmp_dir.join("shpool-daemon-test-hook.socket");
+
+        let log_file = tmp_dir.join("daemon.log");
         eprintln!("spawning daemon proc with log {:?}", &log_file);
 
         let proc = Command::new(shpool_bin()?)
@@ -80,7 +96,8 @@ impl Proc {
 
         Ok(Proc {
             proc,
-            tmp_dir: Some(tmp_dir),
+            local_tmp_dir: Some(local_tmp_dir),
+            tmp_dir,
             log_file,
             subproc_counter: 0,
             events: Some(events),
@@ -94,11 +111,9 @@ impl Proc {
         force: bool,
         extra_env: Vec<(String, String)>,
     ) -> anyhow::Result<attach::Proc> {
-        let tmp_dir = self.tmp_dir.as_ref().ok_or(anyhow!("missing tmp_dir"))?;
-        let log_file = tmp_dir
-            .path()
+        let log_file = self.tmp_dir
             .join(format!("attach_{}_{}.log", name, self.subproc_counter));
-        let test_hook_socket_path = tmp_dir.path().join(format!(
+        let test_hook_socket_path = self.tmp_dir.join(format!(
             "attach_test_hook_{}_{}.socket",
             name, self.subproc_counter
         ));
@@ -137,9 +152,7 @@ impl Proc {
     }
 
     pub fn detach(&mut self, sessions: Vec<String>) -> anyhow::Result<process::Output> {
-        let tmp_dir = self.tmp_dir.as_ref().ok_or(anyhow!("missing tmp_dir"))?;
-        let log_file = tmp_dir
-            .path()
+        let log_file = self.tmp_dir
             .join(format!("detach_{}.log", self.subproc_counter));
         eprintln!("spawning detach proc with log {:?}", &log_file);
         self.subproc_counter += 1;
@@ -159,9 +172,7 @@ impl Proc {
     }
 
     pub fn kill(&mut self, sessions: Vec<String>) -> anyhow::Result<process::Output> {
-        let tmp_dir = self.tmp_dir.as_ref().ok_or(anyhow!("missing tmp_dir"))?;
-        let log_file = tmp_dir
-            .path()
+        let log_file = self.tmp_dir
             .join(format!("kill_{}.log", self.subproc_counter));
         eprintln!("spawning kill proc with log {:?}", &log_file);
         self.subproc_counter += 1;
@@ -183,9 +194,7 @@ impl Proc {
     /// list launches a `shpool list` process, collects the
     /// output and returns it as a string
     pub fn list(&mut self) -> anyhow::Result<process::Output> {
-        let tmp_dir = self.tmp_dir.as_ref().ok_or(anyhow!("missing tmp_dir"))?;
-        let log_file = tmp_dir
-            .path()
+        let log_file = self.tmp_dir
             .join(format!("list_{}.log", self.subproc_counter));
         eprintln!("spawning list proc with log {:?}", &log_file);
         self.subproc_counter += 1;
@@ -216,7 +225,7 @@ impl std::ops::Drop for Proc {
             eprintln!("err killing daemon proc: {:?}", e);
         }
         if std::env::var("SHPOOL_LEAVE_TEST_LOGS").unwrap_or(String::from("")) == "true" {
-            self.tmp_dir.take().map(|d| d.into_path());
+            self.local_tmp_dir.take().map(|d| d.into_path());
         }
     }
 }
