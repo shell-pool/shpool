@@ -1,13 +1,15 @@
 use std::process::Command;
 
 use anyhow::Context;
+use ntest::timeout;
 
 mod support;
 
 #[test]
+#[timeout(30000)]
 fn empty() -> anyhow::Result<()> {
     let mut daemon_proc =
-        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+        support::daemon::Proc::new("norc.toml", false).context("starting daemon proc")?;
     let out = daemon_proc.list()?;
     assert!(out.status.success(), "list proc did not exit successfully");
 
@@ -22,6 +24,7 @@ fn empty() -> anyhow::Result<()> {
 }
 
 #[test]
+#[timeout(30000)]
 fn no_daemon() -> anyhow::Result<()> {
     let out = Command::new(support::shpool_bin()?)
         .arg("--socket")
@@ -39,9 +42,10 @@ fn no_daemon() -> anyhow::Result<()> {
 }
 
 #[test]
+#[timeout(30000)]
 fn one_session() -> anyhow::Result<()> {
     let mut daemon_proc =
-        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+        support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
     let bidi_enter_w = daemon_proc
         .events
         .take()
@@ -65,9 +69,10 @@ fn one_session() -> anyhow::Result<()> {
 }
 
 #[test]
+#[timeout(30000)]
 fn two_sessions() -> anyhow::Result<()> {
     let mut daemon_proc =
-        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+        support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
     let mut bidi_enter_w = daemon_proc
         .events
         .take()

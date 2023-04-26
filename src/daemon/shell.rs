@@ -298,6 +298,7 @@ impl SessionInner {
                 if len == 0 {
                     continue;
                 }
+                test_hooks::emit("daemon-read-c2s-chunk");
 
                 debug!("read {} bytes", len);
 
@@ -335,7 +336,6 @@ impl SessionInner {
                 master_writer
                     .flush()
                     .context("flushing input from client to shell")?;
-                test_hooks::emit("daemon-wrote-client-chunk");
 
                 debug!("flushed chunk of len {}", len);
             }
@@ -425,6 +425,7 @@ impl SessionInner {
                             .context("writing stdout chunk to client stream")?;
                     }
                     debug!("wrote {} pty master bytes", chunk.buf.len());
+                    test_hooks::emit("daemon-wrote-s2c-chunk");
                 }
 
                 // flush immediately

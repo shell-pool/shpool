@@ -21,4 +21,4 @@ sudo mkdir -p $XDG_RUNTIME_DIR
 sudo chown $USER $XDG_RUNTIME_DIR
 chmod 700 $XDG_RUNTIME_DIR
 
-cargo test --offline
+cargo test --offline --no-fail-fast

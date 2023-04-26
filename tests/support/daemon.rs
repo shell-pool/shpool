@@ -17,8 +17,8 @@ use anyhow::{
     anyhow,
     Context,
 };
-use tempfile::TempDir;
 use rand::Rng;
+use tempfile::TempDir;
 
 use super::{
     attach,
@@ -40,7 +40,7 @@ pub struct Proc {
 }
 
 impl Proc {
-    pub fn new<P: AsRef<Path>>(config: P) -> anyhow::Result<Proc> {
+    pub fn new<P: AsRef<Path>>(config: P, listen_events: bool) -> anyhow::Result<Proc> {
         let local_tmp_dir = tempfile::Builder::new()
             .prefix("shpool-test")
             .rand_bytes(20)
@@ -66,7 +66,8 @@ impl Proc {
         let log_file = tmp_dir.join("daemon.log");
         eprintln!("spawning daemon proc with log {:?}", &log_file);
 
-        let proc = Command::new(shpool_bin()?)
+        let mut cmd = Command::new(shpool_bin()?);
+        cmd
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .arg("-vv")
@@ -76,12 +77,19 @@ impl Proc {
             .arg(&socket_path)
             .arg("daemon")
             .arg("--config-file")
-            .arg(testdata_file(config))
-            .env("SHPOOL_TEST_HOOK_SOCKET_PATH", &test_hook_socket_path)
+            .arg(testdata_file(config));
+        if listen_events {
+            cmd.env("SHPOOL_TEST_HOOK_SOCKET_PATH", &test_hook_socket_path);
+        }
+        let proc = cmd
             .spawn()
             .context("spawning daemon process")?;
 
-        let events = Events::new(&test_hook_socket_path)?;
+        let events = if listen_events {
+            Some(Events::new(&test_hook_socket_path)?)
+        } else {
+            None
+        };
 
         // spin until we can dial the socket successfully
         let mut sleep_dur = time::Duration::from_millis(5);
@@ -100,7 +108,7 @@ impl Proc {
             tmp_dir,
             log_file,
             subproc_counter: 0,
-            events: Some(events),
+            events,
             socket_path,
         })
     }
@@ -111,7 +119,8 @@ impl Proc {
         force: bool,
         extra_env: Vec<(String, String)>,
     ) -> anyhow::Result<attach::Proc> {
-        let log_file = self.tmp_dir
+        let log_file = self
+            .tmp_dir
             .join(format!("attach_{}_{}.log", name, self.subproc_counter));
         let test_hook_socket_path = self.tmp_dir.join(format!(
             "attach_test_hook_{}_{}.socket",
@@ -152,7 +161,8 @@ impl Proc {
     }
 
     pub fn detach(&mut self, sessions: Vec<String>) -> anyhow::Result<process::Output> {
-        let log_file = self.tmp_dir
+        let log_file = self
+            .tmp_dir
             .join(format!("detach_{}.log", self.subproc_counter));
         eprintln!("spawning detach proc with log {:?}", &log_file);
         self.subproc_counter += 1;
@@ -172,7 +182,8 @@ impl Proc {
     }
 
     pub fn kill(&mut self, sessions: Vec<String>) -> anyhow::Result<process::Output> {
-        let log_file = self.tmp_dir
+        let log_file = self
+            .tmp_dir
             .join(format!("kill_{}.log", self.subproc_counter));
         eprintln!("spawning kill proc with log {:?}", &log_file);
         self.subproc_counter += 1;
@@ -194,7 +205,8 @@ impl Proc {
     /// list launches a `shpool list` process, collects the
     /// output and returns it as a string
     pub fn list(&mut self) -> anyhow::Result<process::Output> {
-        let log_file = self.tmp_dir
+        let log_file = self
+            .tmp_dir
             .join(format!("list_{}.log", self.subproc_counter));
         eprintln!("spawning list proc with log {:?}", &log_file);
         self.subproc_counter += 1;

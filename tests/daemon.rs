@@ -31,10 +31,12 @@ use nix::{
         Pid,
     },
 };
+use ntest::timeout;
 
 mod support;
 
 #[test]
+#[timeout(30000)]
 fn start() -> anyhow::Result<()> {
     let tmp_dir = tempfile::Builder::new()
         .prefix("shpool-test")
@@ -79,6 +81,7 @@ fn start() -> anyhow::Result<()> {
 }
 
 #[test]
+#[timeout(30000)]
 fn systemd_activation() -> anyhow::Result<()> {
     let tmp_dir = tempfile::Builder::new()
         .prefix("shpool-test")
@@ -164,6 +167,7 @@ fn systemd_activation() -> anyhow::Result<()> {
 }
 
 #[test]
+#[timeout(30000)]
 fn config() -> anyhow::Result<()> {
     let tmp_dir = tempfile::Builder::new()
         .prefix("shpool-test")
@@ -210,9 +214,10 @@ fn config() -> anyhow::Result<()> {
 }
 
 #[test]
+#[timeout(30000)]
 fn cleanup_socket() -> anyhow::Result<()> {
     let mut daemon_proc =
-        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+        support::daemon::Proc::new("norc.toml", false).context("starting daemon proc")?;
 
     signal::kill(Pid::from_raw(daemon_proc.proc.id() as i32), Signal::SIGINT)?;
 

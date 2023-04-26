@@ -39,3 +39,4 @@ tempfile = "3" # keeping tests hermetic
 regex = "1" # test assertions
 serde_json = "1" # json parsing
 rand = "0.8" # generating tmp dirs
+ntest = "0.9" # test timeouts

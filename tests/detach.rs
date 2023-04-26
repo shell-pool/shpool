@@ -1,13 +1,15 @@
 use std::process::Command;
 
 use anyhow::Context;
+use ntest::timeout;
 
 mod support;
 
 #[test]
+#[timeout(30000)]
 fn single_running() -> anyhow::Result<()> {
     let mut daemon_proc =
-        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+        support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
 
     let mut waiter = daemon_proc
         .events
@@ -34,9 +36,10 @@ fn single_running() -> anyhow::Result<()> {
 }
 
 #[test]
+#[timeout(30000)]
 fn single_not_running() -> anyhow::Result<()> {
     let mut daemon_proc =
-        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+        support::daemon::Proc::new("norc.toml", false).context("starting daemon proc")?;
 
     let out = daemon_proc.detach(vec![String::from("sh1")])?;
     assert!(!out.status.success(), "successful");
@@ -51,6 +54,7 @@ fn single_not_running() -> anyhow::Result<()> {
 }
 
 #[test]
+#[timeout(30000)]
 fn no_daemon() -> anyhow::Result<()> {
     let out = Command::new(support::shpool_bin()?)
         .arg("--socket")
@@ -68,9 +72,10 @@ fn no_daemon() -> anyhow::Result<()> {
 }
 
 #[test]
+#[timeout(30000)]
 fn running_env_var() -> anyhow::Result<()> {
     let mut daemon_proc =
-        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+        support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
 
     let mut waiter = daemon_proc
         .events
@@ -103,9 +108,10 @@ fn running_env_var() -> anyhow::Result<()> {
 }
 
 #[test]
+#[timeout(30000)]
 fn reattach() -> anyhow::Result<()> {
     let mut daemon_proc =
-        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+        support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
 
     let bidi_done_w = daemon_proc
         .events
@@ -142,9 +148,10 @@ fn reattach() -> anyhow::Result<()> {
 }
 
 #[test]
+#[timeout(30000)]
 fn multiple_running() -> anyhow::Result<()> {
     let mut daemon_proc =
-        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+        support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
 
     let mut waiter = daemon_proc.events.take().unwrap().waiter([
         "daemon-bidi-stream-enter",
@@ -180,7 +187,7 @@ fn multiple_running() -> anyhow::Result<()> {
 #[test]
 fn multiple_mixed() -> anyhow::Result<()> {
     let mut daemon_proc =
-        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+        support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
 
     let mut waiter = daemon_proc
         .events
@@ -209,7 +216,7 @@ fn multiple_mixed() -> anyhow::Result<()> {
 #[test]
 fn double_tap() -> anyhow::Result<()> {
     let mut daemon_proc =
-        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+        support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
 
     let mut waiter = daemon_proc
         .events

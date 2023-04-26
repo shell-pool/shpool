@@ -5,13 +5,15 @@ use std::{
 };
 
 use anyhow::Context;
+use ntest::timeout;
 
 mod support;
 
 #[test]
+#[timeout(30000)]
 fn happy_path() -> anyhow::Result<()> {
     let mut daemon_proc =
-        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+        support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
     let mut attach_proc = daemon_proc
         .attach("sh1", false, vec![])
         .context("starting attach proc")?;
@@ -38,9 +40,10 @@ fn happy_path() -> anyhow::Result<()> {
 }
 
 #[test]
+#[timeout(30000)]
 fn symlink_ssh_auth_sock() -> anyhow::Result<()> {
     let mut daemon_proc =
-        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+        support::daemon::Proc::new("norc.toml", false).context("starting daemon proc")?;
 
     let fake_auth_sock_tgt = daemon_proc.tmp_dir.join("ssh-auth-sock-target.fake");
     fs::File::create(&fake_auth_sock_tgt)?;
@@ -65,9 +68,10 @@ fn symlink_ssh_auth_sock() -> anyhow::Result<()> {
 }
 
 #[test]
+#[timeout(30000)]
 fn missing_ssh_auth_sock() -> anyhow::Result<()> {
     let mut daemon_proc =
-        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+        support::daemon::Proc::new("norc.toml", false).context("starting daemon proc")?;
 
     let fake_auth_sock_tgt = daemon_proc.tmp_dir.join("ssh-auth-sock-target.fake");
     fs::File::create(&fake_auth_sock_tgt)?;
@@ -85,8 +89,9 @@ fn missing_ssh_auth_sock() -> anyhow::Result<()> {
 }
 
 #[test]
+#[timeout(30000)]
 fn config_disable_symlink_ssh_auth_sock() -> anyhow::Result<()> {
-    let mut daemon_proc = support::daemon::Proc::new("disable_symlink_ssh_auth_sock.toml")
+    let mut daemon_proc = support::daemon::Proc::new("disable_symlink_ssh_auth_sock.toml", false)
         .context("starting daemon proc")?;
 
     let fake_auth_sock_tgt = daemon_proc.tmp_dir.join("ssh-auth-sock-target.fake");
@@ -114,9 +119,10 @@ fn config_disable_symlink_ssh_auth_sock() -> anyhow::Result<()> {
 // test the attach process getting killed, then re-attaching to the
 // same shell session.
 #[test]
+#[timeout(30000)]
 fn bounce() -> anyhow::Result<()> {
     let mut daemon_proc =
-        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+        support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
 
     let bidi_done_w = daemon_proc
         .events
@@ -154,9 +160,10 @@ fn bounce() -> anyhow::Result<()> {
 }
 
 #[test]
+#[timeout(30000)]
 fn two_at_once() -> anyhow::Result<()> {
     let mut daemon_proc =
-        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+        support::daemon::Proc::new("norc.toml", false).context("starting daemon proc")?;
 
     let mut attach_proc1 = daemon_proc
         .attach("sh1", false, vec![])
@@ -180,9 +187,10 @@ fn two_at_once() -> anyhow::Result<()> {
 // test the attach process getting killed, then re-attaching to the
 // same shell session.
 #[test]
+#[timeout(30000)]
 fn explicit_exit() -> anyhow::Result<()> {
     let mut daemon_proc =
-        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+        support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
 
     let bidi_done_w = daemon_proc
         .events
@@ -221,18 +229,22 @@ fn explicit_exit() -> anyhow::Result<()> {
     Ok(())
 }
 
-// test the attach process getting killed, then re-attaching to the
+// Test the attach process getting killed, then re-attaching to the
 // same shell session.
 #[test]
+#[timeout(30000)]
 fn exit_immediate_drop() -> anyhow::Result<()> {
     let mut daemon_proc =
-        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+        support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
 
-    let reap_w = daemon_proc
-        .events
-        .take()
-        .unwrap()
-        .waiter(["daemon-bidi-stream-done"]);
+    let mut waiter = daemon_proc.events.take().unwrap().waiter([
+        "daemon-read-c2s-chunk",
+        "daemon-read-c2s-chunk",
+        "daemon-wrote-s2c-chunk",
+        "daemon-read-c2s-chunk",
+        "daemon-wrote-s2c-chunk",
+        "daemon-bidi-stream-done",
+    ]);
 
     {
         let mut attach_proc = daemon_proc
@@ -242,18 +254,23 @@ fn exit_immediate_drop() -> anyhow::Result<()> {
         let mut line_matcher = attach_proc.line_matcher()?;
 
         attach_proc.run_cmd("export MYVAR=first")?;
+        waiter.wait_event("daemon-read-c2s-chunk")?;
 
         attach_proc.run_cmd("echo $MYVAR")?;
+        waiter.wait_event("daemon-read-c2s-chunk")?;
         line_matcher.match_re("first$")?;
+        waiter.wait_event("daemon-wrote-s2c-chunk")?;
 
         attach_proc.run_cmd("exit")?;
+        waiter.wait_event("daemon-read-c2s-chunk")?;
         line_matcher.match_re("logout$")?;
+        waiter.wait_event("daemon-wrote-s2c-chunk")?;
 
         // Immediately kill the attach proc after we've written exit
         // to bring the connection down.
     }
 
-    daemon_proc.events = Some(reap_w.wait_final_event("daemon-bidi-stream-done")?);
+    daemon_proc.events = Some(waiter.wait_final_event("daemon-bidi-stream-done")?);
 
     {
         let mut attach_proc = daemon_proc
@@ -272,9 +289,10 @@ fn exit_immediate_drop() -> anyhow::Result<()> {
 }
 
 #[test]
+#[timeout(30000)]
 fn output_flood() -> anyhow::Result<()> {
     let mut daemon_proc =
-        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+        support::daemon::Proc::new("norc.toml", false).context("starting daemon proc")?;
     let mut attach_proc = daemon_proc
         .attach("sh1", false, vec![])
         .context("starting attach proc")?;
@@ -295,9 +313,10 @@ fn output_flood() -> anyhow::Result<()> {
 }
 
 #[test]
+#[timeout(30000)]
 fn force_attach() -> anyhow::Result<()> {
     let mut daemon_proc =
-        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+        support::daemon::Proc::new("norc.toml", false).context("starting daemon proc")?;
 
     let mut tty1 = daemon_proc
         .attach("sh1", false, vec![])
@@ -320,9 +339,10 @@ fn force_attach() -> anyhow::Result<()> {
 }
 
 #[test]
+#[timeout(30000)]
 fn busy() -> anyhow::Result<()> {
     let mut daemon_proc =
-        support::daemon::Proc::new("norc.toml").context("starting daemon proc")?;
+        support::daemon::Proc::new("norc.toml", false).context("starting daemon proc")?;
 
     let mut tty1 = daemon_proc
         .attach("sh1", false, vec![])
