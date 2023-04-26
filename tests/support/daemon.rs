@@ -67,8 +67,7 @@ impl Proc {
         eprintln!("spawning daemon proc with log {:?}", &log_file);
 
         let mut cmd = Command::new(shpool_bin()?);
-        cmd
-            .stdout(Stdio::piped())
+        cmd.stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .arg("-vv")
             .arg("--log-file")
@@ -81,9 +80,7 @@ impl Proc {
         if listen_events {
             cmd.env("SHPOOL_TEST_HOOK_SOCKET_PATH", &test_hook_socket_path);
         }
-        let proc = cmd
-            .spawn()
-            .context("spawning daemon process")?;
+        let proc = cmd.spawn().context("spawning daemon process")?;
 
         let events = if listen_events {
             Some(Events::new(&test_hook_socket_path)?)

@@ -4,6 +4,7 @@ use std::{
         Read,
         Write,
     },
+    net,
     os::unix::{
         io::AsRawFd,
         net::UnixStream,
@@ -145,14 +146,12 @@ impl SessionInner {
             None => return Err(anyhow!("no client stream to take for bidi streaming")),
         };
 
-        // set timeouts so we can wake up to handle cancelation correctly
-        client_stream
-            .set_nonblocking(true)
-            .context("setting client stream nonblocking")?;
-
         let mut reader_client_stream = client_stream
             .try_clone()
             .context("creating reader client stream")?;
+        let closable_client_stream = client_stream
+            .try_clone()
+            .context("creating closable client stream handle")?;
         let client_stream_m = Mutex::new(io::BufWriter::new(
             client_stream
                 .try_clone()
@@ -188,7 +187,7 @@ impl SessionInner {
                 s, &stop, &child_done, &pty_master);
 
             // handle SessionMessage RPCs
-            let rpc_h = self.spawn_rpc(s, &stop);
+            let rpc_h = self.spawn_rpc(s, &stop, &closable_client_stream);
 
             drop(spawned_handlers);
 
@@ -206,6 +205,7 @@ impl SessionInner {
                         c_done,
                     );
                     stop.store(true, Ordering::Relaxed);
+                    closable_client_stream.shutdown(net::Shutdown::Both)?;
                     break;
                 }
                 thread::sleep(consts::JOIN_POLL_DURATION);
@@ -269,8 +269,6 @@ impl SessionInner {
 
             let mut master_writer = pty_master.clone();
 
-            info!("spawned");
-
             let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
 
             loop {
@@ -286,15 +284,9 @@ impl SessionInner {
                 //
                 // Also, note that we don't access through the mutex because reads
                 // don't need to be excluded from trampling on writes.
-                let len = match reader_client_stream.read(&mut buf) {
-                    Ok(l) => l,
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        trace!("read: WouldBlock");
-                        thread::sleep(consts::PIPE_POLL_DURATION);
-                        continue;
-                    },
-                    Err(e) => return Err(e).context("reading client chunk"),
-                };
+                let len = reader_client_stream
+                    .read(&mut buf)
+                    .context("reading client chunk")?;
                 if len == 0 {
                     continue;
                 }
@@ -302,28 +294,7 @@ impl SessionInner {
 
                 debug!("read {} bytes", len);
 
-                let mut to_write = &buf[0..len];
-                debug!("created to_write='{}'", String::from_utf8_lossy(to_write));
-
-                while to_write.len() > 0 {
-                    if stop.load(Ordering::Relaxed) {
-                        info!("recvd stop msg (2)");
-                        return Ok(());
-                    }
-
-                    let nwritten = match master_writer.write(&to_write) {
-                        Ok(n) => n,
-                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                            trace!("read: WouldBlock");
-                            thread::sleep(consts::PIPE_POLL_DURATION);
-                            continue;
-                        },
-                        Err(e) => return Err(e).context("writing client chunk"),
-                    };
-                    debug!("wrote {} bytes", nwritten);
-                    to_write = &to_write[nwritten..];
-                    trace!("to_write='{}'", String::from_utf8_lossy(to_write));
-                }
+                master_writer.write_all(&buf[0..len]).context("writing client chunk")?;
 
                 // TODO(ethan): perform keybinding scanning in a background
                 //              thread
@@ -366,8 +337,7 @@ impl SessionInner {
                     return Ok(());
                 }
 
-                // select so we know which stream to read from, and
-                // know to wake up immediately when bytes are available.
+                // select so we only perform reads that will succeed, avoiding deadlocks.
                 let mut fdset = nix::sys::select::FdSet::new();
                 fdset.insert(master_reader.as_raw_fd());
                 let mut poll_dur = consts::PIPE_POLL_DURATION_TIMEVAL.clone();
@@ -388,45 +358,27 @@ impl SessionInner {
                 if nready == 0 {
                     continue;
                 }
-
-                if fdset.contains(master_reader.as_raw_fd()) {
-                    let len = match master_reader.read(&mut buf) {
-                        Ok(n) => n,
-                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                            trace!("pty master read: WouldBlock");
-                            thread::sleep(consts::PIPE_POLL_DURATION);
-                            continue;
-                        },
-                        Err(e) => {
-                            info!("error reading from pty: {:?}", e);
-                            return Err(e).context("reading pty master chunk");
-                        },
-                    };
-                    if len == 0 {
-                        trace!("0 stdout bytes, waiting");
-                        thread::sleep(consts::PIPE_POLL_DURATION);
-                        continue;
-                    }
-
-                    let chunk = protocol::Chunk {
-                        kind: protocol::ChunkKind::Data,
-                        buf: &buf[..len],
-                    };
-                    debug!(
-                        "read pty master len={} '{}'",
-                        len,
-                        String::from_utf8_lossy(chunk.buf)
-                    );
-                    {
-                        let mut s = client_stream_m.lock().unwrap();
-                        chunk
-                            .write_to(&mut *s, &stop)
-                            .and_then(|_| s.flush())
-                            .context("writing stdout chunk to client stream")?;
-                    }
-                    debug!("wrote {} pty master bytes", chunk.buf.len());
-                    test_hooks::emit("daemon-wrote-s2c-chunk");
+                let len = master_reader
+                    .read(&mut buf)
+                    .context("reading pty master chunk")?;
+                let chunk = protocol::Chunk {
+                    kind: protocol::ChunkKind::Data,
+                    buf: &buf[..len],
+                };
+                debug!(
+                    "read pty master len={} '{}'",
+                    len,
+                    String::from_utf8_lossy(chunk.buf)
+                );
+                {
+                    let mut s = client_stream_m.lock().unwrap();
+                    chunk
+                        .write_to(&mut *s)
+                        .and_then(|_| s.flush())
+                        .context("writing stdout chunk to client stream")?;
                 }
+                debug!("wrote {} pty master bytes", chunk.buf.len());
+                test_hooks::emit("daemon-wrote-s2c-chunk");
 
                 // flush immediately
                 client_stream.flush().context("flushing client stream")?;
@@ -458,7 +410,7 @@ impl SessionInner {
                 };
                 {
                     let mut s = client_stream_m.lock().unwrap();
-                    match chunk.write_to(&mut *s, &stop).and_then(|_| s.flush()) {
+                    match chunk.write_to(&mut *s).and_then(|_| s.flush()) {
                         Ok(_) => {
                             trace!("wrote heartbeat");
                         },
@@ -516,6 +468,7 @@ impl SessionInner {
         &'scope self,
         scope: &'scope thread::Scope<'scope, '_>,
         stop: &'scope AtomicBool,
+        client_stream: &'scope UnixStream,
     ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
         scope.spawn(|| -> anyhow::Result<()> {
             let _s1 = span!(Level::INFO, "rpc", s = self.name).entered();
@@ -539,6 +492,7 @@ impl SessionInner {
                     protocol::SessionMessageRequestPayload::Detach => {
                         debug!("handling detach");
                         stop.store(true, Ordering::Relaxed);
+                        client_stream.shutdown(net::Shutdown::Both)?;
                         protocol::SessionMessageReply::Detach(
                             protocol::SessionMessageDetachReply::Ok,
                         )

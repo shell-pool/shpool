@@ -91,8 +91,14 @@ fn missing_ssh_auth_sock() -> anyhow::Result<()> {
 #[test]
 #[timeout(30000)]
 fn config_disable_symlink_ssh_auth_sock() -> anyhow::Result<()> {
-    let mut daemon_proc = support::daemon::Proc::new("disable_symlink_ssh_auth_sock.toml", false)
+    let mut daemon_proc = support::daemon::Proc::new("disable_symlink_ssh_auth_sock.toml", true)
         .context("starting daemon proc")?;
+
+    let mut waiter = daemon_proc.events.take().unwrap().waiter([
+        "daemon-read-c2s-chunk",
+        "daemon-wrote-s2c-chunk",
+        "daemon-wrote-s2c-chunk",
+    ]);
 
     let fake_auth_sock_tgt = daemon_proc.tmp_dir.join("ssh-auth-sock-target.fake");
     fs::File::create(&fake_auth_sock_tgt)?;
@@ -111,6 +117,9 @@ fn config_disable_symlink_ssh_auth_sock() -> anyhow::Result<()> {
     let mut line_matcher = attach_proc.line_matcher()?;
 
     attach_proc.run_cmd("ls -l $SSH_AUTH_SOCK")?;
+    waiter.wait_event("daemon-read-c2s-chunk")?;
+    waiter.wait_event("daemon-wrote-s2c-chunk")?;
+    waiter.wait_event("daemon-wrote-s2c-chunk")?;
     line_matcher.match_re(r#".*No such file or directory$"#)?;
 
     Ok(())
@@ -356,6 +365,28 @@ fn busy() -> anyhow::Result<()> {
         .context("attaching from tty2")?;
     let mut line_matcher2 = tty2.stderr_line_matcher()?;
     line_matcher2.match_re("already has a terminal attached$")?;
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
+fn daemon_hangup() -> anyhow::Result<()> {
+    let mut daemon_proc =
+        support::daemon::Proc::new("norc.toml", false).context("starting daemon proc")?;
+    let mut attach_proc = daemon_proc
+        .attach("sh1", false, vec![])
+        .context("starting attach proc")?;
+
+    // make sure the shell is up and running
+    let mut line_matcher = attach_proc.line_matcher()?;
+    attach_proc.run_cmd("echo foo")?;
+    line_matcher.match_re("foo$")?;
+
+    daemon_proc.proc.kill()?;
+
+    let exit_status = attach_proc.proc.wait()?;
+    assert!(!exit_status.success());
 
     Ok(())
 }

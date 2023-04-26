@@ -38,6 +38,7 @@ impl Proc {
     }
 
     pub fn run_cmd(&mut self, cmd: &str) -> anyhow::Result<()> {
+        eprintln!("running cmd '{}'", cmd);
         let stdin = self.proc.stdin.as_mut().ok_or(anyhow!("missing stdin"))?;
 
         let full_cmd = format!("{}\n", cmd);

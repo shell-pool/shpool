@@ -135,21 +135,20 @@ Upload-Rate:                 5.41 MB/s
 Download-Size:               8.00 MB
 Download-Rate:               7.06 MB/s
 $ sshping -H -e '/path/to/shpool attach -f sshping' $REMOTE_HOST
-ssh-Login-Time:               6.07  s
-Minimum-Latency:              72.7 ms
-Median-Latency:               100.0 m
-Average-Latency:               100 ms
-Average-Deviation:            5.54 ms
-Maximum-Latency:               228 ms
+ssh-Login-Time:               5.17  s
+Minimum-Latency:              24.4 ms
+Median-Latency:               25.7 ms
+Average-Latency:              25.9 ms
+Average-Deviation:            1.19 ms
+Maximum-Latency:              50.8 ms
 Echo-Count:                  1.00 kB
 Upload-Size:                 8.00 MB
-Upload-Rate:                 5.32 MB/s
+Upload-Rate:                 5.48 MB/s
 Download-Size:               8.00 MB
-Download-Rate:               6.62 MB/s
+Download-Rate:               7.31 MB/s
 ```
 
-We've got some work to do, that's way more extra latency than we should be
-introducing.
+pretty good.
 
 ## Preserving Logs in Tests
 

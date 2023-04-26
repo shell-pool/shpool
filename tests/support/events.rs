@@ -115,6 +115,7 @@ enum WaiterEvent {
 
 impl EventWaiter {
     pub fn wait_event(&mut self, event: &str) -> anyhow::Result<()> {
+        eprintln!("waiting for event '{}'", event);
         match self.matched.recv()? {
             WaiterEvent::Event(e) => {
                 return if e == event {
@@ -134,6 +135,7 @@ impl EventWaiter {
     }
 
     pub fn wait_final_event(self, event: &str) -> anyhow::Result<Events> {
+        eprintln!("waiting for final event '{}'", event);
         match self.matched.recv()? {
             WaiterEvent::Event(e) => Err(anyhow!(
                 "Got non-fianl '{}' event, want final '{}'",
