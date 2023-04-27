@@ -1,0 +1,4 @@
+max_width = 79
+newline_style = "Unix"
+use_field_init_shorthand = true
+use_small_heuristics = "Max"

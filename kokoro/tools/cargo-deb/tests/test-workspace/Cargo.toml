@@ -1,0 +1,7 @@
+[workspace]
+members = ["test-ws1", "test-ws2"]
+
+[workspace.package]
+version = "1.0.0-ws"
+authors = ["ws"]
+description = "ws-test"

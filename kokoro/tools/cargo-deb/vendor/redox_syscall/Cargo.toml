@@ -1,0 +1,15 @@
+[dependencies.bitflags]
+version = "1.1.0"
+
+[lib]
+name = "syscall"
+
+[package]
+authors = ["Jeremy Soller <jackpot51@gmail.com>"]
+description = "A Rust library to access raw Redox system calls"
+documentation = "https://docs.rs/redox_syscall"
+edition = "2018"
+license = "MIT"
+name = "redox_syscall"
+repository = "https://gitlab.redox-os.org/redox-os/syscall"
+version = "0.2.16"

@@ -1,0 +1,42 @@
+[package]
+name = "example"
+version = "0.1.0"
+build = "build.rs"
+publish = false
+
+[dependencies]
+
+[package.metadata.deb]
+maintainer = "cargo-deb developers <cargo-deb@example.invalid>"
+copyright = "2017, cargo-deb developers."
+license-file = ["LICENSE", "2"]
+extended-description = "example project for cargo-deb"
+depends = "$auto"
+section = "utils"
+priority = "optional"
+assets = [
+    # binary
+    ["target/release/example", "usr/bin/", "755"],
+    # assets
+    ["assets/*", "var/lib/example", "644"],
+    ["target/release/assets/*", "var/lib/example", "644"],
+    ["3.txt", "var/lib/example/3.txt", "644"],
+]
+changelog = "changelog"
+default-features = false
+features = ["example_debian_build"]
+
+[package.metadata.deb.variants.debug]
+assets =  [
+    # binary
+    ["target/release/example", "usr/bin/", "755"],
+    # assets
+    ["assets/*", "var/lib/example", "644"],
+    ["target/release/assets/*", "var/lib/example", "644"],
+    ["4.txt", "var/lib/example/4.txt", "644"],
+]
+
+[features]
+default = ["example_non_debian_build"]
+example_non_debian_build = []
+example_debian_build = []

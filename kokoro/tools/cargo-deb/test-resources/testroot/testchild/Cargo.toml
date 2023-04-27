@@ -1,0 +1,10 @@
+[package]
+name = "test_child"
+version = "0.1.0"
+edition = "2021"
+description = "A test workspace member crate"
+license = "Some license"
+
+[package.metadata.deb]
+maintainer = "cargo-deb developers <cargo-deb@example.invalid>"
+copyright = "2017, cargo-deb developers."

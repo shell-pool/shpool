@@ -1,0 +1,17 @@
+[package]
+name = "TEST1_CRATE_NAME"
+version = { workspace = true }
+edition = "2021"
+authors = { workspace = true }
+description = { workspace = true }
+
+[package.metadata.deb]
+assets = [
+    ["target/release/renamed2", "usr/local/bin/", "777"],
+    ["target/release/TEST1_CRATE_NAME", "usr/local/bin/decoy", "777"]
+]
+systemd-units = { "enable" = false }
+
+[[bin]]
+path = "borked_file_not_exists.rs"
+name = "do_not_build_me"

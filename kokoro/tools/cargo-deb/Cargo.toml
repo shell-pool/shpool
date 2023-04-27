@@ -1,0 +1,88 @@
+[package]
+name = "cargo-deb"
+license = "MIT"
+authors = ["Kornel Lesiński <kornel@geekhood.net>", "Michael Aaron Murphy <mmstickman@gmail.com>"]
+categories = ["command-line-utilities", "development-tools::cargo-plugins", "development-tools::build-utils"]
+description = "Make Debian packages (.deb) easily with a Cargo subcommand"
+documentation = "https://docs.rs/cargo-deb"
+homepage = "https://github.com/kornelski/cargo-deb#readme"
+keywords = ["debian", "ubuntu", "deploy", "cargo-subcommand"]
+repository = "https://github.com/kornelski/cargo-deb"
+readme = "README.md"
+version = "1.42.2"
+edition = "2021"
+rust-version = "1.63"
+
+[package.metadata.deb]
+maintainer = "Kornel Lesiński <kornel@geekhood.net>"
+copyright = "2016-2021, Michael Aaron Murphy, Kornel Lesiński"
+license-file = ["LICENSE", "5"]
+extended-description = """\
+A simple subcommand for the Cargo package manager for \
+building Debian packages from Rust projects."""
+depends = "$auto"
+section = "utility"
+priority = "optional"
+assets = [
+    ["target/release/cargo-deb", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/cargo-deb/README", "644"],
+]
+
+[lib]
+name = "cargo_deb"
+path = "src/lib.rs"
+doc = true
+
+[[bin]]
+name = "cargo-deb"
+path = "src/main.rs"
+doc = false
+
+[dependencies]
+flate2 = "1.0.25"
+getopts = "0.2.21"
+md5 = "0.7.0"
+quick-error = "2.0.1"
+xz2 = { version = "0.1.7", optional = true }
+serde = { version = "1.0.152", features = ["derive"] }
+serde_json = "1.0.93"
+tar = "0.4.38"
+toml = "0.7.2"
+glob = "0.3.1"
+ar = "0.9.0"
+cargo_toml = "0.15.2"
+rayon = "1.6.1"
+regex = { version = "1.7.0", default-features = false, features = ["std"] }
+itertools = "0.10.5"
+num_cpus = { version = "1.15.0", optional = true }
+tempfile = "3.3.0"
+env_logger = "0.10.0"
+log = "0.4.17"
+crossbeam-channel = "0.5.6"
+
+[features]
+default = ["lzma"]
+lzma = ["dep:xz2", "dep:num_cpus"]
+static-lzma = ["lzma", "xz2?/static"]
+
+[profile.dev]
+debug = 1
+
+[profile.release]
+lto = true
+opt-level = 3
+debug = false
+
+[dev-dependencies]
+mockall = "0.11.3"
+rstest = "0.16.0"
+lazy_static = "1.4.0"
+
+[workspace]
+exclude = ["example"]
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[badges]
+maintenance = { status = "actively-developed" }
