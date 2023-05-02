@@ -2,16 +2,10 @@
 - There is a lot of heartbeat overhead. See if we can reduce that.
 - Implement spooling logic to handle subprocesses which generate
   a bunch of output after we have detached.
-- Fix echo bug in ssh plugin mode. For some reason the tty echo seems
-  to work differently for ssh plugin mode, so we see commands twice if
-  we enable echo for the pty as normal. Disabling pty echo
-  explicitly helps a bit, but we still get double newlines for some reason.
 - Add a keybinding for detaching. Make it simpler than tmux or screen since
   this will be the only keybinding. Make it configurable in the toml file
   with at least enough flexibility to allow tmux users to use their normal
   "C-a d" keybinding.
-- Shpool introduces more lag than it should http://screencast/cast/NjU4Nzk0MTA3MDU2OTQ3MnxkYzhmZjhhZS00Nw
-- I should set up CI/CD (can probably let Nicolas figure it out then copy him)
 - Exit with a success error code when a session gets manually detached (either
   via shpool detach or with the upcoming detach keybinding).
 - Allow users to specify a command to run instead of their default shell.

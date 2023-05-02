@@ -5,16 +5,10 @@ use std::{
         Read,
         Write,
     },
-    os::unix::{
-        io::AsRawFd,
-        net::UnixStream,
-    },
+    os::unix::net::UnixStream,
     path::Path,
-    sync::atomic::{
-        AtomicBool,
-        Ordering,
-    },
     thread,
+    time,
 };
 
 use anyhow::{
@@ -32,6 +26,7 @@ use serde_derive::{
 };
 use tracing::{
     debug,
+    warn,
     info,
     trace,
 };
@@ -40,6 +35,9 @@ use super::{
     consts,
     tty,
 };
+
+const JOIN_POLL_DUR: time::Duration = time::Duration::from_millis(100);
+const JOIN_HANGUP_DUR: time::Duration = time::Duration::from_millis(300);
 
 /// ConnectHeader is the blob of metadata that a client transmits when it
 /// first connections. It uses an enum to allow different connection types
@@ -262,59 +260,13 @@ pub struct Chunk<'data> {
 }
 
 impl<'data> Chunk<'data> {
-    pub fn write_to<W>(&self, w: &mut W, stop: &AtomicBool) -> io::Result<()>
+    pub fn write_to<W>(&self, w: &mut W) -> io::Result<()>
     where
         W: std::io::Write,
     {
-        loop {
-            if stop.load(Ordering::Relaxed) {
-                return Ok(());
-            }
-
-            if let Err(e) = w.write_u8(self.kind as u8) {
-                if e.kind() == std::io::ErrorKind::WouldBlock {
-                    trace!("chunk: writing tag: WouldBlock");
-                    thread::sleep(consts::PIPE_POLL_DURATION);
-                    continue;
-                }
-                return Err(e);
-            }
-            break;
-        }
-
-        loop {
-            if stop.load(Ordering::Relaxed) {
-                return Ok(());
-            }
-
-            if let Err(e) = w.write_u32::<LittleEndian>(self.buf.len() as u32) {
-                if e.kind() == std::io::ErrorKind::WouldBlock {
-                    trace!("chunk: writing length prefix: WouldBlock");
-                    thread::sleep(consts::PIPE_POLL_DURATION);
-                    continue;
-                }
-                return Err(e);
-            }
-            break;
-        }
-
-        let mut to_write = &self.buf[..];
-        while to_write.len() > 0 {
-            if stop.load(Ordering::Relaxed) {
-                return Ok(());
-            }
-
-            let nwritten = match w.write(&to_write) {
-                Ok(n) => n,
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    trace!("chunk: writing buffer: WouldBlock");
-                    thread::sleep(consts::PIPE_POLL_DURATION);
-                    continue;
-                },
-                Err(e) => return Err(e),
-            };
-            to_write = &to_write[nwritten..];
-        }
+        w.write_u8(self.kind as u8)?;
+        w.write_u32::<LittleEndian>(self.buf.len() as u32)?;
+        w.write_all(&self.buf[..])?;
 
         Ok(())
     }
@@ -373,8 +325,6 @@ impl Client {
     /// socket and back again. It is the main loop of
     /// `shpool attach`.
     pub fn pipe_bytes(self) -> anyhow::Result<()> {
-        let stop = AtomicBool::new(false);
-
         let mut read_client_stream = self.stream.try_clone().context("cloning read stream")?;
         let mut write_client_stream = self.stream.try_clone().context("cloning read stream")?;
 
@@ -386,52 +336,16 @@ impl Client {
                 let mut stdin = std::io::stdin().lock();
                 let mut buf = vec![0; consts::BUF_SIZE];
 
-                nix::fcntl::fcntl(
-                    stdin.as_raw_fd(),
-                    nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
-                )
-                .context("setting stdin nonblocking")?;
-
                 loop {
-                    if stop.load(Ordering::Relaxed) {
-                        info!("pipe_bytes: stdin->sock: recvd stop msg (1)");
-                        return Ok(());
-                    }
-
-                    let nread = match stdin.read(&mut buf) {
-                        Ok(n) => n,
-                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                            trace!("pipe_bytes: stdin->sock: read: WouldBlock");
-                            thread::sleep(consts::PIPE_POLL_DURATION);
-                            continue;
-                        },
-                        Err(e) => return Err(e).context("reading stdin from user"),
-                    };
-
+                    let nread = stdin.read(&mut buf).context("reading stdin from user")?;
                     debug!("pipe_bytes: stdin->sock: read {} bytes", nread);
 
-                    let mut to_write = &buf[..nread];
+                    let to_write = &buf[..nread];
                     debug!(
                         "pipe_bytes: stdin->sock: created to_write='{}'",
                         String::from_utf8_lossy(to_write)
                     );
-
-                    while to_write.len() > 0 {
-                        if stop.load(Ordering::Relaxed) {
-                            info!("pipe_bytes: stdin->sock: recvd stop msg (2)");
-                            return Ok(());
-                        }
-
-                        let nwritten = write_client_stream
-                            .write(to_write)
-                            .context("writing chunk to server")?;
-                        to_write = &to_write[nwritten..];
-                        trace!(
-                            "pipe_bytes: stdin->sock: to_write={}",
-                            String::from_utf8_lossy(to_write)
-                        );
-                    }
-
+                    write_client_stream.write_all(to_write)?;
                     write_client_stream.flush().context("flushing client")?;
                 }
             });
@@ -444,11 +358,6 @@ impl Client {
                 let mut buf = vec![0; consts::BUF_SIZE];
 
                 loop {
-                    if stop.load(Ordering::Relaxed) {
-                        info!("pipe_bytes: sock->stdout: recvd stop msg (1)");
-                        return Ok(());
-                    }
-
                     let chunk = Chunk::read_into(&mut read_client_stream, &mut buf)
                         .context("reading output chunk from daemon")?;
 
@@ -461,39 +370,12 @@ impl Client {
                         );
                     }
 
-                    let mut to_write = &chunk.buf[..];
                     match chunk.kind {
                         ChunkKind::Heartbeat => {
                             trace!("pipe_bytes: got heartbeat chunk");
                         },
                         ChunkKind::Data => {
-                            while to_write.len() > 0 {
-                                if stop.load(Ordering::Relaxed) {
-                                    info!("pipe_bytes: sock->stdout: recvd stop msg (2)");
-                                    return Ok(());
-                                }
-
-                                debug!("pipe_bytes: sock->stdout: about to select on stdout");
-                                let mut stdout_set = nix::sys::select::FdSet::new();
-                                stdout_set.insert(stdout.as_raw_fd());
-                                let mut poll_dur = consts::PIPE_POLL_DURATION_TIMEVAL.clone();
-                                let nready = nix::sys::select::select(
-                                    None,
-                                    None,
-                                    Some(&mut stdout_set),
-                                    None,
-                                    Some(&mut poll_dur),
-                                )
-                                .context("selecting on stdout")?;
-                                if nready == 0 || !stdout_set.contains(stdout.as_raw_fd()) {
-                                    continue;
-                                }
-
-                                let nwritten =
-                                    stdout.write(to_write).context("writing chunk to stdout")?;
-                                debug!("pipe_bytes: sock->stdout: wrote {} stdout bytes", nwritten);
-                                to_write = &to_write[nwritten..];
-                            }
+                            stdout.write_all(&chunk.buf[..]).context("writing chunk to stdout")?;
 
                             if let Err(e) = stdout.flush() {
                                 if e.kind() == std::io::ErrorKind::WouldBlock {
@@ -512,12 +394,40 @@ impl Client {
             });
 
             loop {
-                if stdin_to_sock_h.is_finished() || sock_to_stdout_h.is_finished() {
-                    stop.store(true, Ordering::Relaxed);
+                let mut nfinished_threads = 0;
+                if stdin_to_sock_h.is_finished() {
+                    nfinished_threads += 1;
+                }
+                if sock_to_stdout_h.is_finished() {
+                    nfinished_threads += 1;
+                }
+                if nfinished_threads > 0 {
+                    if nfinished_threads < 2 {
+                        thread::sleep(JOIN_HANGUP_DUR);
+                        nfinished_threads = 0;
+                        if stdin_to_sock_h.is_finished() {
+                            nfinished_threads += 1;
+                        }
+                        if sock_to_stdout_h.is_finished() {
+                            nfinished_threads += 1;
+                        }
+                        if nfinished_threads < 2 {
+                            // If one of the worker threads is done and the
+                            // other is not exiting, we are likely blocked on
+                            // some IO. Fortunately, since there isn't much else
+                            // going on in the client process and the thing to do
+                            // is to shut down at this point, we can resolve this
+                            // by just hard-exiting the whole process. This allows
+                            // us to use simple blocking IO.
+                            warn!("exiting due to a stuck IO thread");
+                            std::process::exit(1);
+                        }
+                    }
                     break;
                 }
-                thread::sleep(consts::JOIN_POLL_DURATION);
+                thread::sleep(JOIN_POLL_DUR);
             }
+
             match stdin_to_sock_h.join() {
                 Ok(v) => v?,
                 Err(panic_err) => std::panic::resume_unwind(panic_err),
