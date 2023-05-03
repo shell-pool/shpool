@@ -291,10 +291,15 @@ impl SessionInner {
                     continue;
                 }
                 test_hooks::emit("daemon-read-c2s-chunk");
+                trace!(
+                    "read client len={}: '{}'",
+                    len,
+                    String::from_utf8_lossy(&buf[..len]),
+                );
 
-                debug!("read {} bytes", len);
-
-                master_writer.write_all(&buf[0..len]).context("writing client chunk")?;
+                master_writer
+                    .write_all(&buf[0..len])
+                    .context("writing client chunk")?;
 
                 // TODO(ethan): perform keybinding scanning in a background
                 //              thread
@@ -365,10 +370,10 @@ impl SessionInner {
                     kind: protocol::ChunkKind::Data,
                     buf: &buf[..len],
                 };
-                debug!(
+                trace!(
                     "read pty master len={} '{}'",
                     len,
-                    String::from_utf8_lossy(chunk.buf)
+                    String::from_utf8_lossy(chunk.buf),
                 );
                 {
                     let mut s = client_stream_m.lock().unwrap();
@@ -487,7 +492,16 @@ impl SessionInner {
                 let resp = match req {
                     protocol::SessionMessageRequestPayload::Resize(req) => {
                         debug!("handling resize");
-                        protocol::SessionMessageReply::Resize(self.handle_resize_rpc(req)?)
+                        protocol::SessionMessageReply::Resize(match self.handle_resize_rpc(req) {
+                            Ok(_) => protocol::ResizeReply::Ok,
+                            Err(err) => {
+                                // only log about resize errors since they seem to happen in
+                                // headless test environments, but we don't actually care in
+                                // such situations
+                                error!("resize failed: {:?}", err);
+                                protocol::ResizeReply::Failed
+                            },
+                        })
                     },
                     protocol::SessionMessageRequestPayload::Detach => {
                         debug!("handling detach");

@@ -26,9 +26,9 @@ use serde_derive::{
 };
 use tracing::{
     debug,
-    warn,
     info,
     trace,
+    warn,
 };
 
 use super::{
@@ -154,6 +154,7 @@ pub enum SessionMessageDetachReply {
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub enum ResizeReply {
     Ok,
+    Failed,
 }
 
 /// AttachHeader is the blob of metadata that a client transmits when it
@@ -375,7 +376,9 @@ impl Client {
                             trace!("pipe_bytes: got heartbeat chunk");
                         },
                         ChunkKind::Data => {
-                            stdout.write_all(&chunk.buf[..]).context("writing chunk to stdout")?;
+                            stdout
+                                .write_all(&chunk.buf[..])
+                                .context("writing chunk to stdout")?;
 
                             if let Err(e) = stdout.flush() {
                                 if e.kind() == std::io::ErrorKind::WouldBlock {
@@ -419,7 +422,8 @@ impl Client {
                             // is to shut down at this point, we can resolve this
                             // by just hard-exiting the whole process. This allows
                             // us to use simple blocking IO.
-                            warn!("exiting due to a stuck IO thread");
+                            warn!("exiting due to a stuck IO thread stdin_to_sock_finished={} sock_to_stdout_finished={}",
+                                  stdin_to_sock_h.is_finished(), sock_to_stdout_h.is_finished());
                             std::process::exit(1);
                         }
                     }

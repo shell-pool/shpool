@@ -1,0 +1,7 @@
+#
+# Bogus file. Normally, debian/rules is a make script for building the deb
+# file, but we use kokoro/rodete/benz-build.sh to build the deb instead.
+#
+# Benz checks for the presence of this file though, so we need to have
+# something here.
+#
