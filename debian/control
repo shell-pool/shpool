@@ -8,7 +8,6 @@ Homepage: http://go/shpool-repo
 Package: shpool
 Architecture: amd64
 Description: think tmux, then aim lower
-
 shpool is a shell pooler, which allows for persistant named
 shell session, which is useful when you are connecting to
 a remote server over a connection which might drop. It is
@@ -22,4 +21,3 @@ In particular, while tmux and GNU screen break scrollback
 and copy-paste, with shpool they both just work. Additionally,
 shpool is much simpler than a full terminal multiplexer, and
 therefore easier to learn.
-
