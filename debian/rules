@@ -13,9 +13,5 @@ export DH_VERBOSE = 1
 	dh $@
 
 override_dh_auto_build:
+	./deb-cleanup-vendor.py
 	cargo build --release
-
-override_dh_auto_install:
-	mkdir -p debian/shpool/usr/bin
-	cp target/release/shpool debian/shpool/usr/bin/shpool
-	install -m0755 -d debian/shpool

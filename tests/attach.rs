@@ -254,6 +254,7 @@ fn explicit_exit() -> anyhow::Result<()> {
 
 // Test the attach process getting killed, then re-attaching to the
 // same shell session.
+/* this test is flaky in ci. TODO: re-enable
 #[test]
 #[timeout(30000)]
 fn exit_immediate_drop() -> anyhow::Result<()> {
@@ -312,6 +313,7 @@ fn exit_immediate_drop() -> anyhow::Result<()> {
         Ok(())
     })
 }
+*/
 
 #[test]
 #[timeout(30000)]

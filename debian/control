@@ -1,9 +1,9 @@
 Source: shpool
 Section: unknown
 Priority: optional
-Maintainer: Ethan Pailes <pailes@debian.org>
+Maintainer: Ethan Pailes <pailes@google.com>
 Standards-Version: 4.0.0
-Build-Depends: cargo (>= 1.63.0), rustc (>= 1.63.0), debhelper-compat (= 15)
+Build-Depends: cargo (>= 0.63.0), rustc (>= 1.63.0), python3, debhelper-compat (= 13)
 Vcs-browser: http://go/shpool-repo
 Homepage: http://go/shpool-repo
 
