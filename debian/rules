@@ -1,7 +1,21 @@
+#!/usr/bin/make -f
 #
-# Bogus file. Normally, debian/rules is a make script for building the deb
-# file, but we use kokoro/rodete/benz-build.sh to build the deb instead.
+# You can test this locally with
+# ```
+# dpkg-buildpackage --sanitize-env -us -uc -b -d -rfakeroot
+# ```
 #
-# Benz checks for the presence of this file though, so we need to have
-# something here.
-#
+# `dh clean` will remove any dangling files afterwards
+
+export DH_VERBOSE = 1
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	cargo build --release
+
+override_dh_auto_install:
+	mkdir -p debian/shpool/usr/bin
+	cp target/release/shpool debian/shpool/usr/bin/shpool
+	install -m0755 -d debian/shpool

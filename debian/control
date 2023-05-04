@@ -3,10 +3,13 @@ Section: unknown
 Priority: optional
 Maintainer: Ethan Pailes <pailes@debian.org>
 Standards-Version: 4.0.0
+Build-Depends: cargo (>= 1.63.0), rustc (>= 1.63.0), debhelper-compat (= 15)
+Vcs-browser: http://go/shpool-repo
 Homepage: http://go/shpool-repo
 
 Package: shpool
-Architecture: amd64
+Architecture: any
+Depends: ${misc:Depends}, ${shlibs:Depends}
 Description: think tmux... then aim lower
  shpool is a shell pooler, which allows for persistant named
  shell session. This is useful when you are connecting to
