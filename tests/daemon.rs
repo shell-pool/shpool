@@ -140,7 +140,8 @@ fn systemd_activation() -> anyhow::Result<()> {
 
                 // set the LISTEN_PID environment variable without
                 // allocating
-                write!(&mut pid_buf, "{}", std::process::id()).expect("to be able to format the pid");
+                write!(&mut pid_buf, "{}", std::process::id())
+                    .expect("to be able to format the pid");
                 cmd.env("LISTEN_PID", pid_buf);
 
                 let err = cmd.exec();
@@ -162,7 +163,8 @@ fn systemd_activation() -> anyhow::Result<()> {
         nix::sys::wait::waitpid(child_pid, None).context("reaping daemon")?;
 
         let mut stderr_buf: Vec<u8> = vec![0; 1024 * 8];
-        let len = nix::unistd::read(parent_stderr, &mut stderr_buf[..]).context("reading stderr")?;
+        let len =
+            nix::unistd::read(parent_stderr, &mut stderr_buf[..]).context("reading stderr")?;
         let stderr = String::from_utf8_lossy(&stderr_buf[..len]);
         assert!(stderr.contains("using systemd activation socket"));
 

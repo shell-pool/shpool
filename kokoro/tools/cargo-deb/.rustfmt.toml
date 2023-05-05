@@ -1,2 +1,0 @@
-max_width = 140
-ignore = ["."] # rustfmt does a poor job, and I don't want it ruining well-formatted code

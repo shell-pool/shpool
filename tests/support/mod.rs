@@ -25,8 +25,7 @@ pub mod daemon;
 pub mod events;
 pub mod line_matcher;
 
-pub fn dump_err(f: fn() -> anyhow::Result<()>) -> anyhow::Result<()>
-{
+pub fn dump_err(f: fn() -> anyhow::Result<()>) -> anyhow::Result<()> {
     let res = f();
     if let Err(e) = res.as_ref() {
         eprintln!("top level error: {:?}", e);

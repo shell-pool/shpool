@@ -91,14 +91,6 @@ you can do so with `cargo install cargo-vendor-filterer`. Then run the command
 ./vendor.sh
 ```
 
-you generally should not need to regenerate the vendor directory for the
-`cargo-deb` tool, which is checked in under `kokoro/tools`, but if you do
-want to you can do so with
-
-```
-SHPOOL_REGEN_CARGO_DEB_VENDOR=true ./vendor.sh
-```
-
 ## Formatting
 
 Run `cargo +nightly fmt` to ensure that the code matches the expected

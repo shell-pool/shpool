@@ -1,5 +1,0 @@
-example (0.1.0) experimental; urgency=low
-
-  * Initial release
-
- -- cargo-deb developers <dev@example.com>  Fri, 5 Jan 2018 17:00:00 +0800

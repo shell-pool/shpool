@@ -46,7 +46,13 @@ fn happy_path() -> anyhow::Result<()> {
 fn symlink_ssh_auth_sock() -> anyhow::Result<()> {
     support::dump_err(|| {
         let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", false).context("starting daemon proc")?;
+            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+
+        let mut waiter = daemon_proc.events.take().unwrap().waiter([
+            "daemon-read-c2s-chunk",
+            "daemon-wrote-s2c-chunk",
+            "daemon-wrote-s2c-chunk",
+        ]);
 
         let fake_auth_sock_tgt = daemon_proc.tmp_dir.join("ssh-auth-sock-target.fake");
         fs::File::create(&fake_auth_sock_tgt)?;
@@ -65,6 +71,9 @@ fn symlink_ssh_auth_sock() -> anyhow::Result<()> {
         let mut line_matcher = attach_proc.line_matcher()?;
 
         attach_proc.run_cmd("ls -l $SSH_AUTH_SOCK")?;
+        waiter.wait_event("daemon-read-c2s-chunk")?;
+        waiter.wait_event("daemon-wrote-s2c-chunk")?;
+        waiter.wait_event("daemon-wrote-s2c-chunk")?;
         line_matcher.match_re(r#".*sh1/ssh-auth-sock.socket ->.*ssh-auth-sock-target.fake$"#)?;
 
         Ok(())
@@ -98,8 +107,9 @@ fn missing_ssh_auth_sock() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn config_disable_symlink_ssh_auth_sock() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc = support::daemon::Proc::new("disable_symlink_ssh_auth_sock.toml", true)
-            .context("starting daemon proc")?;
+        let mut daemon_proc =
+            support::daemon::Proc::new("disable_symlink_ssh_auth_sock.toml", true)
+                .context("starting daemon proc")?;
 
         let mut waiter = daemon_proc.events.take().unwrap().waiter([
             "daemon-read-c2s-chunk",
@@ -254,7 +264,7 @@ fn explicit_exit() -> anyhow::Result<()> {
 
 // Test the attach process getting killed, then re-attaching to the
 // same shell session.
-/* this test is flaky in ci. TODO: re-enable
+#[ignore] // this test is flaky in ci. TODO: re-enable
 #[test]
 #[timeout(30000)]
 fn exit_immediate_drop() -> anyhow::Result<()> {
@@ -313,7 +323,6 @@ fn exit_immediate_drop() -> anyhow::Result<()> {
         Ok(())
     })
 }
-*/
 
 #[test]
 #[timeout(30000)]
@@ -417,12 +426,13 @@ fn daemon_hangup() -> anyhow::Result<()> {
     })
 }
 
-/* flaky. TODO: fix
+#[ignore] // TODO: re-enable, this test if flaky
 #[test]
 fn up_arrow_no_crash() -> anyhow::Result<()> {
-    let mut daemon_proc = support::daemon::Proc::new("norc.toml")
-        .context("starting daemon proc")?;
-    let mut attach_proc = daemon_proc.attach("sh1")
+    let mut daemon_proc =
+        support::daemon::Proc::new("norc.toml", false).context("starting daemon proc")?;
+    let mut attach_proc = daemon_proc
+        .attach("sh1", false, vec![])
         .context("starting attach proc")?;
 
     let mut line_matcher = attach_proc.line_matcher()?;
@@ -434,4 +444,3 @@ fn up_arrow_no_crash() -> anyhow::Result<()> {
 
     Ok(())
 }
-*/
