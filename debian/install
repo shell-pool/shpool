@@ -1,1 +1,3 @@
 target/release/shpool usr/bin
+systemd/shpool.service usr/lib/systemd/user
+systemd/shpool.socket usr/lib/systemd/user

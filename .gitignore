@@ -5,3 +5,5 @@ debian/debhelper-build-stamp
 debian/files
 debian/shpool.substvars
 debian/shpool
+debian/shpool.postinst.debhelper
+debian/shpool.postrm.debhelper
