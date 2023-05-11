@@ -43,7 +43,7 @@ pub struct Config {
     pub ssh_handshake_timeout_ms: Option<u64>,
 
     /// The user supplied keybindings.
-    pub keybindings: Option<Vec<Keybinding>>,
+    pub keybinding: Option<Vec<Keybinding>>,
 }
 
 #[derive(Deserialize, Debug, Clone)]

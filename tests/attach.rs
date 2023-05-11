@@ -47,12 +47,11 @@ fn symlink_ssh_auth_sock() -> anyhow::Result<()> {
     support::dump_err(|| {
         let mut daemon_proc =
             support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
-
-        let mut waiter = daemon_proc.events.take().unwrap().waiter([
-            "daemon-read-c2s-chunk",
-            "daemon-wrote-s2c-chunk",
-            "daemon-wrote-s2c-chunk",
-        ]);
+        let mut waiter = daemon_proc
+            .events
+            .take()
+            .unwrap()
+            .waiter(["daemon-wrote-s2c-chunk"]);
 
         let fake_auth_sock_tgt = daemon_proc.tmp_dir.join("ssh-auth-sock-target.fake");
         fs::File::create(&fake_auth_sock_tgt)?;
@@ -70,10 +69,8 @@ fn symlink_ssh_auth_sock() -> anyhow::Result<()> {
 
         let mut line_matcher = attach_proc.line_matcher()?;
 
+        waiter.wait_event("daemon-wrote-s2c-chunk")?; // resize prompt redraw
         attach_proc.run_cmd("ls -l $SSH_AUTH_SOCK")?;
-        waiter.wait_event("daemon-read-c2s-chunk")?;
-        waiter.wait_event("daemon-wrote-s2c-chunk")?;
-        waiter.wait_event("daemon-wrote-s2c-chunk")?;
         line_matcher.match_re(r#".*sh1/ssh-auth-sock.socket ->.*ssh-auth-sock-target.fake$"#)?;
 
         Ok(())
@@ -85,7 +82,12 @@ fn symlink_ssh_auth_sock() -> anyhow::Result<()> {
 fn missing_ssh_auth_sock() -> anyhow::Result<()> {
     support::dump_err(|| {
         let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", false).context("starting daemon proc")?;
+            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut waiter = daemon_proc
+            .events
+            .take()
+            .unwrap()
+            .waiter(["daemon-wrote-s2c-chunk"]);
 
         let fake_auth_sock_tgt = daemon_proc.tmp_dir.join("ssh-auth-sock-target.fake");
         fs::File::create(&fake_auth_sock_tgt)?;
@@ -96,6 +98,7 @@ fn missing_ssh_auth_sock() -> anyhow::Result<()> {
 
         let mut line_matcher = attach_proc.line_matcher()?;
 
+        waiter.wait_event("daemon-wrote-s2c-chunk")?; // resize prompt re-draw
         attach_proc.run_cmd("ls -l $SSH_AUTH_SOCK")?;
         line_matcher.match_re(r#".*No such file or directory$"#)?;
 
@@ -110,12 +113,11 @@ fn config_disable_symlink_ssh_auth_sock() -> anyhow::Result<()> {
         let mut daemon_proc =
             support::daemon::Proc::new("disable_symlink_ssh_auth_sock.toml", true)
                 .context("starting daemon proc")?;
-
-        let mut waiter = daemon_proc.events.take().unwrap().waiter([
-            "daemon-read-c2s-chunk",
-            "daemon-wrote-s2c-chunk",
-            "daemon-wrote-s2c-chunk",
-        ]);
+        let mut waiter = daemon_proc
+            .events
+            .take()
+            .unwrap()
+            .waiter(["daemon-wrote-s2c-chunk"]);
 
         let fake_auth_sock_tgt = daemon_proc.tmp_dir.join("ssh-auth-sock-target.fake");
         fs::File::create(&fake_auth_sock_tgt)?;
@@ -133,10 +135,8 @@ fn config_disable_symlink_ssh_auth_sock() -> anyhow::Result<()> {
 
         let mut line_matcher = attach_proc.line_matcher()?;
 
+        waiter.wait_event("daemon-wrote-s2c-chunk")?; // resize prompt re-draw
         attach_proc.run_cmd("ls -l $SSH_AUTH_SOCK")?;
-        waiter.wait_event("daemon-read-c2s-chunk")?;
-        waiter.wait_event("daemon-wrote-s2c-chunk")?;
-        waiter.wait_event("daemon-wrote-s2c-chunk")?;
         line_matcher.match_re(r#".*No such file or directory$"#)?;
 
         Ok(())
@@ -421,6 +421,82 @@ fn daemon_hangup() -> anyhow::Result<()> {
 
         let exit_status = attach_proc.proc.wait()?;
         assert!(!exit_status.success());
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
+fn default_keybinding_detach() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc =
+            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut waiter = daemon_proc
+            .events
+            .take()
+            .unwrap()
+            .waiter(["daemon-bidi-stream-done"]);
+
+        let mut a1 = daemon_proc
+            .attach("sess", false, vec![])
+            .context("starting attach proc")?;
+        let mut lm1 = a1.line_matcher()?;
+
+        a1.run_cmd("export MYVAR=someval")?;
+        a1.run_cmd("echo $MYVAR")?;
+        lm1.match_re("someval$")?;
+
+        a1.run_raw_cmd(vec![0, 17])?; // Ctrl-Space Ctrl-q
+        a1.proc.wait()?;
+
+        waiter.wait_event("daemon-bidi-stream-done")?;
+
+        let mut a2 = daemon_proc
+            .attach("sess", false, vec![])
+            .context("starting attach proc 2")?;
+        let mut lm2 = a2.line_matcher()?;
+
+        a2.run_cmd("echo $MYVAR")?;
+        lm2.match_re("someval$")?;
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
+fn custom_keybinding_detach() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc = support::daemon::Proc::new("custom_detach_keybinding.toml", true)
+            .context("starting daemon proc")?;
+        let mut waiter = daemon_proc
+            .events
+            .take()
+            .unwrap()
+            .waiter(["daemon-bidi-stream-done"]);
+
+        let mut a1 = daemon_proc
+            .attach("sess", false, vec![])
+            .context("starting attach proc")?;
+        let mut lm1 = a1.line_matcher()?;
+
+        a1.run_cmd("export MYVAR=someval")?;
+        a1.run_cmd("echo $MYVAR")?;
+        lm1.match_re("someval$")?;
+
+        a1.run_raw_cmd(vec![22, 23, 7])?; // Ctrl-v Ctrl-w Ctrl-g
+        a1.proc.wait()?;
+
+        waiter.wait_event("daemon-bidi-stream-done")?;
+
+        let mut a2 = daemon_proc
+            .attach("sess", false, vec![])
+            .context("starting attach proc 2")?;
+        let mut lm2 = a2.line_matcher()?;
+
+        a2.run_cmd("echo $MYVAR")?;
+        lm2.match_re("someval$")?;
 
         Ok(())
     })

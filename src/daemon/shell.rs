@@ -20,6 +20,7 @@ use std::{
     },
     thread,
     time,
+    // sync,
 };
 
 use anyhow::{
@@ -56,8 +57,7 @@ const SESSION_MESSAGE_TIMEOUT: time::Duration = time::Duration::from_secs(10);
 #[derive(Debug)]
 pub struct Session {
     pub started_at: time::SystemTime,
-    pub rpc_in: crossbeam_channel::Sender<protocol::SessionMessageRequestPayload>,
-    pub rpc_out: crossbeam_channel::Receiver<protocol::SessionMessageReply>,
+    pub caller: Arc<Mutex<SessionCaller>>,
     /// Mutable state with the lock held by the servicing handle_attach thread
     /// while a tty is attached to the session. Probing the mutex can be used
     /// to determine if someone is currently attached to the session.
@@ -81,13 +81,8 @@ impl Session {
             },
         }
 
-        self.rpc_in
-            .send_timeout(arg, SESSION_MESSAGE_TIMEOUT)
-            .context("sending session message")?;
-        Ok(self
-            .rpc_out
-            .recv_timeout(SESSION_MESSAGE_TIMEOUT)
-            .context("receiving session message reply")?)
+        let caller = self.caller.lock().unwrap();
+        caller.call(arg)
     }
 }
 
@@ -96,12 +91,14 @@ impl Session {
 #[derive(Debug)]
 pub struct SessionInner {
     pub name: String, // to improve logging
+    pub caller: Arc<Mutex<SessionCaller>>,
     pub rpc_in: crossbeam_channel::Receiver<protocol::SessionMessageRequestPayload>,
     pub rpc_out: crossbeam_channel::Sender<protocol::SessionMessageReply>,
     pub child_exited: crossbeam_channel::Receiver<()>,
     pub pty_master: pty::fork::Fork,
     pub client_stream: Option<UnixStream>,
     pub config: config::Config,
+    // pub outer: sync::Weak<Session>,
 }
 
 impl SessionInner {
@@ -134,6 +131,7 @@ impl SessionInner {
     #[instrument(skip_all, fields(s = self.name))]
     pub fn bidi_stream(
         &mut self,
+        // outer_session: &Session,
         spawned_handlers: crossbeam_channel::Sender<()>,
     ) -> anyhow::Result<bool> {
         test_hooks::emit("daemon-bidi-stream-enter");
@@ -195,8 +193,7 @@ impl SessionInner {
                 let c_done = child_done.load(Ordering::Acquire);
                 if client_to_shell_h.is_finished() || shell_to_client_h.is_finished()
                     || heartbeat_h.is_finished() || supervisor_h.is_finished() || rpc_h.is_finished() || c_done {
-                    debug!("s({}): bidi_stream: signaling for threads to stop: client_to_shell_finished={} shell_to_client_finished={} heartbeat_finished={} supervisor_finished={} rpc_finished={} child_done={}",
-                        self.name,
+                    debug!("signaling for threads to stop: client_to_shell_finished={} shell_to_client_finished={} heartbeat_finished={} supervisor_finished={} rpc_finished={} child_done={}",
                         client_to_shell_h.is_finished(),
                         shell_to_client_h.is_finished(),
                         heartbeat_h.is_finished(),
@@ -210,22 +207,25 @@ impl SessionInner {
                 }
                 thread::sleep(consts::JOIN_POLL_DURATION);
             }
-            debug!("s({}): bidi_stream: joining client_to_shell_h", self.name);
+            debug!("joining client_to_shell_h");
             match client_to_shell_h.join() {
                 Ok(v) => v.context("joining client_to_shell_h")?,
-                Err(panic_err) => std::panic::resume_unwind(panic_err),
+                Err(panic_err) => {
+                    debug!("client_to_shell panic_err = {:?}", panic_err);
+                    std::panic::resume_unwind(panic_err)
+                },
             }
-            debug!("s({}): bidi_stream: joining shell_to_client_h", self.name);
+            debug!("joining shell_to_client_h");
             match shell_to_client_h.join() {
                 Ok(v) => v.context("joining shell_to_client_h")?,
                 Err(panic_err) => std::panic::resume_unwind(panic_err),
             }
-            debug!("s({}): bidi_stream: joining heartbeat_h", self.name);
+            debug!("joining heartbeat_h");
             match heartbeat_h.join() {
                 Ok(v) => v.context("joining heartbeat_h")?,
                 Err(panic_err) => std::panic::resume_unwind(panic_err),
             }
-            debug!("s({}): bidi_stream: joining supervisor_h", self.name);
+            debug!("joining supervisor_h");
             match supervisor_h.join() {
                 Ok(v) => v.context("joining supervisor_h")?,
                 Err(panic_err) => std::panic::resume_unwind(panic_err),
@@ -241,7 +241,7 @@ impl SessionInner {
                 .context("shutting down client stream")?;
         }
 
-        info!("s({}): bidi_stream: done child_done={}", self.name, c_done);
+        info!("bidi_stream: done child_done={}", c_done);
         Ok(c_done)
     }
 
@@ -253,10 +253,13 @@ impl SessionInner {
         pty_master: &'scope pty::fork::Master,
         reader_client_stream: &'scope mut UnixStream,
     ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
-        let empty_bindings = vec![];
+        let empty_bindings = vec![config::Keybinding {
+            binding: String::from("Ctrl-Space Ctrl-q"),
+            action: keybindings::Action::Detach,
+        }];
         let bindings = keybindings::Bindings::new(
             self.config
-                .keybindings
+                .keybinding
                 .as_ref()
                 .unwrap_or(&empty_bindings)
                 .iter()
@@ -269,6 +272,8 @@ impl SessionInner {
 
             let mut master_writer = pty_master.clone();
 
+            let mut snip_sections = vec![]; // (<len>, <end offset>)
+            let mut keep_sections = vec![]; // (<start offset>, <end offset>)
             let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
 
             loop {
@@ -284,7 +289,7 @@ impl SessionInner {
                 //
                 // Also, note that we don't access through the mutex because reads
                 // don't need to be excluded from trampling on writes.
-                let len = reader_client_stream
+                let mut len = reader_client_stream
                     .read(&mut buf)
                     .context("reading client chunk")?;
                 if len == 0 {
@@ -297,17 +302,26 @@ impl SessionInner {
                     String::from_utf8_lossy(&buf[..len]),
                 );
 
+                // We might be able to gain some perf by doing this scanning in
+                // a background thread (though maybe not given the need to copy
+                // the data), but just doing it inline doesn't seem have have
+                // a major perf impact, and this way is simpler.
+                snip_sections.clear();
+                for (i, byte) in buf[0..len].into_iter().enumerate() {
+                    use keybindings::Action::*;
+                    if let Some((action, binding_len)) = bindings.transition(*byte) {
+                        snip_sections.push((binding_len, i));
+                        info!("keybinding for {:?} fired", action);
+                        match action {
+                            Detach => self.action_detach()?,
+                        }
+                    }
+                }
+                len = snip_buf(&mut buf[..], len, &snip_sections[..], &mut keep_sections);
+
                 master_writer
                     .write_all(&buf[0..len])
                     .context("writing client chunk")?;
-
-                // TODO(ethan): perform keybinding scanning in a background
-                //              thread
-                for byte in buf[0..len].into_iter() {
-                    if let Some(action) = bindings.transition(*byte) {
-                        info!("keybinding for {:?} fired", action);
-                    }
-                }
 
                 master_writer
                     .flush()
@@ -522,5 +536,133 @@ impl SessionInner {
                     .context("sending session reply")?
             }
         })
+    }
+
+    //
+    // actions which can be bound to keybindings
+    //
+
+    #[instrument(skip_all)]
+    fn action_detach(&self) -> anyhow::Result<()> {
+        let caller = self.caller.lock().unwrap();
+        let reply = caller.call(protocol::SessionMessageRequestPayload::Detach)?;
+        info!("action detach, reply={:?}", reply);
+        Ok(())
+    }
+}
+
+/// A handle for making calls to the rpc handler thread for an active session.
+/// Shared between the session struct (for calls originating with the cli)
+/// and the session inner struct (for calls resulting from keybindings).
+#[derive(Debug)]
+pub struct SessionCaller {
+    pub rpc_in: crossbeam_channel::Sender<protocol::SessionMessageRequestPayload>,
+    pub rpc_out: crossbeam_channel::Receiver<protocol::SessionMessageReply>,
+}
+
+impl SessionCaller {
+    #[instrument(skip_all)]
+    pub fn call(
+        &self,
+        arg: protocol::SessionMessageRequestPayload,
+    ) -> anyhow::Result<protocol::SessionMessageReply> {
+        self.rpc_in
+            .send_timeout(arg, SESSION_MESSAGE_TIMEOUT)
+            .context("sending session message")?;
+        Ok(self
+            .rpc_out
+            .recv_timeout(SESSION_MESSAGE_TIMEOUT)
+            .context("receiving session message reply")?)
+    }
+}
+
+/// Given a buffer, a length after which the data is not valid, a list of
+/// sections to remove, and some scratch space, compact the given buffer and
+/// return a new len.
+///
+/// The snip sections must all be within buf[..len], and must be non-overlapping.
+fn snip_buf(
+    buf: &mut [u8],
+    len: usize,
+    snip_sections: &[(usize, usize)],        // (<len>, <end offset>)
+    keep_sections: &mut Vec<(usize, usize)>, // re-usable scratch
+) -> usize {
+    if snip_sections.len() == 0 {
+        return len;
+    }
+
+    // build up the sections to keep in a more normal format
+    keep_sections.clear();
+    let mut cur_start = 0;
+    for (len, end_offset) in snip_sections.iter() {
+        let end_open = *end_offset + 1;
+        let snip_start = end_open - len;
+        if snip_start > cur_start {
+            keep_sections.push((cur_start, snip_start));
+        }
+        cur_start = end_open;
+    }
+    keep_sections.push((cur_start, len));
+
+    let mut last_end = 0;
+    for (start, end) in keep_sections.iter() {
+        if *start == *end {
+            continue;
+        }
+        if *start == last_end {
+            last_end = *end;
+            continue;
+        }
+        let section_len = *end - *start;
+        // Saftey: we are copying sections of buf into itself, just overwriting
+        //         little sections of the buffer. This should be fine because it
+        //         is all happening within the same section of memory and
+        //         std::ptr::copy (memmove in c). Also, these assertions should
+        //         make it safer.
+        assert!(last_end + section_len < buf.len());
+        assert!(*start + section_len - 1 < buf.len());
+        unsafe {
+            std::ptr::copy(
+                &buf[*start] as *const u8,
+                &mut buf[last_end] as *mut u8,
+                section_len,
+            );
+        }
+        last_end += section_len;
+    }
+
+    last_end
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_snip_buf() {
+        let cases = vec![
+            (vec![1, 1], 2, vec![(2, 1)], vec![]),
+            (vec![1, 1, 3], 3, vec![(2, 1)], vec![3]),
+            (vec![1, 1, 3, 4, 5], 5, vec![(2, 1), (1, 3)], vec![3, 5]),
+            (
+                vec![1, 1, 3, 4, 5, 8, 9, 1, 3],
+                5,
+                vec![(2, 1), (1, 3)],
+                vec![3, 5],
+            ),
+            (
+                vec![1, 1, 3, 4, 5, 8, 9, 1, 3],
+                9,
+                vec![(5, 7)],
+                vec![1, 1, 3, 3],
+            ),
+        ];
+
+        let mut keep_sections = vec![];
+        for (mut buf, len, snips, want_buf) in cases.into_iter() {
+            let got_len = snip_buf(&mut buf, len, &snips[..], &mut keep_sections);
+            dbg!(got_len);
+            assert_eq!(&buf[..got_len], &want_buf[..]);
+        }
     }
 }

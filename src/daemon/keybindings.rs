@@ -70,6 +70,8 @@ pub struct Bindings {
     sequences: Trie<ChordAtom, Action, Vec<Option<usize>>>,
     /// The current match state in the sequences trie.
     sequences_cursor: TrieCursor,
+    /// The number of bytes in the current match.
+    bytes_in_match: usize,
 }
 
 /// A ChordAtom is a lightweight type that represents a Chord within
@@ -130,13 +132,19 @@ impl Bindings {
             chords_cursor: TrieCursor::Start,
             sequences,
             sequences_cursor: TrieCursor::Start,
+            bytes_in_match: 0,
         })
     }
 
     /// transition takes the next byte in an input stream and mutates the
     /// bindings engine while possibly emitting an action that the caller
     /// should perform in response to a keybinding that has just been completed.
-    pub fn transition(&mut self, byte: u8) -> Option<&Action> {
+    /// In addition to the action enum, the binding engine informs the caller
+    /// of how many bytes were part of the match so that it can strip the
+    /// keybinding bytes from the input stream.
+    pub fn transition(&mut self, byte: u8) -> Option<(&Action, usize)> {
+        self.bytes_in_match += 1;
+
         self.chords_cursor = self.chords.advance(self.chords_cursor, byte);
         if let Some(chord_atom) = self.chords.get(self.chords_cursor) {
             self.chords_cursor = TrieCursor::Start;
@@ -147,7 +155,7 @@ impl Bindings {
                 TrieCursor::Match { .. } => {
                     let cursor = self.sequences_cursor;
                     self.sequences_cursor = TrieCursor::Start;
-                    self.sequences.get(cursor)
+                    self.sequences.get(cursor).map(|a| (a, self.bytes_in_match))
                 },
                 _ => {
                     self.sequences_cursor = TrieCursor::Start;
@@ -158,6 +166,7 @@ impl Bindings {
             // leave both cursors untouched if we have a partial match
             // in the chords cursor, otherwise reset.
             if let TrieCursor::NoMatch = self.chords_cursor {
+                self.bytes_in_match = 0;
                 self.sequences_cursor = TrieCursor::Start;
                 self.chords_cursor = TrieCursor::Start;
             }
@@ -686,7 +695,7 @@ mod test {
             for byte in keypresses.into_iter() {
                 actual_final_output = bindings.transition(byte);
             }
-            assert_eq!(actual_final_output, final_output.as_ref());
+            assert_eq!(actual_final_output.map(|(a, _)| a), final_output.as_ref());
         }
 
         Ok(())

@@ -69,7 +69,7 @@ pub struct Server {
     /// that is spawned during the attach process, and so that
     /// handle_conn can delegate to worker threads and quickly allow
     /// the main thread to become available to accept new connections.
-    shells: Arc<Mutex<HashMap<String, shell::Session>>>,
+    shells: Arc<Mutex<HashMap<String, Box<shell::Session>>>>,
     runtime_dir: PathBuf,
 }
 
@@ -225,7 +225,7 @@ impl Server {
                 info!("creating new subshell");
                 let session = self.spawn_subshell(stream, &header)?;
 
-                shells.insert(header.name.clone(), session);
+                shells.insert(header.name.clone(), Box::new(session));
                 // fallthrough to bidi streaming
             }
 
@@ -268,12 +268,15 @@ impl Server {
                     error!("error shuffling bytes: {:?}", e);
                 },
             }
+            info!("bidi stream loop finished");
 
             if child_done {
                 info!("'{}' exited, removing from session table", header.name);
                 let mut shells = self.shells.lock().unwrap();
                 shells.remove(&header.name);
             }
+
+            info!("finished attach streaming section");
         } else {
             error!("internal error: failed to fetch just inserted session");
         }
@@ -532,6 +535,8 @@ impl Server {
         Ok(())
     }
 
+    /// Spawn a subshell and return the sessession descriptor for it. The session is wrapped
+    /// in an Arc so the inner session can hold a Weak back-reference to the session.
     #[instrument(skip_all)]
     fn spawn_subshell(
         &self,
@@ -659,7 +664,31 @@ impl Server {
 
         let (in_tx, in_rx) = crossbeam_channel::unbounded();
         let (out_tx, out_rx) = crossbeam_channel::unbounded();
-        let session = shell::SessionInner {
+        let session_caller = Arc::new(Mutex::new(shell::SessionCaller {
+            rpc_in: in_tx,
+            rpc_out: out_rx,
+        }));
+        let session_inner = shell::SessionInner {
+            name: header.name.clone(),
+            caller: Arc::clone(&session_caller),
+            rpc_in: in_rx,
+            rpc_out: out_tx,
+            child_exited: child_exited_rx,
+            pty_master: fork,
+            client_stream: Some(client_stream),
+            config: self.config.clone(),
+            // outer: sync::Weak::new(),
+        };
+        session_inner
+            .set_pty_size(&header.local_tty_size)
+            .context("setting initial pty size")?;
+        Ok(shell::Session {
+            caller: session_caller,
+            started_at: time::SystemTime::now(),
+            inner: Arc::new(Mutex::new(session_inner)),
+        })
+        /*
+        let session_inner = shell::SessionInner {
             name: header.name.clone(),
             rpc_in: in_rx,
             rpc_out: out_tx,
@@ -667,16 +696,23 @@ impl Server {
             pty_master: fork,
             client_stream: Some(client_stream),
             config: self.config.clone(),
+            outer: sync::Weak::new(),
         };
-        session
+        session_inner
             .set_pty_size(&header.local_tty_size)
             .context("setting initial pty size")?;
-        Ok(shell::Session {
+        let session = Arc::new(shell::Session {
             rpc_in: in_tx,
             rpc_out: out_rx,
             started_at: time::SystemTime::now(),
-            inner: Arc::new(Mutex::new(session)),
-        })
+            inner: Arc::new(Mutex::new(session_inner)),
+        });
+        {
+            let mut session_inner = session.inner.lock().unwrap();
+            session_inner.outer = Arc::downgrade(&session);
+        }
+        Ok(session)
+        */
     }
 
     fn ssh_auth_sock_symlink(&self, session_name: PathBuf) -> PathBuf {
