@@ -328,7 +328,13 @@ def main() -> None:
   _check_install_dependencies(shpool_checkout_dir)
 
   _log_banner("Installing shpool from source...", sep="-")
-  _execute_command(f"{_cargo()} install --path .", cwd=shpool_checkout_dir)
+  _execute_command(f"{_cargo()} build --release", cwd=shpool_checkout_dir)
+  cargo_bin_dir = os.path.join(os.environ["HOME"], ".cargo", "bin")
+  if not os.path.exists(cargo_bin_dir):
+    os.makedirs(cargo_bin_dir)
+  shutil.copy(
+      os.path.join(shpool_checkout_dir, "target", "release", "shpool"),
+      os.path.join(cargo_bin_dir, "shpool"))
   install_systemd_service(shpool_checkout_dir)
   _log_banner("Almost done installing shpool on your system...", sep="-")
   _log_banner(
