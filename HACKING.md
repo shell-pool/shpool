@@ -58,7 +58,8 @@ In addition to the standard rust toolchain, shpool uses the
 To build and install `shpool` run
 
 ```
-$ cargo install --path .
+$ cargo build --release
+$ cp target/release/shpool ~/.cargo/bin/shpool
 ```
 
 ### Install the systemd user service unit file
