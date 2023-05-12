@@ -156,16 +156,21 @@ the `LC_` prefix since it may be more likely to be accepted).
 #### Explicitly named sessions
 
 Rather than derive the session name from the local tty, you may prefer
-to explicitly set the names for your sessions. In this case you
-can instead set up a remote host config per name in your .ssh/config,
-making use of the SetEnv config option. For example, you could have an entry like
+to explicitly set the names for your sessions. In this case, in addition to
+the changes for generating session names based on local tty number, you
+can add a function like
 
 ```
-Host = remote
-    User remoteuser
-    Hostname remote.host.example.com
-    SetEnv LC__SHPOOL_SET_SESSION_NAME=edit
+function shpool-ssh () {
+    if [ -z ${1+x} ] ; then
+        echo "expect a shpool session name as an arg"
+    fi
+    env LC__SHPOOL_SET_SESSION_NAME=$1 ssh -oSendEnv=LC__SHPOOL_SET_SESSION_NAME remote.host.example.com
+}
 ```
+
+then invoke it like `shpool-ssh main`. You may want to change the function
+name depending on the name of your remote host.
 
 ## Bugs
 
