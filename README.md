@@ -87,6 +87,29 @@ an ssh proxy is holding the connection open in the vain hope that
 it will get some traffic again. You can just run `shpool detach main`
 to force the session to detach and allow you to attach.
 
+### Configuration
+
+You can specify some additional configuration options to the daemon
+by passing a `-c /path/to/config.toml` flag, or by creating and
+editing `~/.config/shpool/config.toml`. The options available
+are documented in detail in `src/daemon/config.rs`, but the most
+common thing to want to configure is your detach keybinding.
+By default, shpool will detach from the current user session when you
+press the sequence `Ctrl-Space Ctrl-q` (press `Ctrl-Space` then release
+it and press `Ctrl-q`, don't try to hold down all three keys at once),
+but this you can configure a different binding by adding an entry
+like.
+
+```
+[[keybinding]]
+binding = "Ctrl-a d"
+action = "Detach"
+```
+
+for the moment, control is the only modifier key supported, but the keybinding
+engine is designed to be able to handle more, so if you want a different one,
+you can file a bug with your feature request.
+
 ### Subcommands
 
 #### `shpool daemon`

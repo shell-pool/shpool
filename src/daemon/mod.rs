@@ -28,8 +28,23 @@ pub fn run(
 
     let mut config = config::Config::default();
     if let Some(config_path) = config_file {
-        let config_str = fs::read_to_string(config_path).context("reading config toml")?;
-        config = toml::from_str(&config_str).context("parsing config file")?;
+        info!("parsing explicitly passed in config ({})", config_path);
+        let config_str = fs::read_to_string(config_path)
+            .context("reading config toml (1)")?;
+        config = toml::from_str(&config_str)
+            .context("parsing config file (1)")?;
+    } else {
+        let user_info = user::info()?;
+        let mut config_path = PathBuf::from(user_info.home_dir);
+        config_path.push(".config");
+        config_path.push("shpool");
+        config_path.push("config.toml");
+        if config_path.exists() {
+            let config_str = fs::read_to_string(config_path)
+                .context("reading config toml (2)")?;
+            config = toml::from_str(&config_str)
+                .context("parsing config file (2)")?;
+        }
     }
 
     let server = server::Server::new(config, runtime_dir);
