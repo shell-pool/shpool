@@ -2,10 +2,6 @@
 - There is a lot of heartbeat overhead. See if we can reduce that.
 - Implement spooling logic to handle subprocesses which generate
   a bunch of output after we have detached.
-- Add a keybinding for detaching. Make it simpler than tmux or screen since
-  this will be the only keybinding. Make it configurable in the toml file
-  with at least enough flexibility to allow tmux users to use their normal
-  "C-a d" keybinding.
 - Exit with a success error code when a session gets manually detached (either
   via shpool detach or with the upcoming detach keybinding).
 - Allow users to specify a command to run instead of their default shell.
