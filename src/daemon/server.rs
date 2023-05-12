@@ -629,9 +629,11 @@ impl Server {
             .ok_or(anyhow!("error parsing shell name as utf8"))?;
         cmd.arg0(format!("-{}", shell_basename));
 
+        let noecho = self.config.noecho.unwrap_or(false);
+        info!("about to fork subshell noecho={}", noecho);
         let fork = pty::fork::Fork::from_ptmx().context("forking pty")?;
         if let Ok(slave) = fork.is_child() {
-            if self.config.noecho.unwrap_or(false) {
+            if noecho {
                 tty::disable_echo(slave.as_raw_fd()).unwrap();
             }
             for fd in STDERR_FD + 1..(nix::unistd::SysconfVar::OPEN_MAX as i32) {

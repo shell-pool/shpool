@@ -137,8 +137,6 @@ fn do_attach(name: &str, socket: &PathBuf) -> anyhow::Result<()> {
         }
     }
 
-    let _tty_guard = tty::set_attach_flags();
-
     client.pipe_bytes()
 }
 

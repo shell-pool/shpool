@@ -326,6 +326,8 @@ impl Client {
     /// socket and back again. It is the main loop of
     /// `shpool attach`.
     pub fn pipe_bytes(self) -> anyhow::Result<()> {
+        let tty_guard = tty::set_attach_flags()?;
+
         let mut read_client_stream = self.stream.try_clone().context("cloning read stream")?;
         let mut write_client_stream = self.stream.try_clone().context("cloning read stream")?;
 
@@ -424,6 +426,10 @@ impl Client {
                             // us to use simple blocking IO.
                             warn!("exiting due to a stuck IO thread stdin_to_sock_finished={} sock_to_stdout_finished={}",
                                   stdin_to_sock_h.is_finished(), sock_to_stdout_h.is_finished());
+                            // make sure that we restore the tty flags on the input
+                            // tty before exiting the process.
+                            drop(tty_guard);
+
                             std::process::exit(1);
                         }
                     }
