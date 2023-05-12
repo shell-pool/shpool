@@ -1,6 +1,7 @@
 use std::{
     fs,
     io::Read,
+    thread,
     time,
 };
 
@@ -459,6 +460,132 @@ fn default_keybinding_detach() -> anyhow::Result<()> {
 
         a2.run_cmd("echo $MYVAR")?;
         lm2.match_re("someval$")?;
+
+        Ok(())
+    })
+}
+
+// test to exercise the code path where a keybinding
+// shows up in two different input chunks
+#[test]
+#[timeout(30000)]
+fn keybinding_input_shear() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc =
+            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut waiter = daemon_proc
+            .events
+            .take()
+            .unwrap()
+            .waiter(["daemon-bidi-stream-done"]);
+
+        let mut a1 = daemon_proc
+            .attach("sess", false, vec![])
+            .context("starting attach proc")?;
+        let mut lm1 = a1.line_matcher()?;
+
+        a1.run_cmd("export MYVAR=someval")?;
+        a1.run_cmd("echo $MYVAR")?;
+        lm1.match_re("someval$")?;
+
+        a1.run_raw(vec![0])?; // Ctrl-Space
+        thread::sleep(time::Duration::from_millis(100));
+        a1.run_raw(vec![17])?; // Ctrl-q
+        a1.proc.wait()?;
+
+        waiter.wait_event("daemon-bidi-stream-done")?;
+
+        let mut a2 = daemon_proc
+            .attach("sess", false, vec![])
+            .context("starting attach proc 2")?;
+        let mut lm2 = a2.line_matcher()?;
+
+        a2.run_cmd("echo $MYVAR")?;
+        lm2.match_re("someval$")?;
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
+fn keybinding_strip_keys() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc = support::daemon::Proc::new("long_noop_keybinding.toml", false)
+            .context("starting daemon proc")?;
+        let mut a1 = daemon_proc
+            .attach("sess", false, vec![])
+            .context("starting attach proc")?;
+        let mut lm1 = a1.line_matcher()?;
+
+        // the keybinding is 5 'a' chars in a row, so they should get stripped out
+        a1.run_cmd("echo baaaaad")?;
+        lm1.match_re("bd$")?;
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
+fn keybinding_strip_keys_split() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc = support::daemon::Proc::new("long_noop_keybinding.toml", false)
+            .context("starting daemon proc")?;
+        let mut a1 = daemon_proc
+            .attach("sess", false, vec![])
+            .context("starting attach proc")?;
+        let mut lm1 = a1.line_matcher()?;
+
+        // the keybinding is 5 'a' chars in a row, so they should get stripped out
+        a1.run_raw("echo ba".bytes().collect())?;
+        thread::sleep(time::Duration::from_millis(50));
+        a1.run_raw("aa".bytes().collect())?;
+        thread::sleep(time::Duration::from_millis(50));
+        a1.run_raw("aad\n".bytes().collect())?;
+        lm1.match_re("bd$")?;
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
+fn keybinding_partial_match_nostrip() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc = support::daemon::Proc::new("long_noop_keybinding.toml", false)
+            .context("starting daemon proc")?;
+        let mut a1 = daemon_proc
+            .attach("sess", false, vec![])
+            .context("starting attach proc")?;
+        let mut lm1 = a1.line_matcher()?;
+
+        // the keybinding is 5 'a' chars in a row, this has only 3
+        a1.run_cmd("echo baaad")?;
+        lm1.match_re("baaad$")?;
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
+fn keybinding_partial_match_nostrip_split() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc = support::daemon::Proc::new("long_noop_keybinding.toml", false)
+            .context("starting daemon proc")?;
+        let mut a1 = daemon_proc
+            .attach("sess", false, vec![])
+            .context("starting attach proc")?;
+        let mut lm1 = a1.line_matcher()?;
+
+        // the keybinding is 5 'a' chars in a row, this has only 3
+        a1.run_raw("echo ba".bytes().collect())?;
+        thread::sleep(time::Duration::from_millis(50));
+        a1.run_raw("a".bytes().collect())?;
+        thread::sleep(time::Duration::from_millis(50));
+        a1.run_raw("ad\n".bytes().collect())?;
+        lm1.match_re("baaad$")?;
 
         Ok(())
     })

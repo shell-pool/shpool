@@ -1,0 +1,11 @@
+norc = true
+noecho = true
+shell = "/bin/bash"
+
+[env]
+PS1 = "prompt> "
+TERM = ""
+
+[[keybinding]]
+binding = "a a a a a"
+action = "NoOp"

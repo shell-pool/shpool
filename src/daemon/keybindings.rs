@@ -70,8 +70,14 @@ pub struct Bindings {
     sequences: Trie<ChordAtom, Action, Vec<Option<usize>>>,
     /// The current match state in the sequences trie.
     sequences_cursor: TrieCursor,
-    /// The number of bytes in the current match.
-    bytes_in_match: usize,
+}
+
+/// The result of advancing the binding engine by a single byte.
+#[derive(Debug, Eq, PartialEq)]
+pub enum BindingResult {
+    NoMatch,
+    Partial,
+    Match(Action),
 }
 
 /// A ChordAtom is a lightweight type that represents a Chord within
@@ -132,53 +138,54 @@ impl Bindings {
             chords_cursor: TrieCursor::Start,
             sequences,
             sequences_cursor: TrieCursor::Start,
-            bytes_in_match: 0,
         })
     }
 
     /// transition takes the next byte in an input stream and mutates the
     /// bindings engine while possibly emitting an action that the caller
     /// should perform in response to a keybinding that has just been completed.
-    /// In addition to the action enum, the binding engine informs the caller
-    /// of how many bytes were part of the match so that it can strip the
-    /// keybinding bytes from the input stream.
-    pub fn transition(&mut self, byte: u8) -> Option<(&Action, usize)> {
-        self.bytes_in_match += 1;
-
+    pub fn transition(&mut self, byte: u8) -> BindingResult {
         self.chords_cursor = self.chords.advance(self.chords_cursor, byte);
         if let Some(chord_atom) = self.chords.get(self.chords_cursor) {
             self.chords_cursor = TrieCursor::Start;
 
             self.sequences_cursor = self.sequences.advance(self.sequences_cursor, *chord_atom);
             match self.sequences_cursor {
-                TrieCursor::Match { is_partial, .. } if is_partial => None,
+                TrieCursor::Match { is_partial, .. } if is_partial => BindingResult::Partial,
                 TrieCursor::Match { .. } => {
                     let cursor = self.sequences_cursor;
                     self.sequences_cursor = TrieCursor::Start;
-                    self.sequences.get(cursor).map(|a| (a, self.bytes_in_match))
+                    if let Some(action) = self.sequences.get(cursor) {
+                        BindingResult::Match(*action)
+                    } else {
+                        BindingResult::NoMatch
+                    }
                 },
                 _ => {
                     self.sequences_cursor = TrieCursor::Start;
-                    None
+                    BindingResult::NoMatch
                 },
             }
         } else {
-            // leave both cursors untouched if we have a partial match
-            // in the chords cursor, otherwise reset.
-            if let TrieCursor::NoMatch = self.chords_cursor {
-                self.bytes_in_match = 0;
-                self.sequences_cursor = TrieCursor::Start;
-                self.chords_cursor = TrieCursor::Start;
+            match self.chords_cursor {
+                TrieCursor::Match { is_partial, .. } if is_partial => BindingResult::Partial,
+                _ => {
+                    // no match, reset
+                    self.sequences_cursor = TrieCursor::Start;
+                    self.chords_cursor = TrieCursor::Start;
+                    BindingResult::NoMatch
+                },
             }
-
-            None
         }
     }
 }
 
 #[derive(Eq, PartialEq, Debug, Deserialize, Copy, Clone)]
 pub enum Action {
+    /// detaches the current shpool session
     Detach,
+    /// does nothing, useful for testing the keybinding engine and not much else
+    NoOp,
 }
 
 //
@@ -633,7 +640,7 @@ mod test {
                     .iter()
                     .map(|c| *c as u32 as u8)
                     .collect::<Vec<_>>(),
-                Some(Action::Detach), // the final output from the engine
+                BindingResult::Match(Action::Detach), // the final output from the engine
             ),
             (
                 // the bindings mapping
@@ -643,7 +650,7 @@ mod test {
                     .iter()
                     .map(|c| *c as u32 as u8)
                     .collect::<Vec<_>>(),
-                Some(Action::Detach), // the final output from the engine
+                BindingResult::Match(Action::Detach), // the final output from the engine
             ),
             (
                 vec![("a", Action::Detach)],
@@ -651,7 +658,7 @@ mod test {
                     .iter()
                     .map(|c| *c as u32 as u8)
                     .collect::<Vec<_>>(),
-                None,
+                BindingResult::NoMatch,
             ),
             (
                 vec![("a", Action::Detach)],
@@ -659,43 +666,51 @@ mod test {
                     .iter()
                     .map(|c| *c as u32 as u8)
                     .collect::<Vec<_>>(),
-                None,
+                BindingResult::NoMatch,
             ),
             (
                 vec![("Ctrl-a", Action::Detach)],
                 vec![1],
-                Some(Action::Detach),
+                BindingResult::Match(Action::Detach),
             ),
             (
                 vec![("Ctrl-Space", Action::Detach)],
                 vec![0],
-                Some(Action::Detach),
+                BindingResult::Match(Action::Detach),
             ),
             (
                 vec![("Ctrl-Space Ctrl-d", Action::Detach)],
                 vec![0, 4],
-                Some(Action::Detach),
+                BindingResult::Match(Action::Detach),
             ),
             (
                 vec![("Ctrl-Space Ctrl-d", Action::Detach)],
                 vec![0, 20, 4],
-                None,
+                BindingResult::NoMatch,
             ),
             (
                 vec![("Ctrl-Space Ctrl-d", Action::Detach)],
                 vec![0, 4, 20],
-                None,
+                BindingResult::NoMatch,
+            ),
+            (
+                vec![("a b c", Action::Detach)],
+                vec!['a', 'b']
+                    .iter()
+                    .map(|c| *c as u32 as u8)
+                    .collect::<Vec<_>>(),
+                BindingResult::Partial,
             ),
         ];
 
         for (bindings_mapping, keypresses, final_output) in cases.into_iter() {
             let mut bindings = Bindings::new(bindings_mapping)?;
 
-            let mut actual_final_output = None;
+            let mut actual_final_output = BindingResult::NoMatch;
             for byte in keypresses.into_iter() {
                 actual_final_output = bindings.transition(byte);
             }
-            assert_eq!(actual_final_output.map(|(a, _)| a), final_output.as_ref());
+            assert_eq!(actual_final_output, final_output);
         }
 
         Ok(())

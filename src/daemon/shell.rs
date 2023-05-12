@@ -20,7 +20,6 @@ use std::{
     },
     thread,
     time,
-    // sync,
 };
 
 use anyhow::{
@@ -98,7 +97,6 @@ pub struct SessionInner {
     pub pty_master: pty::fork::Fork,
     pub client_stream: Option<UnixStream>,
     pub config: config::Config,
-    // pub outer: sync::Weak<Session>,
 }
 
 impl SessionInner {
@@ -131,7 +129,6 @@ impl SessionInner {
     #[instrument(skip_all, fields(s = self.name))]
     pub fn bidi_stream(
         &mut self,
-        // outer_session: &Session,
         spawned_handlers: crossbeam_channel::Sender<()>,
     ) -> anyhow::Result<bool> {
         test_hooks::emit("daemon-bidi-stream-enter");
@@ -275,6 +272,7 @@ impl SessionInner {
             let mut snip_sections = vec![]; // (<len>, <end offset>)
             let mut keep_sections = vec![]; // (<start offset>, <end offset>)
             let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
+            let mut partial_keybinding = vec![];
 
             loop {
                 if stop.load(Ordering::Relaxed) {
@@ -308,14 +306,68 @@ impl SessionInner {
                 // a major perf impact, and this way is simpler.
                 snip_sections.clear();
                 for (i, byte) in buf[0..len].into_iter().enumerate() {
-                    use keybindings::Action::*;
-                    if let Some((action, binding_len)) = bindings.transition(*byte) {
-                        snip_sections.push((binding_len, i));
-                        info!("keybinding for {:?} fired", action);
-                        match action {
-                            Detach => self.action_detach()?,
-                        }
+                    use keybindings::BindingResult::*;
+                    match bindings.transition(*byte) {
+                        NoMatch if partial_keybinding.len() > 0 && i < partial_keybinding.len() => {
+                            // it turned out the partial keybinding match was not
+                            // a real match, so flush it to the output stream
+                            debug!(
+                                "flushing partial keybinding_len={} i={}",
+                                partial_keybinding.len(),
+                                i
+                            );
+                            master_writer
+                                .write_all(&partial_keybinding)
+                                .context("writing partial keybinding")?;
+                            if i > 0 {
+                                // snip the leading part of the input chunk that
+                                // was part of this keybinding
+                                snip_sections.push((i, i - 1));
+                            }
+                            partial_keybinding.clear()
+                        },
+                        NoMatch => {
+                            partial_keybinding.clear();
+                        },
+                        Partial => partial_keybinding.push(*byte),
+                        Match(action) => {
+                            info!("{:?} keybinding action fired", action);
+                            let keybinding_len = partial_keybinding.len() + 1;
+                            if keybinding_len < i {
+                                // this keybinding is wholely contained in buf
+                                debug!("snipping keybinding_len={} i={}", keybinding_len, i);
+                                snip_sections.push((keybinding_len, i));
+                            } else {
+                                // this keybinding was split across multiple
+                                // input buffers, just snip the last bit
+                                debug!("snipping split keybinding i={}", i);
+                                snip_sections.push((i + 1, i));
+                            }
+                            partial_keybinding.clear();
+
+                            use keybindings::Action::*;
+                            match action {
+                                Detach => self.action_detach()?,
+                                NoOp => {},
+                            }
+                        },
                     }
+                }
+                if partial_keybinding.len() > 0 {
+                    // we have a partial keybinding pending, so don't write
+                    // it to the output stream immediately
+                    let snip_chunk_len = if partial_keybinding.len() > len {
+                        len
+                    } else {
+                        partial_keybinding.len()
+                    };
+                    debug!(
+                        "end of buf w/ partial keybinding_len={} snip_chunk_len={} buf_len={}",
+                        partial_keybinding.len(),
+                        snip_chunk_len,
+                        len
+                    );
+                    snip_sections.push((snip_chunk_len, len - 1));
                 }
                 len = snip_buf(&mut buf[..], len, &snip_sections[..], &mut keep_sections);
 

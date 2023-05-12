@@ -25,16 +25,20 @@ pub struct Proc {
 }
 
 impl Proc {
-    pub fn run_raw_cmd(&mut self, mut cmd: Vec<u8>) -> anyhow::Result<()> {
+    pub fn run_raw(&mut self, cmd: Vec<u8>) -> anyhow::Result<()> {
         let stdin = self.proc.stdin.as_mut().ok_or(anyhow!("missing stdin"))?;
 
-        cmd.push("\n".as_bytes()[0]);
         stdin
             .write_all(&cmd)
             .context("writing cmd into attach proc")?;
         stdin.flush().context("flushing cmd")?;
 
         Ok(())
+    }
+
+    pub fn run_raw_cmd(&mut self, mut cmd: Vec<u8>) -> anyhow::Result<()> {
+        cmd.push("\n".as_bytes()[0]);
+        self.run_raw(cmd)
     }
 
     pub fn run_cmd(&mut self, cmd: &str) -> anyhow::Result<()> {

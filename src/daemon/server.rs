@@ -687,32 +687,6 @@ impl Server {
             started_at: time::SystemTime::now(),
             inner: Arc::new(Mutex::new(session_inner)),
         })
-        /*
-        let session_inner = shell::SessionInner {
-            name: header.name.clone(),
-            rpc_in: in_rx,
-            rpc_out: out_tx,
-            child_exited: child_exited_rx,
-            pty_master: fork,
-            client_stream: Some(client_stream),
-            config: self.config.clone(),
-            outer: sync::Weak::new(),
-        };
-        session_inner
-            .set_pty_size(&header.local_tty_size)
-            .context("setting initial pty size")?;
-        let session = Arc::new(shell::Session {
-            rpc_in: in_tx,
-            rpc_out: out_rx,
-            started_at: time::SystemTime::now(),
-            inner: Arc::new(Mutex::new(session_inner)),
-        });
-        {
-            let mut session_inner = session.inner.lock().unwrap();
-            session_inner.outer = Arc::downgrade(&session);
-        }
-        Ok(session)
-        */
     }
 
     fn ssh_auth_sock_symlink(&self, session_name: PathBuf) -> PathBuf {
