@@ -1,0 +1,7 @@
+norc = true
+noecho = true
+shell = "/bin/bash"
+
+[env]
+PS1 = "prompt> "
+SOME_CUSTOM_ENV_VAR = "customvalue"

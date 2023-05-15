@@ -588,7 +588,7 @@ impl Server {
         }
         if let Some(env) = self.config.env.as_ref() {
             term = match env.get("TERM") {
-                None => None,
+                None => term,
                 Some(t) if t.is_empty() => None,
                 Some(t) => Some(String::from(t)),
             };
@@ -613,6 +613,7 @@ impl Server {
                 cmd.envs(env);
             }
         }
+        info!("injecting TERM into shell {:?}", term);
         if let Some(t) = term {
             cmd.env("TERM", t);
         }

@@ -629,6 +629,35 @@ fn custom_keybinding_detach() -> anyhow::Result<()> {
     })
 }
 
+#[test]
+#[timeout(30000)]
+fn injects_term_even_with_env_config() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc =
+            support::daemon::Proc::new("user_env.toml", true).context("starting daemon proc")?;
+        let mut waiter = daemon_proc
+            .events
+            .take()
+            .unwrap()
+            .waiter(["daemon-wrote-s2c-chunk"]);
+
+        let mut attach_proc = daemon_proc
+            .attach("sh1", false, vec![(String::from("TERM"), String::from("dumb"))])
+            .context("starting attach proc")?;
+
+        let mut line_matcher = attach_proc.line_matcher()?;
+
+        waiter.wait_event("daemon-wrote-s2c-chunk")?; // resize prompt redraw
+        attach_proc.run_cmd("echo $SOME_CUSTOM_ENV_VAR")?;
+        line_matcher.match_re("customvalue$")?;
+
+        attach_proc.run_cmd("echo $TERM")?;
+        line_matcher.match_re("dumb$")?;
+
+        Ok(())
+    })
+}
+
 #[ignore] // TODO: re-enable, this test if flaky
 #[test]
 fn up_arrow_no_crash() -> anyhow::Result<()> {
