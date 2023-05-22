@@ -4,7 +4,7 @@ Requires=shpool.socket
 
 [Service]
 Type=simple
-ExecStart=%h/.cargo/bin/shpool daemon
+ExecStart=/usr/bin/shpool daemon
 KillMode=mixed
 TimeoutStopSec=2s
 SendSIGHUP=yes

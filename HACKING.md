@@ -3,6 +3,54 @@
 
 Some tips for working on shpool.
 
+## Cutting a Release
+
+First, make sure to update `debian/changelog` and merge the patch. Once
+the patch is merged, run
+
+```
+benz --server blade:benz-prod build --branch main --git rpc://team/cloudtop-connectivity-eng-team/shpool
+```
+
+to build the .deb file with benz. You should see some output telling you where
+benz put the results. Look for the package upload section. It should look
+something like this:
+
+```
+Build successful; uploaded 2 packages:
+eca1444daa9c6d2cab6cae3ef365b552603abf458b0bbcba63c43e9743af6385
+3a9771e76475aa30b3fa959b8a83fd1fa81e1b5601f9f0e859b11d07f779845b
+```
+
+Now for each of the hashes, run
+
+```
+rapture addpkg shpool <hash>
+```
+
+to put the package, which benz has already uploaded, into the actual
+repo. This has just put the packages in a new direct repository, now
+we need to point `shpool-stable` and `shpool-unstable` at that direct
+rapture repo. To do this, look for the most recent datestamped direct
+repository with
+
+```
+rapture listrepos | grep shpool
+```
+
+Choose the one with the most recent date and largest serial number,
+then add tags.
+
+```
+rapture settag <direct repo> cloudtop-connectivity-eng-team.unstable:true
+rapture settag <direct repo> cloudtop-connectivity-eng-team.stable:true
+```
+
+If there is a change in the release that seems risky, you may want to
+announce the release on the mailing list telling people they can
+check it out on the unstable channel, then promote to stable after
+a few days to a week.
+
 ## Installing From Source
 
 ### Clone the repo
