@@ -19,34 +19,10 @@ The biggest thing I'm having to work around is:
 
 ## Installation & Setup
 
-First, make sure you have an up-to-date rust toolchain from `rustup`.
-Make sure you do not already have the out-of-date debian rust toolchain
-installed. If you do, run `sudo apt remove rustc` to remove it, then
-follow the instructions on https://rustup.rs to install the latest
-rustup and rust toolchain. If you already have rustup installed, run
-`rustup update stable` to update to the latest stable release.
-
-The easiest way to install shpool is to use the installer script
-
 ```
-$ /google/data/ro/users/pa/pailes/shpool/install.py --shpool-checkout-dir=/tmp/shpool-install
-```
-
-If this script runs into trouble, you might need to fall back on the more
-manual install described in [HACKING.md](./HACKING.md).
-
-Once shpool is installed, make sure the user-level systemd unit is
-running. You can check its status with
-
-```
-systemctl --user status shpool
-```
-
-Enable and start it with
-
-```
-systemctl --user enable shpool
-systemctl --user start shpool
+sudo glinux-add-repo shpool unstable && \
+sudo apt update && \
+sudo apt install shpool
 ```
 
 ### Shell Config
