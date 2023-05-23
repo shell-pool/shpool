@@ -144,7 +144,7 @@ a shpool session based on the tty variable we just forwarded
 
 ```
 if [[ $- =~ i ]] && [[ -n "$LC__SHPOOL_SET_SESSION_NAME" ]]; then
-   exec $HOME/.cargo/bin/shpool attach "$LC__SHPOOL_SET_SESSION_NAME"
+   exec shpool attach "$LC__SHPOOL_SET_SESSION_NAME"
 fi
 ```
 
