@@ -119,11 +119,52 @@ Kills a named shell session.
 
 ### (Optional) `ssh` Plugin Mode
 
+#### Explicitly named sessions
+
+##### shell function
+
+Rather than derive the session name from the local tty, you
+may prefer to explicitly set the names for your sessions.
+In this case you can add a function like
+
+```
+function shpool-ssh () {
+    if [ -z ${1+x} ] ; then
+        echo "usage: shpool-ssh <remote-machine> <session-name>"
+        return
+    fi
+    if [ -z ${2+x} ] ; then
+        echo "usage: shpool-ssh <remote-machine> <session-name>"
+        return
+    fi
+    ssh -t "-oRemoteCommand=shpool attach -f $2" $1
+}
+```
+
+to your `.bashrc` then invoke it like
+`shpool-ssh remote.host.example.com main`.
+
+##### ssh config
+
+You can also set up explicitly named sessions by adding
+config blocks to you `.ssh/config`. For example, you
+might add a config block named `edit` like so
+
+```
+Host = edit
+    Hostname remote.host.example.com
+
+    RemoteCommand shpool attach -f edit
+    RequestTTY yes
+```
+
 #### Local tty based
 
-To set up your system to automatically generate a shpool session name
-based on your local terminal emulator's tty number, add the following
-line to the .profile or .bashrc on your local machine
+Rather than specify an explicit name when you connect, you
+can set up your system to automatically generate a shpool
+session name based on your local terminal emulator's tty
+number. To do so, add the following line to the .profile or
+.bashrc on your local machine
 
 ```
 export LC__SHPOOL_SET_SESSION_NAME="ssh-$(basename $(tty))"
@@ -144,7 +185,7 @@ a shpool session based on the tty variable we just forwarded
 
 ```
 if [[ $- =~ i ]] && [[ -n "$LC__SHPOOL_SET_SESSION_NAME" ]]; then
-   exec shpool attach "$LC__SHPOOL_SET_SESSION_NAME"
+   exec shpool attach -f "$LC__SHPOOL_SET_SESSION_NAME"
 fi
 ```
 
@@ -152,24 +193,6 @@ Note that your remote machine must be configured to allow
 `LC__SHPOOL_SET_SESSION_NAME` to get forwarded (this is why we use
 the `LC_` prefix since it may be more likely to be accepted).
 
-#### Explicitly named sessions
-
-Rather than derive the session name from the local tty, you may prefer
-to explicitly set the names for your sessions. In this case, in addition to
-the changes for generating session names based on local tty number, you
-can add a function like
-
-```
-function shpool-ssh () {
-    if [ -z ${1+x} ] ; then
-        echo "expect a shpool session name as an arg"
-    fi
-    env LC__SHPOOL_SET_SESSION_NAME=$1 ssh -oSendEnv=LC__SHPOOL_SET_SESSION_NAME remote.host.example.com
-}
-```
-
-then invoke it like `shpool-ssh main`. You may want to change the function
-name depending on the name of your remote host.
 
 ## Bugs
 

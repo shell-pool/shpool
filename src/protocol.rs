@@ -26,9 +26,11 @@ use serde_derive::{
 };
 use tracing::{
     debug,
-    info,
+    instrument,
+    span,
     trace,
     warn,
+    Level,
 };
 
 use super::{
@@ -325,6 +327,7 @@ impl Client {
     /// pipe_bytes suffles bytes from std{in,out} to the unix
     /// socket and back again. It is the main loop of
     /// `shpool attach`.
+    #[instrument(skip_all)]
     pub fn pipe_bytes(self) -> anyhow::Result<()> {
         let tty_guard = tty::set_attach_flags()?;
 
@@ -334,20 +337,17 @@ impl Client {
         thread::scope(|s| {
             // stdin -> sock
             let stdin_to_sock_h = s.spawn(|| -> anyhow::Result<()> {
-                info!("pipe_bytes: stdin->sock thread spawned");
-
+                let _s = span!(Level::INFO, "stdin->sock").entered();
                 let mut stdin = std::io::stdin().lock();
                 let mut buf = vec![0; consts::BUF_SIZE];
 
                 loop {
                     let nread = stdin.read(&mut buf).context("reading stdin from user")?;
-                    debug!("pipe_bytes: stdin->sock: read {} bytes", nread);
+                    debug!("read {} bytes", nread);
 
                     let to_write = &buf[..nread];
-                    debug!(
-                        "pipe_bytes: stdin->sock: created to_write='{}'",
-                        String::from_utf8_lossy(to_write)
-                    );
+                    trace!("created to_write='{}'", String::from_utf8_lossy(to_write));
+
                     write_client_stream.write_all(to_write)?;
                     write_client_stream.flush().context("flushing client")?;
                 }
@@ -355,7 +355,7 @@ impl Client {
 
             // sock -> stdout
             let sock_to_stdout_h = s.spawn(|| -> anyhow::Result<()> {
-                info!("pipe_bytes: sock->stdout thread spawned");
+                let _s = span!(Level::INFO, "sock->stdout").entered();
 
                 let mut stdout = std::io::stdout().lock();
                 let mut buf = vec![0; consts::BUF_SIZE];
@@ -366,7 +366,7 @@ impl Client {
 
                     if chunk.buf.len() > 0 {
                         debug!(
-                            "pipe_bytes: sock->stdout: chunk='{}' kind={:?} len={}",
+                            "chunk='{}' kind={:?} len={}",
                             String::from_utf8_lossy(chunk.buf),
                             chunk.kind,
                             chunk.buf.len()
@@ -375,7 +375,7 @@ impl Client {
 
                     match chunk.kind {
                         ChunkKind::Heartbeat => {
-                            trace!("pipe_bytes: got heartbeat chunk");
+                            trace!("got heartbeat chunk");
                         },
                         ChunkKind::Data => {
                             stdout
@@ -392,7 +392,7 @@ impl Client {
                                     continue;
                                 }
                             }
-                            debug!("pipe_bytes: sock->stdout: flushed stdout");
+                            debug!("flushed stdout");
                         },
                     }
                 }

@@ -642,7 +642,11 @@ fn injects_term_even_with_env_config() -> anyhow::Result<()> {
             .waiter(["daemon-wrote-s2c-chunk"]);
 
         let mut attach_proc = daemon_proc
-            .attach("sh1", false, vec![(String::from("TERM"), String::from("dumb"))])
+            .attach(
+                "sh1",
+                false,
+                vec![(String::from("TERM"), String::from("dumb"))],
+            )
             .context("starting attach proc")?;
 
         let mut line_matcher = attach_proc.line_matcher()?;
