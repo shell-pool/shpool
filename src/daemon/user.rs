@@ -17,10 +17,7 @@ pub fn info() -> anyhow::Result<Info> {
         let passwd = libc::getpwuid(libc::getuid());
         let errno = nix::errno::errno();
         if errno != 0 {
-            return Err(anyhow!(
-                "error getting passwd: {:?}",
-                nix::errno::from_i32(errno)
-            ));
+            return Err(anyhow!("error getting passwd: {:?}", nix::errno::from_i32(errno)));
         }
 
         Ok(Info {

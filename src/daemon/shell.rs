@@ -1,51 +1,23 @@
 use std::{
     io,
-    io::{
-        Read,
-        Write,
-    },
+    io::{Read, Write},
     net,
-    os::unix::{
-        io::AsRawFd,
-        net::UnixStream,
-    },
+    os::unix::{io::AsRawFd, net::UnixStream},
     sync::{
-        atomic::{
-            AtomicBool,
-            Ordering,
-        },
-        Arc,
-        Mutex,
-        TryLockError,
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, TryLockError,
     },
-    thread,
-    time,
+    thread, time,
 };
 
-use anyhow::{
-    anyhow,
-    Context,
-};
+use anyhow::{anyhow, Context};
 use crossbeam_channel::RecvTimeoutError;
-use tracing::{
-    debug,
-    error,
-    info,
-    instrument,
-    span,
-    trace,
-    Level,
-};
+use tracing::{debug, error, info, instrument, span, trace, Level};
 
 use crate::{
     consts,
-    daemon::{
-        config,
-        keybindings,
-    },
-    protocol,
-    test_hooks,
-    tty,
+    daemon::{config, keybindings},
+    protocol, test_hooks, tty,
 };
 
 const SUPERVISOR_POLL_DUR: time::Duration = time::Duration::from_millis(300);
@@ -73,11 +45,11 @@ impl Session {
         // to a session with no attached terminal
         match self.inner.try_lock() {
             // if it is locked, someone is attached
-            Err(TryLockError::WouldBlock) => {},
+            Err(TryLockError::WouldBlock) => {}
             // if we can lock it, there is no one to get our msg
             _ => {
                 return Ok(protocol::SessionMessageReply::NotAttached);
-            },
+            }
         }
 
         let caller = self.caller.lock().unwrap();
@@ -110,10 +82,8 @@ impl SessionInner {
     }
 
     pub fn set_pty_size(&self, size: &tty::Size) -> anyhow::Result<()> {
-        let pty_master = self
-            .pty_master
-            .is_parent()
-            .context("internal error: executing in child fork")?;
+        let pty_master =
+            self.pty_master.is_parent().context("internal error: executing in child fork")?;
         size.set_fd(pty_master.as_raw_fd())
     }
 }
@@ -141,22 +111,16 @@ impl SessionInner {
             None => return Err(anyhow!("no client stream to take for bidi streaming")),
         };
 
-        let mut reader_client_stream = client_stream
-            .try_clone()
-            .context("creating reader client stream")?;
-        let closable_client_stream = client_stream
-            .try_clone()
-            .context("creating closable client stream handle")?;
+        let mut reader_client_stream =
+            client_stream.try_clone().context("creating reader client stream")?;
+        let closable_client_stream =
+            client_stream.try_clone().context("creating closable client stream handle")?;
         let client_stream_m = Mutex::new(io::BufWriter::new(
-            client_stream
-                .try_clone()
-                .context("wrapping stream in bufwriter")?,
+            client_stream.try_clone().context("wrapping stream in bufwriter")?,
         ));
 
-        let pty_master = self
-            .pty_master
-            .is_parent()
-            .context("internal error: executing in child fork")?;
+        let pty_master =
+            self.pty_master.is_parent().context("internal error: executing in child fork")?;
 
         // A flag to indicate that outstanding threads should stop
         let stop = AtomicBool::new(false);
@@ -287,18 +251,13 @@ impl SessionInner {
                 //
                 // Also, note that we don't access through the mutex because reads
                 // don't need to be excluded from trampling on writes.
-                let mut len = reader_client_stream
-                    .read(&mut buf)
-                    .context("reading client chunk")?;
+                let mut len =
+                    reader_client_stream.read(&mut buf).context("reading client chunk")?;
                 if len == 0 {
                     continue;
                 }
                 test_hooks::emit("daemon-read-c2s-chunk");
-                trace!(
-                    "read client len={}: '{}'",
-                    len,
-                    String::from_utf8_lossy(&buf[..len]),
-                );
+                trace!("read client len={}: '{}'", len, String::from_utf8_lossy(&buf[..len]),);
 
                 // We might be able to gain some perf by doing this scanning in
                 // a background thread (though maybe not given the need to copy
@@ -325,10 +284,10 @@ impl SessionInner {
                                 snip_sections.push((i, i - 1));
                             }
                             partial_keybinding.clear()
-                        },
+                        }
                         NoMatch => {
                             partial_keybinding.clear();
-                        },
+                        }
                         Partial => partial_keybinding.push(*byte),
                         Match(action) => {
                             info!("{:?} keybinding action fired", action);
@@ -348,19 +307,16 @@ impl SessionInner {
                             use keybindings::Action::*;
                             match action {
                                 Detach => self.action_detach()?,
-                                NoOp => {},
+                                NoOp => {}
                             }
-                        },
+                        }
                     }
                 }
                 if partial_keybinding.len() > 0 {
                     // we have a partial keybinding pending, so don't write
                     // it to the output stream immediately
-                    let snip_chunk_len = if partial_keybinding.len() > len {
-                        len
-                    } else {
-                        partial_keybinding.len()
-                    };
+                    let snip_chunk_len =
+                        if partial_keybinding.len() > len { len } else { partial_keybinding.len() };
                     debug!(
                         "end of buf w/ partial keybinding_len={} snip_chunk_len={} buf_len={}",
                         partial_keybinding.len(),
@@ -371,13 +327,9 @@ impl SessionInner {
                 }
                 len = snip_buf(&mut buf[..], len, &snip_sections[..], &mut keep_sections);
 
-                master_writer
-                    .write_all(&buf[0..len])
-                    .context("writing client chunk")?;
+                master_writer.write_all(&buf[0..len]).context("writing client chunk")?;
 
-                master_writer
-                    .flush()
-                    .context("flushing input from client to shell")?;
+                master_writer.flush().context("flushing input from client to shell")?;
 
                 debug!("flushed chunk of len {}", len);
             }
@@ -423,24 +375,15 @@ impl SessionInner {
                     Err(nix::errno::Errno::EBADF) => {
                         info!("shell went down");
                         return Ok(());
-                    },
+                    }
                     Err(e) => return Err(e).context("selecting on pty master"),
                 };
                 if nready == 0 {
                     continue;
                 }
-                let len = master_reader
-                    .read(&mut buf)
-                    .context("reading pty master chunk")?;
-                let chunk = protocol::Chunk {
-                    kind: protocol::ChunkKind::Data,
-                    buf: &buf[..len],
-                };
-                trace!(
-                    "read pty master len={} '{}'",
-                    len,
-                    String::from_utf8_lossy(chunk.buf),
-                );
+                let len = master_reader.read(&mut buf).context("reading pty master chunk")?;
+                let chunk = protocol::Chunk { kind: protocol::ChunkKind::Data, buf: &buf[..len] };
+                trace!("read pty master len={} '{}'", len, String::from_utf8_lossy(chunk.buf),);
                 {
                     let mut s = client_stream_m.lock().unwrap();
                     chunk
@@ -475,23 +418,20 @@ impl SessionInner {
                 }
 
                 thread::sleep(consts::HEARTBEAT_DURATION);
-                let chunk = protocol::Chunk {
-                    kind: protocol::ChunkKind::Heartbeat,
-                    buf: &[],
-                };
+                let chunk = protocol::Chunk { kind: protocol::ChunkKind::Heartbeat, buf: &[] };
                 {
                     let mut s = client_stream_m.lock().unwrap();
                     match chunk.write_to(&mut *s).and_then(|_| s.flush()) {
                         Ok(_) => {
                             trace!("wrote heartbeat");
-                        },
+                        }
                         Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {
                             trace!("client hangup");
                             return Ok(());
-                        },
+                        }
                         Err(e) => {
                             return Err(e).context("writing heartbeat")?;
-                        },
+                        }
                     }
                 }
             }
@@ -519,16 +459,16 @@ impl SessionInner {
                 match self.child_exited.recv_timeout(SUPERVISOR_POLL_DUR) {
                     Ok(_) => {
                         error!("internal error: unexpected send on child_exited chan");
-                    },
+                    }
                     Err(RecvTimeoutError::Timeout) => {
                         // shell is still running, do nothing
                         trace!("poll timeout");
-                    },
+                    }
                     Err(RecvTimeoutError::Disconnected) => {
                         info!("child shell exited");
                         child_done.store(true, Ordering::Release);
                         return Ok(());
-                    },
+                    }
                 }
             }
         })
@@ -566,9 +506,9 @@ impl SessionInner {
                                 // such situations
                                 error!("resize failed: {:?}", err);
                                 protocol::ResizeReply::Failed
-                            },
+                            }
                         })
-                    },
+                    }
                     protocol::SessionMessageRequestPayload::Detach => {
                         debug!("handling detach");
                         stop.store(true, Ordering::Relaxed);
@@ -576,7 +516,7 @@ impl SessionInner {
                         protocol::SessionMessageReply::Detach(
                             protocol::SessionMessageDetachReply::Ok,
                         )
-                    },
+                    }
                 };
 
                 // A timeout here is a hard error because it represents
@@ -632,7 +572,8 @@ impl SessionCaller {
 /// sections to remove, and some scratch space, compact the given buffer and
 /// return a new len.
 ///
-/// The snip sections must all be within buf[..len], and must be non-overlapping.
+/// The snip sections must all be within buf[..len], and must be
+/// non-overlapping.
 fn snip_buf(
     buf: &mut [u8],
     len: usize,
@@ -674,11 +615,7 @@ fn snip_buf(
         assert!(last_end + section_len < buf.len());
         assert!(*start + section_len - 1 < buf.len());
         unsafe {
-            std::ptr::copy(
-                &buf[*start] as *const u8,
-                &mut buf[last_end] as *mut u8,
-                section_len,
-            );
+            std::ptr::copy(&buf[*start] as *const u8, &mut buf[last_end] as *mut u8, section_len);
         }
         last_end += section_len;
     }
@@ -696,18 +633,8 @@ mod test {
             (vec![1, 1], 2, vec![(2, 1)], vec![]),
             (vec![1, 1, 3], 3, vec![(2, 1)], vec![3]),
             (vec![1, 1, 3, 4, 5], 5, vec![(2, 1), (1, 3)], vec![3, 5]),
-            (
-                vec![1, 1, 3, 4, 5, 8, 9, 1, 3],
-                5,
-                vec![(2, 1), (1, 3)],
-                vec![3, 5],
-            ),
-            (
-                vec![1, 1, 3, 4, 5, 8, 9, 1, 3],
-                9,
-                vec![(5, 7)],
-                vec![1, 1, 3, 3],
-            ),
+            (vec![1, 1, 3, 4, 5, 8, 9, 1, 3], 5, vec![(2, 1), (1, 3)], vec![3, 5]),
+            (vec![1, 1, 3, 4, 5, 8, 9, 1, 3], 9, vec![(5, 7)], vec![1, 1, 3, 3]),
         ];
 
         let mut keep_sections = vec![];

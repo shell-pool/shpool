@@ -1,20 +1,8 @@
-use std::{
-    io,
-    io::Write,
-    os::unix::io::AsRawFd,
-    path::PathBuf,
-    process,
-};
+use std::{io, io::Write, os::unix::io::AsRawFd, path::PathBuf, process};
 
-use anyhow::{
-    anyhow,
-    Context,
-};
+use anyhow::{anyhow, Context};
 
-use super::{
-    events::Events,
-    line_matcher::LineMatcher,
-};
+use super::{events::Events, line_matcher::LineMatcher};
 
 /// Proc is a handle for a `shpool attach` subprocess
 /// spawned for testing
@@ -28,9 +16,7 @@ impl Proc {
     pub fn run_raw(&mut self, cmd: Vec<u8>) -> anyhow::Result<()> {
         let stdin = self.proc.stdin.as_mut().ok_or(anyhow!("missing stdin"))?;
 
-        stdin
-            .write_all(&cmd)
-            .context("writing cmd into attach proc")?;
+        stdin.write_all(&cmd).context("writing cmd into attach proc")?;
         stdin.flush().context("flushing cmd")?;
 
         Ok(())
@@ -46,9 +32,7 @@ impl Proc {
         let stdin = self.proc.stdin.as_mut().ok_or(anyhow!("missing stdin"))?;
 
         let full_cmd = format!("{}\n", cmd);
-        stdin
-            .write_all(full_cmd.as_bytes())
-            .context("writing cmd into attach proc")?;
+        stdin.write_all(full_cmd.as_bytes()).context("writing cmd into attach proc")?;
         stdin.flush().context("flushing cmd")?;
 
         Ok(())
@@ -68,9 +52,7 @@ impl Proc {
         )
         .context("setting stdin nonblocking")?;
 
-        Ok(LineMatcher {
-            out: io::BufReader::new(r),
-        })
+        Ok(LineMatcher { out: io::BufReader::new(r) })
     }
 
     /// Create a handle for asserting about stderr output lines.
@@ -83,9 +65,7 @@ impl Proc {
         )
         .context("setting stdin nonblocking")?;
 
-        Ok(LineMatcher {
-            out: io::BufReader::new(r),
-        })
+        Ok(LineMatcher { out: io::BufReader::new(r) })
     }
 
     pub fn await_event(&mut self, event: &str) -> anyhow::Result<()> {

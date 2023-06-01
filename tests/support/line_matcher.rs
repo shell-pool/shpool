@@ -1,13 +1,6 @@
-use std::{
-    io,
-    io::BufRead,
-    time,
-};
+use std::{io, io::BufRead, time};
 
-use anyhow::{
-    anyhow,
-    Context,
-};
+use anyhow::{anyhow, Context};
 use regex::Regex;
 
 const CMD_READ_TIMEOUT: time::Duration = time::Duration::from_secs(3);
@@ -35,7 +28,7 @@ where
             match self.out.read_line(&mut line) {
                 Ok(0) => {
                     return Err(anyhow!("LineMatcher: EOF"));
-                },
+                }
                 Err(e) => {
                     if e.kind() == io::ErrorKind::WouldBlock {
                         if start.elapsed() > CMD_READ_TIMEOUT {
@@ -50,7 +43,7 @@ where
                     }
 
                     return Err(e).context("reading line from shell output")?;
-                },
+                }
                 Ok(_) => {
                     if line.ends_with('\n') {
                         line.pop();
@@ -58,7 +51,7 @@ where
                             line.pop();
                         }
                     }
-                },
+                }
             }
 
             eprintln!("testing /{}/ against '{}'", re, &line);

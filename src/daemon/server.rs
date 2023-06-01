@@ -1,60 +1,26 @@
 use std::{
     collections::HashMap,
-    env,
-    fs,
-    net,
-    os,
+    env, fs, net, os,
     os::unix::{
         fs::PermissionsExt,
         io::AsRawFd,
-        net::{
-            UnixListener,
-            UnixStream,
-        },
+        net::{UnixListener, UnixStream},
         process::CommandExt,
     },
-    path::{
-        Path,
-        PathBuf,
-    },
+    path::{Path, PathBuf},
     process,
-    sync::{
-        Arc,
-        Mutex,
-    },
-    thread,
-    time,
+    sync::{Arc, Mutex},
+    thread, time,
 };
 
-use anyhow::{
-    anyhow,
-    Context,
-};
-use crossbeam_channel::{
-    RecvTimeoutError,
-    TryRecvError,
-};
-use nix::{
-    sys::signal,
-    unistd::Pid,
-};
-use tracing::{
-    error,
-    info,
-    instrument,
-    warn,
-};
+use anyhow::{anyhow, Context};
+use crossbeam_channel::{RecvTimeoutError, TryRecvError};
+use nix::{sys::signal, unistd::Pid};
+use tracing::{error, info, instrument, warn};
 
 use super::{
-    super::{
-        consts,
-        protocol,
-        test_hooks,
-        tty,
-    },
-    config,
-    shell,
-    user,
+    super::{consts, protocol, test_hooks, tty},
+    config, shell, user,
 };
 
 const SHELL_KILL_TIMEOUT: time::Duration = time::Duration::from_millis(500);
@@ -76,11 +42,7 @@ pub struct Server {
 impl Server {
     #[instrument(skip_all)]
     pub fn new(config: config::Config, runtime_dir: PathBuf) -> Arc<Self> {
-        Arc::new(Server {
-            config,
-            shells: Arc::new(Mutex::new(HashMap::new())),
-            runtime_dir,
-        })
+        Arc::new(Server { config, shells: Arc::new(Mutex::new(HashMap::new())), runtime_dir })
     }
 
     #[instrument(skip_all)]
@@ -96,10 +58,10 @@ impl Server {
                             error!("handling new connection: {:?}", err)
                         }
                     });
-                },
+                }
                 Err(err) => {
                     error!("accepting stream: {:?}", err);
-                },
+                }
             }
         }
 
@@ -124,9 +86,7 @@ impl Server {
                     },
                 )?;
             }
-            stream
-                .shutdown(net::Shutdown::Both)
-                .context("closing stream")?;
+            stream.shutdown(net::Shutdown::Both).context("closing stream")?;
             return Err(err).context("bad peer")?;
         }
 
@@ -134,9 +94,7 @@ impl Server {
         // worker thread because it is perfectly fine for there to
         // be no new data for long periods of time when the users
         // is connected to a shell session.
-        stream
-            .set_read_timeout(None)
-            .context("unsetting read timout on inbound session")?;
+        stream.set_read_timeout(None).context("unsetting read timout on inbound session")?;
 
         match header {
             protocol::ConnectHeader::Attach(h) => self.handle_attach(stream, h),
@@ -145,7 +103,7 @@ impl Server {
             protocol::ConnectHeader::List => self.handle_list(stream),
             protocol::ConnectHeader::SessionMessage(header) => {
                 self.handle_session_message(stream, header)
-            },
+            }
         }
     }
 
@@ -183,7 +141,7 @@ impl Server {
                     match inner.child_exited.try_recv() {
                         Ok(_) => {
                             return Err(anyhow!("unexpected send on child_exited chan"));
-                        },
+                        }
                         Err(TryRecvError::Empty) => {
                             // the channel is still open so the subshell is still running
                             info!("taking over existing session inner={:?}", inner);
@@ -194,12 +152,12 @@ impl Server {
                             inner.client_stream = Some(stream.try_clone()?);
 
                             // status is already attached
-                        },
+                        }
                         Err(TryRecvError::Disconnected) => {
                             // the channel is closed so we know the subshell exited
                             info!("stale inner={:?}, clobbering with new subshell", inner);
                             status = protocol::AttachStatus::Created;
-                        },
+                        }
                     }
 
                     // fallthrough to bidi streaming
@@ -208,13 +166,9 @@ impl Server {
                     // The stream is busy, so we just inform the client and close the stream.
                     write_reply(
                         &mut stream,
-                        protocol::AttachReplyHeader {
-                            status: protocol::AttachStatus::Busy,
-                        },
+                        protocol::AttachReplyHeader { status: protocol::AttachStatus::Busy },
                     )?;
-                    stream
-                        .shutdown(net::Shutdown::Both)
-                        .context("closing stream")?;
+                    stream.shutdown(net::Shutdown::Both).context("closing stream")?;
                     return Ok(());
                 }
             } else {
@@ -239,8 +193,7 @@ impl Server {
             }
         };
 
-        self.link_ssh_auth_sock(&header)
-            .context("linking SSH_AUTH_SOCK")?;
+        self.link_ssh_auth_sock(&header).context("linking SSH_AUTH_SOCK")?;
 
         if let Some(inner) = inner_to_stream {
             let mut child_done = false;
@@ -249,7 +202,7 @@ impl Server {
                 Some(s) => s,
                 None => {
                     return Err(anyhow!("no client stream, should be impossible"));
-                },
+                }
             };
 
             let reply_status = write_reply(client_stream, protocol::AttachReplyHeader { status });
@@ -263,10 +216,10 @@ impl Server {
             match inner.bidi_stream(spawned_threads_tx) {
                 Ok(done) => {
                     child_done = done;
-                },
+                }
                 Err(e) => {
                     error!("error shuffling bytes: {:?}", e);
-                },
+                }
             }
             info!("bidi stream loop finished");
 
@@ -299,20 +252,18 @@ impl Server {
                 Ok(()) => {
                     warn!("unexpected send on spawned_threads chan");
                     return;
-                },
+                }
                 Err(RecvTimeoutError::Timeout) => {
                     warn!("timed out waiting for bidi_stream threads to spawn");
                     return;
-                },
+                }
                 // fallthrough because channel closure indicates all threads have
                 // been spawned and are ready for us
-                Err(RecvTimeoutError::Disconnected) => {},
+                Err(RecvTimeoutError::Disconnected) => {}
             }
 
-            let tty_oversize = tty::Size {
-                rows: local_tty_size.rows + 1,
-                cols: local_tty_size.cols + 1,
-            };
+            let tty_oversize =
+                tty::Size { rows: local_tty_size.rows + 1, cols: local_tty_size.cols + 1 };
 
             // For some reason, emacs will correctly re-draw when we jiggle
             // the tty size via a ResizeRequest RPC call, but directly calling
@@ -326,17 +277,13 @@ impl Server {
 
                 if let Some(session) = shells.get(&sess_name) {
                     if let Err(e) = session.rpc_call(SessionMessageRequestPayload::Resize(
-                        protocol::ResizeRequest {
-                            tty_size: tty_oversize,
-                        },
+                        protocol::ResizeRequest { tty_size: tty_oversize },
                     )) {
                         error!("making oversize resize rpc: {:?}", e);
                     }
 
                     if let Err(e) = session.rpc_call(SessionMessageRequestPayload::Resize(
-                        protocol::ResizeRequest {
-                            tty_size: local_tty_size,
-                        },
+                        protocol::ResizeRequest { tty_size: local_tty_size },
                     )) {
                         error!("making normal size resize rpc: {:?}", e);
                     }
@@ -358,10 +305,8 @@ impl Server {
             fs::create_dir_all(symlink.parent().ok_or(anyhow!("no symlink parent dir"))?)
                 .context("could not create directory for SSH_AUTH_SOCK symlink")?;
 
-            let sessions_dir = symlink
-                .parent()
-                .and_then(|d| d.parent())
-                .ok_or(anyhow!("no sessions dir"))?;
+            let sessions_dir =
+                symlink.parent().and_then(|d| d.parent()).ok_or(anyhow!("no sessions dir"))?;
             let sessions_meta = fs::metadata(sessions_dir).context("stating sessions dir")?;
 
             // set RWX bits for user and no one else
@@ -408,10 +353,7 @@ impl Server {
 
         write_reply(
             &mut stream,
-            protocol::DetachReply {
-                not_found_sessions,
-                not_attached_sessions,
-            },
+            protocol::DetachReply { not_found_sessions, not_attached_sessions },
         )
         .context("writing detach reply")?;
 
@@ -439,10 +381,7 @@ impl Server {
                     }
 
                     let inner = s.inner.lock().unwrap();
-                    let pid = inner
-                        .pty_master
-                        .child_pid()
-                        .ok_or(anyhow!("no child pid"))?;
+                    let pid = inner.pty_master.child_pid().ok_or(anyhow!("no child pid"))?;
 
                     // SIGHUP is a signal to indicate that the terminal has disconnected
                     // from a process. We can't use the normal SIGTERM graceful-shutdown
@@ -466,8 +405,8 @@ impl Server {
                         Err(RecvTimeoutError::Timeout) => {
                             signal::kill(Pid::from_raw(pid), Some(signal::Signal::SIGKILL))
                                 .context("sending SIGKILL to child proc")?;
-                        },
-                        Err(_) => {},
+                        }
+                        Err(_) => {}
                     }
 
                     // we don't need to wait since the dedicated reaping thread is active
@@ -535,8 +474,9 @@ impl Server {
         Ok(())
     }
 
-    /// Spawn a subshell and return the sessession descriptor for it. The session is wrapped
-    /// in an Arc so the inner session can hold a Weak back-reference to the session.
+    /// Spawn a subshell and return the sessession descriptor for it. The
+    /// session is wrapped in an Arc so the inner session can hold a Weak
+    /// back-reference to the session.
     #[instrument(skip_all)]
     fn spawn_subshell(
         &self,
@@ -659,18 +599,13 @@ impl Server {
                 error!("waiting to reap child shell: {:?}", e);
             }
 
-            info!(
-                "s({}): reaped child shell: {:?}",
-                session_name, waitable_child
-            );
+            info!("s({}): reaped child shell: {:?}", session_name, waitable_child);
         });
 
         let (in_tx, in_rx) = crossbeam_channel::unbounded();
         let (out_tx, out_rx) = crossbeam_channel::unbounded();
-        let session_caller = Arc::new(Mutex::new(shell::SessionCaller {
-            rpc_in: in_tx,
-            rpc_out: out_rx,
-        }));
+        let session_caller =
+            Arc::new(Mutex::new(shell::SessionCaller { rpc_in: in_tx, rpc_out: out_rx }));
         let session_inner = shell::SessionInner {
             name: header.name.clone(),
             caller: Arc::clone(&session_caller),
@@ -682,9 +617,7 @@ impl Server {
             config: self.config.clone(),
             // outer: sync::Weak::new(),
         };
-        session_inner
-            .set_pty_size(&header.local_tty_size)
-            .context("setting initial pty size")?;
+        session_inner.set_pty_size(&header.local_tty_size).context("setting initial pty size")?;
         Ok(shell::Session {
             caller: session_caller,
             started_at: time::SystemTime::now(),
@@ -693,10 +626,7 @@ impl Server {
     }
 
     fn ssh_auth_sock_symlink(&self, session_name: PathBuf) -> PathBuf {
-        self.runtime_dir
-            .join("sessions")
-            .join(session_name)
-            .join("ssh-auth-sock.socket")
+        self.runtime_dir.join("sessions").join(session_name).join("ssh-auth-sock.socket")
     }
 }
 
@@ -719,9 +649,7 @@ where
     let serializeable_stream = stream.try_clone().context("cloning stream handle")?;
     bincode::serialize_into(serializeable_stream, &header).context("writing reply")?;
 
-    stream
-        .set_write_timeout(None)
-        .context("unsetting write timout on inbound session")?;
+    stream.set_write_timeout(None).context("unsetting write timout on inbound session")?;
     Ok(())
 }
 
@@ -729,10 +657,7 @@ where
 /// control socket has the same UID as the current user and that
 /// both have the same executable path.
 fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
-    use nix::{
-        sys::socket,
-        unistd,
-    };
+    use nix::{sys::socket, unistd};
 
     let peer_creds = socket::getsockopt(sock.as_raw_fd(), socket::sockopt::PeerCredentials)
         .context("could not get peer creds from socket")?;
@@ -747,9 +672,7 @@ fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
     let peer_exe = exe_for_pid(peer_pid).context("could not resolve exe from the pid")?;
     let self_exe = exe_for_pid(self_pid).context("could not resolve our own exe")?;
     if peer_exe != self_exe {
-        return Err(anyhow!(
-            "shpool prohibits connecting to a daemon with a different exe"
-        ));
+        return Err(anyhow!("shpool prohibits connecting to a daemon with a different exe"));
     }
 
     Ok(())

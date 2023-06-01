@@ -1,29 +1,17 @@
 use std::{
     io,
-    os::unix::io::{
-        AsRawFd,
-        RawFd,
-    },
+    os::unix::io::{AsRawFd, RawFd},
 };
 
 use anyhow::Context;
 use nix::{
     sys::{
         termios,
-        termios::{
-            ControlFlags,
-            InputFlags,
-            LocalFlags,
-            OutputFlags,
-            SetArg,
-        },
+        termios::{ControlFlags, InputFlags, LocalFlags, OutputFlags, SetArg},
     },
     unistd::isatty,
 };
-use serde_derive::{
-    Deserialize,
-    Serialize,
-};
+use serde_derive::{Deserialize, Serialize};
 use tracing::error;
 
 // see `man ioctl_tty` for info on these ioctl commands
@@ -39,12 +27,7 @@ pub struct Size {
 impl Size {
     /// from_fd returns the terminal size for the given terminal.
     pub fn from_fd(fd: RawFd) -> anyhow::Result<Size> {
-        let mut term_size = libc::winsize {
-            ws_row: 0,
-            ws_col: 0,
-            ws_xpixel: 0,
-            ws_ypixel: 0,
-        };
+        let mut term_size = libc::winsize { ws_row: 0, ws_col: 0, ws_xpixel: 0, ws_ypixel: 0 };
 
         // Saftey: term_size is stack allocated and live for the whole
         //         call.
@@ -52,21 +35,14 @@ impl Size {
             tiocgwinsz(fd, &mut term_size).context("fetching term size")?;
         }
 
-        Ok(Size {
-            rows: term_size.ws_row,
-            cols: term_size.ws_col,
-        })
+        Ok(Size { rows: term_size.ws_row, cols: term_size.ws_col })
     }
 
     /// set_fd sets the tty indicated by the given file descriptor
     /// to have this size.
     pub fn set_fd(&self, fd: RawFd) -> anyhow::Result<()> {
-        let term_size = libc::winsize {
-            ws_row: self.rows,
-            ws_col: self.cols,
-            ws_xpixel: 0,
-            ws_ypixel: 0,
-        };
+        let term_size =
+            libc::winsize { ws_row: self.rows, ws_col: self.cols, ws_xpixel: 0, ws_ypixel: 0 };
 
         unsafe {
             tiocswinsz(fd, &term_size).context("setting term size")?;

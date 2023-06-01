@@ -1,17 +1,10 @@
-use std::{
-    io,
-    path::PathBuf,
-    time,
-};
+use std::{io, path::PathBuf, time};
 
 use anyhow::Context;
 
 use super::{
     protocol,
-    protocol::{
-        ConnectHeader,
-        ListReply,
-    },
+    protocol::{ConnectHeader, ListReply},
 };
 
 pub fn run(socket: PathBuf) -> anyhow::Result<()> {
@@ -23,12 +16,10 @@ pub fn run(socket: PathBuf) -> anyhow::Result<()> {
                 eprintln!("could not connect to daemon");
             }
             return Err(io_err).context("connecting to daemon");
-        },
+        }
     };
 
-    client
-        .write_connect_header(ConnectHeader::List)
-        .context("sending list connect header")?;
+    client.write_connect_header(ConnectHeader::List).context("sending list connect header")?;
     let reply: ListReply = client.read_reply().context("reading reply")?;
 
     println!("NAME\tSTARTED_AT");

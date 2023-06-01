@@ -22,7 +22,8 @@ The biggest thing I'm having to work around is:
 ```
 sudo glinux-add-repo shpool unstable && \
 sudo apt update && \
-sudo apt install shpool
+sudo apt install shpool && \
+systemctl --user start shpool
 ```
 
 ### Shell Config

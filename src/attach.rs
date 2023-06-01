@@ -1,30 +1,12 @@
-use std::{
-    env,
-    fmt,
-    io,
-    path::PathBuf,
-    thread,
-    time,
-};
+use std::{env, fmt, io, path::PathBuf, thread, time};
 
-use anyhow::{
-    anyhow,
-    Context,
-};
-use tracing::{
-    error,
-    info,
-    warn,
-};
+use anyhow::{anyhow, Context};
+use tracing::{error, info, warn};
 
 use super::{
     protocol,
-    protocol::{
-        AttachHeader,
-        ConnectHeader,
-    },
-    test_hooks,
-    tty,
+    protocol::{AttachHeader, ConnectHeader},
+    test_hooks, tty,
 };
 
 const MAX_FORCE_RETRIES: usize = 20;
@@ -41,7 +23,7 @@ pub fn run(name: String, force: bool, socket: PathBuf) -> anyhow::Result<()> {
             Ok(BusyError) if !force => {
                 eprintln!("session '{}' already has a terminal attached", name);
                 return Ok(());
-            },
+            }
             Ok(BusyError) => {
                 if !detached {
                     let mut client = dial_client(&socket)?;
@@ -61,11 +43,14 @@ pub fn run(name: String, force: bool, socket: PathBuf) -> anyhow::Result<()> {
                 thread::sleep(time::Duration::from_millis(100));
 
                 if tries > MAX_FORCE_RETRIES {
-                    eprintln!("session '{}' already has a terminal which remains attached even after attempting to detach it", name);
+                    eprintln!(
+                        "session '{}' already has a terminal which remains attached even after attempting to detach it",
+                        name
+                    );
                     return Err(anyhow!("could not detach session, forced attach failed"));
                 }
                 tries += 1;
-            },
+            }
             Err(err) => return Err(err),
         }
     }
@@ -90,7 +75,7 @@ fn do_attach(name: &str, socket: &PathBuf) -> anyhow::Result<()> {
         Err(e) => {
             warn!("stdin is not a tty, using default size (err: {:?})", e);
             tty::Size { rows: 24, cols: 80 }
-        },
+        }
     };
 
     client
@@ -116,24 +101,20 @@ fn do_attach(name: &str, socket: &PathBuf) -> anyhow::Result<()> {
         match attach_resp.status {
             Busy => {
                 return Err(BusyError.into());
-            },
+            }
             Forbidden(reason) => {
                 eprintln!("forbidden: {}", reason);
                 return Err(anyhow!("forbidden: {}", reason));
-            },
+            }
             Attached => {
                 info!("attached to an existing session: '{}'", name);
-            },
+            }
             Created => {
                 info!("created a new session: '{}'", name);
-            },
+            }
             UnexpectedError(err) => {
-                return Err(anyhow!(
-                    "BUG: unexpected error attaching to '{}': {}",
-                    name,
-                    err
-                ))
-            },
+                return Err(anyhow!("BUG: unexpected error attaching to '{}': {}", name, err));
+            }
         }
     }
 
@@ -149,7 +130,7 @@ fn dial_client(socket: &PathBuf) -> anyhow::Result<protocol::Client> {
                 eprintln!("could not connect to daemon");
             }
             Err(io_err).context("connecting to daemon")
-        },
+        }
     }
 }
 
@@ -164,17 +145,11 @@ struct SignalHandler {
 
 impl SignalHandler {
     fn new(session_name: String, socket: PathBuf) -> Self {
-        SignalHandler {
-            session_name,
-            socket,
-        }
+        SignalHandler { session_name, socket }
     }
 
     fn spawn(self) -> anyhow::Result<()> {
-        use signal_hook::{
-            consts::*,
-            iterator::*,
-        };
+        use signal_hook::{consts::*, iterator::*};
 
         let sigs = vec![SIGWINCH];
         let mut signals = Signals::new(&sigs).context("creating signal iterator")?;
@@ -186,7 +161,7 @@ impl SignalHandler {
                     sig => {
                         error!("unknown signal: {}", sig);
                         panic!("unknown signal: {}", sig);
-                    },
+                    }
                 };
                 if let Err(e) = res {
                     error!("signal handler error: {:?}", e);
@@ -210,30 +185,27 @@ impl SignalHandler {
                 protocol::SessionMessageRequest {
                     session_name: self.session_name.clone(),
                     payload: protocol::SessionMessageRequestPayload::Resize(
-                        protocol::ResizeRequest {
-                            tty_size: tty_size.clone(),
-                        },
+                        protocol::ResizeRequest { tty_size: tty_size.clone() },
                     ),
                 },
             ))
             .context("writing resize request")?;
 
-        let reply: protocol::SessionMessageReply = client
-            .read_reply()
-            .context("reading session message reply")?;
+        let reply: protocol::SessionMessageReply =
+            client.read_reply().context("reading session message reply")?;
         match reply {
             protocol::SessionMessageReply::NotFound => {
-                warn!("handle_sigwinch: sent resize for session '{}', but the daemon has no record of that session", self.session_name);
-            },
-            protocol::SessionMessageReply::Resize(protocol::ResizeReply::Ok) => {
-                info!(
-                    "handle_sigwinch: resized session '{}' to {:?}",
-                    self.session_name, tty_size
+                warn!(
+                    "handle_sigwinch: sent resize for session '{}', but the daemon has no record of that session",
+                    self.session_name
                 );
-            },
+            }
+            protocol::SessionMessageReply::Resize(protocol::ResizeReply::Ok) => {
+                info!("handle_sigwinch: resized session '{}' to {:?}", self.session_name, tty_size);
+            }
             reply => {
                 warn!("handle_sigwinch: unexpected resize reply: {:?}", reply);
-            },
+            }
         }
 
         Ok(())

@@ -1,21 +1,10 @@
-use std::{
-    io,
-    path::Path,
-};
+use std::{io, path::Path};
 
-use anyhow::{
-    anyhow,
-    Context,
-};
+use anyhow::{anyhow, Context};
 
 use super::{
-    common,
-    protocol,
-    protocol::{
-        ConnectHeader,
-        DetachReply,
-        DetachRequest,
-    },
+    common, protocol,
+    protocol::{ConnectHeader, DetachReply, DetachRequest},
 };
 
 pub fn run<P>(mut sessions: Vec<String>, socket: P) -> anyhow::Result<()>
@@ -30,7 +19,7 @@ where
                 eprintln!("could not connect to daemon");
             }
             return Err(io_err).context("connecting to daemon");
-        },
+        }
     };
 
     common::resolve_sessions(&mut sessions, "detach")?;
@@ -47,10 +36,7 @@ where
     }
     if reply.not_attached_sessions.len() > 0 {
         eprintln!("not attached: {}", reply.not_attached_sessions.join(" "));
-        return Err(anyhow!(
-            "not attached: {}",
-            reply.not_attached_sessions.join(" ")
-        ));
+        return Err(anyhow!("not attached: {}", reply.not_attached_sessions.join(" ")));
     }
 
     Ok(())

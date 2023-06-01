@@ -1,22 +1,12 @@
 use std::{
     path::PathBuf,
-    sync::{
-        atomic::AtomicBool,
-        Arc,
-    },
+    sync::{atomic::AtomicBool, Arc},
     thread,
 };
 
 use anyhow::Context;
-use signal_hook::{
-    consts::TERM_SIGNALS,
-    flag,
-    iterator::Signals,
-};
-use tracing::{
-    error,
-    info,
-};
+use signal_hook::{consts::TERM_SIGNALS, flag, iterator::Signals};
+use tracing::{error, info};
 
 pub struct Handler {
     sock: Option<PathBuf>,
@@ -38,8 +28,8 @@ impl Handler {
             // This will do nothing the first time (because term_now is false).
             flag::register_conditional_shutdown(*sig, 1, Arc::clone(&term_now))?;
             // But this will "arm" the above for the second time, by setting it to true.
-            // The order of registering these is important, if you put this one first, it will
-            // first arm and then terminate ‒ all in the first round.
+            // The order of registering these is important, if you put this one first, it
+            // will first arm and then terminate ‒ all in the first round.
             flag::register(*sig, Arc::clone(&term_now))?;
         }
 

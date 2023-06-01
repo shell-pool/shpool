@@ -51,11 +51,7 @@ fn one_session() -> anyhow::Result<()> {
     support::dump_err(|| {
         let mut daemon_proc =
             support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
-        let bidi_enter_w = daemon_proc
-            .events
-            .take()
-            .unwrap()
-            .waiter(["daemon-bidi-stream-enter"]);
+        let bidi_enter_w = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-enter"]);
 
         let _sess1 = daemon_proc.attach("sh1", false, vec![])?;
 

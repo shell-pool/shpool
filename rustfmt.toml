@@ -1,7 +1,10 @@
 # Use: `cargo +nightly fmt`
-imports_layout = "Vertical"
-imports_granularity = "Crate"
-group_imports = "StdExternalCrate"
-match_block_trailing_comma = true
-use_field_init_shorthand = true
-use_try_shorthand = true
+#
+# The standard devtools/rust/rustfmt.toml google rust format.
+
+edition = "2021"
+version = "Two"
+use_small_heuristics = "Max"
+newline_style = "Unix"
+wrap_comments = true
+format_generated_files = false

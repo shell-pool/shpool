@@ -34,16 +34,9 @@
 //! be singletons besides 'Ctrl' or of the form 'Ctrl-x' where
 //! x is some non-'Ctrl' key.
 
-use std::{
-    collections::HashMap,
-    fmt,
-    hash,
-};
+use std::{collections::HashMap, fmt, hash};
 
-use anyhow::{
-    anyhow,
-    Context,
-};
+use anyhow::{anyhow, Context};
 use serde_derive::Deserialize;
 
 //
@@ -102,9 +95,8 @@ impl Bindings {
 
         let tokenizer = Lexer::new();
         for (binding_src, action) in bindings.into_iter() {
-            let tokens = tokenizer
-                .tokenize(binding_src.chars())
-                .context("tokenizing keybinding")?;
+            let tokens =
+                tokenizer.tokenize(binding_src.chars()).context("tokenizing keybinding")?;
             let sequence = parse(tokens).context("parsing keybinding")?;
             for chord in sequence.0.iter() {
                 // resolving the key code will also check the validity
@@ -124,13 +116,8 @@ impl Bindings {
 
                 chords.insert(vec![code].into_iter(), *chord_atom);
             }
-            sequences.insert(
-                sequence
-                    .0
-                    .iter()
-                    .map(|chord| *chord_atom_tab.get(chord).unwrap()),
-                action,
-            );
+            sequences
+                .insert(sequence.0.iter().map(|chord| *chord_atom_tab.get(chord).unwrap()), action);
         }
 
         Ok(Bindings {
@@ -160,11 +147,11 @@ impl Bindings {
                     } else {
                         BindingResult::NoMatch
                     }
-                },
+                }
                 _ => {
                     self.sequences_cursor = TrieCursor::Start;
                     BindingResult::NoMatch
-                },
+                }
             }
         } else {
             match self.chords_cursor {
@@ -174,7 +161,7 @@ impl Bindings {
                     self.sequences_cursor = TrieCursor::Start;
                     self.chords_cursor = TrieCursor::Start;
                     BindingResult::NoMatch
-                },
+                }
             }
         }
     }
@@ -219,10 +206,7 @@ impl Chord {
             }
         } else if self.0.len() == 2 {
             if !Self::is_ctrl(&self.0[0]) {
-                return Err(anyhow!(
-                    "invalid chord: {}: Ctrl is the only supported mod key",
-                    self
-                ));
+                return Err(anyhow!("invalid chord: {}: Ctrl is the only supported mod key", self));
             }
             if Self::is_ctrl(&self.0[1]) {
                 return Err(anyhow!("invalid chord: {}: Ctrl cannot be repeated", self));
@@ -309,14 +293,14 @@ fn parse<T: IntoIterator<Item = Token>>(tokens: T) -> anyhow::Result<Sequence> {
                     keys.clear();
                     keys.push(key);
                 }
-            },
+            }
             Token::Dash => {
                 if saw_dash {
                     return Err(anyhow!("unexpected DASH token"));
                 } else {
                     saw_dash = true;
                 }
-            },
+            }
         }
     }
 
@@ -376,7 +360,7 @@ impl Lexer {
                     }
                     word_chars.clear();
                     continue;
-                },
+                }
                 TrieCursor::Match { is_partial, .. } => {
                     word_chars.push(c);
                     if is_partial {
@@ -389,7 +373,7 @@ impl Lexer {
                         word_chars.clear();
                         continue;
                     }
-                },
+                }
             }
         }
 
@@ -434,9 +418,7 @@ where
     Sym: Copy,
 {
     fn new() -> Self {
-        Trie {
-            nodes: vec![TrieNode::new(None)],
-        }
+        Trie { nodes: vec![TrieNode::new(None)] }
     }
 
     fn insert<Seq: Iterator<Item = Sym>>(&mut self, seq: Seq, value: V) {
@@ -467,11 +449,7 @@ where
             return self.nodes[0].value.is_some();
         }
 
-        if let TrieCursor::Match { is_partial, .. } = match_state {
-            !is_partial
-        } else {
-            false
-        }
+        if let TrieCursor::Match { is_partial, .. } = match_state { !is_partial } else { false }
     }
 
     fn advance(&self, cursor: TrieCursor, sym: Sym) -> TrieCursor {
@@ -482,10 +460,7 @@ where
         };
 
         if let Some(idx) = node.tab.get(sym) {
-            TrieCursor::Match {
-                idx: *idx,
-                is_partial: self.nodes[*idx].value.is_none(),
-            }
+            TrieCursor::Match { idx: *idx, is_partial: self.nodes[*idx].value.is_none() }
         } else {
             TrieCursor::NoMatch
         }
@@ -505,11 +480,7 @@ where
     TT: TrieTab<Sym>,
 {
     fn new(value: Option<V>) -> Self {
-        TrieNode {
-            phantom: std::marker::PhantomData,
-            value,
-            tab: TT::new(),
-        }
+        TrieNode { phantom: std::marker::PhantomData, value, tab: TT::new() }
     }
 }
 
@@ -636,69 +607,38 @@ mod test {
                 // the bindings mapping
                 vec![("a", Action::Detach)],
                 // the keypresses to scan over
-                vec!['a']
-                    .iter()
-                    .map(|c| *c as u32 as u8)
-                    .collect::<Vec<_>>(),
+                vec!['a'].iter().map(|c| *c as u32 as u8).collect::<Vec<_>>(),
                 BindingResult::Match(Action::Detach), // the final output from the engine
             ),
             (
                 // the bindings mapping
                 vec![("a", Action::Detach)],
                 // the keypresses to scan over
-                vec!['b', 'x', 'y', 'a']
-                    .iter()
-                    .map(|c| *c as u32 as u8)
-                    .collect::<Vec<_>>(),
+                vec!['b', 'x', 'y', 'a'].iter().map(|c| *c as u32 as u8).collect::<Vec<_>>(),
                 BindingResult::Match(Action::Detach), // the final output from the engine
             ),
             (
                 vec![("a", Action::Detach)],
-                vec!['b']
-                    .iter()
-                    .map(|c| *c as u32 as u8)
-                    .collect::<Vec<_>>(),
+                vec!['b'].iter().map(|c| *c as u32 as u8).collect::<Vec<_>>(),
                 BindingResult::NoMatch,
             ),
             (
                 vec![("a", Action::Detach)],
-                vec!['a', 'a', 'x', 'a', 'b']
-                    .iter()
-                    .map(|c| *c as u32 as u8)
-                    .collect::<Vec<_>>(),
+                vec!['a', 'a', 'x', 'a', 'b'].iter().map(|c| *c as u32 as u8).collect::<Vec<_>>(),
                 BindingResult::NoMatch,
             ),
-            (
-                vec![("Ctrl-a", Action::Detach)],
-                vec![1],
-                BindingResult::Match(Action::Detach),
-            ),
-            (
-                vec![("Ctrl-Space", Action::Detach)],
-                vec![0],
-                BindingResult::Match(Action::Detach),
-            ),
+            (vec![("Ctrl-a", Action::Detach)], vec![1], BindingResult::Match(Action::Detach)),
+            (vec![("Ctrl-Space", Action::Detach)], vec![0], BindingResult::Match(Action::Detach)),
             (
                 vec![("Ctrl-Space Ctrl-d", Action::Detach)],
                 vec![0, 4],
                 BindingResult::Match(Action::Detach),
             ),
-            (
-                vec![("Ctrl-Space Ctrl-d", Action::Detach)],
-                vec![0, 20, 4],
-                BindingResult::NoMatch,
-            ),
-            (
-                vec![("Ctrl-Space Ctrl-d", Action::Detach)],
-                vec![0, 4, 20],
-                BindingResult::NoMatch,
-            ),
+            (vec![("Ctrl-Space Ctrl-d", Action::Detach)], vec![0, 20, 4], BindingResult::NoMatch),
+            (vec![("Ctrl-Space Ctrl-d", Action::Detach)], vec![0, 4, 20], BindingResult::NoMatch),
             (
                 vec![("a b c", Action::Detach)],
-                vec!['a', 'b']
-                    .iter()
-                    .map(|c| *c as u32 as u8)
-                    .collect::<Vec<_>>(),
+                vec!['a', 'b'].iter().map(|c| *c as u32 as u8).collect::<Vec<_>>(),
                 BindingResult::Partial,
             ),
         ];
@@ -795,22 +735,12 @@ mod test {
             (" -\t", vec![Token::Dash]),
             (" \t-\t ", vec![Token::Dash]),
             ("a", vec![Token::Key(String::from("a"))]),
-            (
-                "a a",
-                vec![Token::Key(String::from("a")), Token::Key(String::from("a"))],
-            ),
-            (
-                "aa",
-                vec![Token::Key(String::from("a")), Token::Key(String::from("a"))],
-            ),
+            ("a a", vec![Token::Key(String::from("a")), Token::Key(String::from("a"))]),
+            ("aa", vec![Token::Key(String::from("a")), Token::Key(String::from("a"))]),
             ("Ctrl", vec![Token::Key(String::from("Ctrl"))]),
             (
                 "Ctrl-a",
-                vec![
-                    Token::Key(String::from("Ctrl")),
-                    Token::Dash,
-                    Token::Key(String::from("a")),
-                ],
+                vec![Token::Key(String::from("Ctrl")), Token::Dash, Token::Key(String::from("a"))],
             ),
         ];
 
@@ -842,11 +772,8 @@ mod test {
 
     #[test]
     fn test_trie_contains() {
-        let cases = vec![
-            vec!["word"],
-            vec![""],
-            vec!["word", "words", "blah", "blip", "foo", "bar"],
-        ];
+        let cases =
+            vec![vec!["word"], vec![""], vec!["word", "words", "blah", "blip", "foo", "bar"]];
 
         for words in cases.into_iter() {
             let mut trie: Trie<_, _, HashMap<char, usize>> = Trie::new();

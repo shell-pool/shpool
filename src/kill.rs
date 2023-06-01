@@ -1,21 +1,10 @@
-use std::{
-    io,
-    path::Path,
-};
+use std::{io, path::Path};
 
-use anyhow::{
-    anyhow,
-    Context,
-};
+use anyhow::{anyhow, Context};
 
 use super::{
-    common,
-    protocol,
-    protocol::{
-        ConnectHeader,
-        KillReply,
-        KillRequest,
-    },
+    common, protocol,
+    protocol::{ConnectHeader, KillReply, KillRequest},
 };
 
 pub fn run<P>(mut sessions: Vec<String>, socket: P) -> anyhow::Result<()>
@@ -30,7 +19,7 @@ where
                 eprintln!("could not connect to daemon");
             }
             return Err(io_err).context("connecting to daemon");
-        },
+        }
     };
 
     common::resolve_sessions(&mut sessions, "kill")?;

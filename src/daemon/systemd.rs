@@ -1,18 +1,13 @@
 use std::{
     env,
-    os::unix::{
-        io::FromRawFd,
-        net::UnixListener,
-    },
+    os::unix::{io::FromRawFd, net::UnixListener},
 };
 
-use anyhow::{
-    anyhow,
-    Context,
-};
+use anyhow::{anyhow, Context};
 use nix::sys::stat;
 
-// the fd that uses for the first activation socket (0 through 2 are for the std streams)
+// the fd that uses for the first activation socket (0 through 2 are for the std
+// streams)
 const FIRST_ACTIVATION_SOCKET_FD: i32 = 3;
 
 /// activation_socket converts the systemd activation socket
@@ -23,10 +18,7 @@ pub fn activation_socket() -> anyhow::Result<UnixListener> {
         .parse::<isize>()
         .context("parsing LISTEN_FDS as int")?;
     if num_activation_socks != 1 {
-        return Err(anyhow!(
-            "expected exactly 1 activation fd, got {}",
-            num_activation_socks,
-        ));
+        return Err(anyhow!("expected exactly 1 activation fd, got {}", num_activation_socks,));
     }
 
     let fd = FIRST_ACTIVATION_SOCKET_FD;

@@ -1,21 +1,14 @@
 use std::{
     collections::hash_map::DefaultHasher,
-    env,
-    fs,
-    hash::{
-        Hash,
-        Hasher,
-    },
+    env, fs,
+    hash::{Hash, Hasher},
     io,
     path::PathBuf,
     sync::Mutex,
 };
 
 use anyhow::Context;
-use clap::{
-    Parser,
-    Subcommand,
-};
+use clap::{Parser, Subcommand};
 use tracing::error;
 use tracing_subscriber::fmt::format::FmtSpan;
 
@@ -80,11 +73,7 @@ enum Commands {
 
     #[clap(about = "Creates or attaches to an existing shell session")]
     Attach {
-        #[clap(
-            short,
-            long,
-            help = "If a tty is already attached to the session, detach it first"
-        )]
+        #[clap(short, long, help = "If a tty is already attached to the session, detach it first")]
         force: bool,
         #[clap(help = "The name of the shell session to create or attach to")]
         name: String,
@@ -159,7 +148,7 @@ fn main() -> anyhow::Result<()> {
         Ok(runtime_dir) => PathBuf::from(runtime_dir),
         Err(_) => {
             PathBuf::from(env::var("HOME").context("no XDG_RUNTIME_DIR or HOME")?).join(".shpool")
-        },
+        }
     }
     .join("shpool");
 
@@ -176,7 +165,7 @@ fn main() -> anyhow::Result<()> {
             runtime_dir = runtime_dir.join(format!("{:x}", hash));
 
             PathBuf::from(s)
-        },
+        }
         None => runtime_dir.join("shpool.socket"),
     };
 

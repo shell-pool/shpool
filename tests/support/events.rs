@@ -1,10 +1,4 @@
-use std::{
-    io,
-    io::BufRead,
-    os::unix::net::UnixStream,
-    path::Path,
-    time,
-};
+use std::{io, io::BufRead, os::unix::net::UnixStream, path::Path, time};
 
 use anyhow::anyhow;
 
@@ -21,9 +15,7 @@ impl Events {
         let mut sleep_dur = time::Duration::from_millis(5);
         for _ in 0..12 {
             if let Ok(s) = UnixStream::connect(&sock) {
-                return Ok(Events {
-                    lines: io::BufReader::new(s).lines(),
-                });
+                return Ok(Events { lines: io::BufReader::new(s).lines() });
             } else {
                 std::thread::sleep(sleep_dur);
                 sleep_dur *= 2;
@@ -69,16 +61,15 @@ impl Events {
                             }
                             offset += 1;
                         }
-                    },
+                    }
                     Err(e) => {
                         eprintln!("error scanning for event '{}': {:?}", events[offset], e);
-                    },
+                    }
                 }
             }
 
             if return_lines {
-                tx.send(WaiterEvent::Done((events[offset].clone(), self.lines)))
-                    .unwrap();
+                tx.send(WaiterEvent::Done((events[offset].clone(), self.lines))).unwrap();
             }
         });
 
@@ -123,32 +114,30 @@ impl EventWaiter {
                 } else {
                     Err(anyhow!("Got '{}' event, want '{}'", e, event))
                 };
-            },
+            }
             WaiterEvent::Done((e, _)) => {
                 return if e == event {
                     Ok(())
                 } else {
                     Err(anyhow!("Got '{}' event, want '{}'", e, event))
                 };
-            },
+            }
         }
     }
 
     pub fn wait_final_event(self, event: &str) -> anyhow::Result<Events> {
         eprintln!("waiting for final event '{}'", event);
         match self.matched.recv()? {
-            WaiterEvent::Event(e) => Err(anyhow!(
-                "Got non-fianl '{}' event, want final '{}'",
-                e,
-                event
-            )),
+            WaiterEvent::Event(e) => {
+                Err(anyhow!("Got non-fianl '{}' event, want final '{}'", e, event))
+            }
             WaiterEvent::Done((e, lines)) => {
                 return if e == event {
                     Ok(Events { lines })
                 } else {
                     Err(anyhow!("Got '{}' event, want '{}'", e, event))
                 };
-            },
+            }
         }
     }
 }

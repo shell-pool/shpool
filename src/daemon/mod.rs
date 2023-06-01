@@ -1,14 +1,7 @@
-use std::{
-    fs,
-    os::unix::net::UnixListener,
-    path::PathBuf,
-};
+use std::{fs, os::unix::net::UnixListener, path::PathBuf};
 
 use anyhow::Context;
-use tracing::{
-    info,
-    instrument,
-};
+use tracing::{info, instrument};
 
 mod config;
 mod keybindings;
@@ -49,14 +42,11 @@ pub fn run(
         Ok(l) => {
             info!("using systemd activation socket");
             (None, l)
-        },
+        }
         Err(e) => {
             info!("no systemd activation socket: {:?}", e);
-            (
-                Some(socket.clone()),
-                UnixListener::bind(&socket).context("binding to socket")?,
-            )
-        },
+            (Some(socket.clone()), UnixListener::bind(&socket).context("binding to socket")?)
+        }
     };
     // spawn the signal handler thread in the background
     signals::Handler::new(cleanup_socket.clone()).spawn()?;

@@ -8,22 +8,13 @@
 // named events in order to block until they have occurred.
 use std::{
     io::Write,
-    os::unix::net::{
-        UnixListener,
-        UnixStream,
-    },
+    os::unix::net::{UnixListener, UnixStream},
     sync::Mutex,
     time,
 };
 
-use anyhow::{
-    anyhow,
-    Context,
-};
-use tracing::{
-    error,
-    info,
-};
+use anyhow::{anyhow, Context};
+use tracing::{error, info};
 
 #[cfg(feature = "test_hooks")]
 pub fn emit(event: &str) {
@@ -76,10 +67,7 @@ pub struct TestHookServer {
 
 impl TestHookServer {
     fn new() -> Self {
-        TestHookServer {
-            sock_path: Mutex::new(None),
-            clients: Mutex::new(vec![]),
-        }
+        TestHookServer { sock_path: Mutex::new(None), clients: Mutex::new(vec![]) }
     }
 
     pub fn set_socket_path(&self, path: String) {
@@ -116,11 +104,11 @@ impl TestHookServer {
             match &*sock_path_m {
                 Some(s) => {
                     sock_path = String::from(s);
-                },
+                }
                 None => {
                     error!("you must call set_socket_path before calling start");
                     return;
-                },
+                }
             };
         }
 
@@ -129,7 +117,7 @@ impl TestHookServer {
             Err(e) => {
                 error!("error binding to test hook socket: {:?}", e);
                 return;
-            },
+            }
         };
         info!("listening for test hook connections on {}", &sock_path);
         for stream in listener.incoming() {
@@ -139,7 +127,7 @@ impl TestHookServer {
                 Err(e) => {
                     error!("error accepting connection to test hook server: {:?}", e);
                     continue;
-                },
+                }
             };
             let mut clients = self.clients.lock().unwrap();
             clients.push(stream);

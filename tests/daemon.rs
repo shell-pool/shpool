@@ -2,34 +2,19 @@ use std::{
     fmt::Write,
     io::Read,
     os::unix::{
-        io::{
-            AsRawFd,
-            FromRawFd,
-        },
+        io::{AsRawFd, FromRawFd},
         net::UnixListener,
         process::CommandExt,
     },
     path,
-    process::{
-        Command,
-        Stdio,
-    },
+    process::{Command, Stdio},
     time,
 };
 
-use anyhow::{
-    anyhow,
-    Context,
-};
+use anyhow::{anyhow, Context};
 use nix::{
-    sys::signal::{
-        self,
-        Signal,
-    },
-    unistd::{
-        ForkResult,
-        Pid,
-    },
+    sys::signal::{self, Signal},
+    unistd::{ForkResult, Pid},
 };
 use ntest::timeout;
 
@@ -62,9 +47,7 @@ fn start() -> anyhow::Result<()> {
 
         let mut stdout = child.stdout.take().context("missing stdout")?;
         let mut stdout_str = String::from("");
-        stdout
-            .read_to_string(&mut stdout_str)
-            .context("slurping stdout")?;
+        stdout.read_to_string(&mut stdout_str).context("slurping stdout")?;
 
         if stdout_str != "" {
             println!("{}", stdout_str);
@@ -73,9 +56,7 @@ fn start() -> anyhow::Result<()> {
 
         let mut stderr = child.stderr.take().context("missing stderr")?;
         let mut stderr_str = String::from("");
-        stderr
-            .read_to_string(&mut stderr_str)
-            .context("slurping stderr")?;
+        stderr.read_to_string(&mut stderr_str).context("slurping stderr")?;
         assert!(stderr_str.contains("STARTING DAEMON"));
 
         Ok(())
@@ -126,7 +107,7 @@ fn systemd_activation() -> anyhow::Result<()> {
                     Err(e) => {
                         eprintln!("dup err: {}", e);
                         std::process::exit(1)
-                    },
+                    }
                 };
 
                 // unset the fd_cloexec flag on the file descriptor so
@@ -147,10 +128,10 @@ fn systemd_activation() -> anyhow::Result<()> {
                 let err = cmd.exec();
                 eprintln!("exec err: {:?}", err);
                 std::process::exit(1);
-            },
+            }
             Err(e) => {
                 return Err(e).context("forking daemon proc");
-            },
+            }
         };
 
         // The server should start up and run without incident for
@@ -201,9 +182,7 @@ fn config() -> anyhow::Result<()> {
 
         let mut stdout = child.stdout.take().context("missing stdout")?;
         let mut stdout_str = String::from("");
-        stdout
-            .read_to_string(&mut stdout_str)
-            .context("slurping stdout")?;
+        stdout.read_to_string(&mut stdout_str).context("slurping stdout")?;
 
         if stdout_str != "" {
             println!("{}", stdout_str);
@@ -212,9 +191,7 @@ fn config() -> anyhow::Result<()> {
 
         let mut stderr = child.stderr.take().context("missing stderr")?;
         let mut stderr_str = String::from("");
-        stderr
-            .read_to_string(&mut stderr_str)
-            .context("slurping stderr")?;
+        stderr.read_to_string(&mut stderr_str).context("slurping stderr")?;
         assert!(stderr_str.contains("STARTING DAEMON"));
 
         Ok(())

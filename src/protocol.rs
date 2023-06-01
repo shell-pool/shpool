@@ -1,42 +1,18 @@
 use std::{
     convert::TryFrom,
     io,
-    io::{
-        Read,
-        Write,
-    },
+    io::{Read, Write},
     os::unix::net::UnixStream,
     path::Path,
-    thread,
-    time,
+    thread, time,
 };
 
-use anyhow::{
-    anyhow,
-    Context,
-};
-use byteorder::{
-    LittleEndian,
-    ReadBytesExt,
-    WriteBytesExt,
-};
-use serde_derive::{
-    Deserialize,
-    Serialize,
-};
-use tracing::{
-    debug,
-    instrument,
-    span,
-    trace,
-    warn,
-    Level,
-};
+use anyhow::{anyhow, Context};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use serde_derive::{Deserialize, Serialize};
+use tracing::{debug, instrument, span, trace, warn, Level};
 
-use super::{
-    consts,
-    tty,
-};
+use super::{consts, tty};
 
 const JOIN_POLL_DUR: time::Duration = time::Duration::from_millis(100);
 const JOIN_HANGUP_DUR: time::Duration = time::Duration::from_millis(300);
@@ -179,16 +155,13 @@ pub struct AttachHeader {
 
 impl AttachHeader {
     pub fn local_env_get(&self, var: &str) -> Option<&str> {
-        self.local_env
-            .iter()
-            .find(|(k, _)| k == var)
-            .map(|(_, v)| v.as_str())
+        self.local_env.iter().find(|(k, _)| k == var).map(|(_, v)| v.as_str())
     }
 }
 
 /// AttachReplyHeader is the blob of metadata that the shpool service prefixes
-/// the data stream with after an attach. In can be used to indicate a connection
-/// error.
+/// the data stream with after an attach. In can be used to indicate a
+/// connection error.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AttachReplyHeader {
     pub status: AttachStatus,
@@ -281,18 +254,11 @@ impl<'data> Chunk<'data> {
         let kind = r.read_u8()?;
         let len = r.read_u32::<LittleEndian>()? as usize;
         if len as usize > buf.len() {
-            return Err(anyhow!(
-                "chunk of size {} exceeds size limit of {} bytes",
-                len,
-                buf.len()
-            ));
+            return Err(anyhow!("chunk of size {} exceeds size limit of {} bytes", len, buf.len()));
         }
         r.read_exact(&mut buf[..len])?;
 
-        Ok(Chunk {
-            kind: ChunkKind::try_from(kind)?,
-            buf: &buf[..len],
-        })
+        Ok(Chunk { kind: ChunkKind::try_from(kind)?, buf: &buf[..len] })
     }
 }
 
@@ -307,10 +273,7 @@ impl Client {
     }
 
     pub fn write_connect_header(&mut self, header: ConnectHeader) -> anyhow::Result<()> {
-        let serialize_stream = self
-            .stream
-            .try_clone()
-            .context("cloning stream for reply")?;
+        let serialize_stream = self.stream.try_clone().context("cloning stream for reply")?;
         bincode::serialize_into(serialize_stream, &header).context("writing reply")?;
 
         Ok(())
@@ -376,11 +339,9 @@ impl Client {
                     match chunk.kind {
                         ChunkKind::Heartbeat => {
                             trace!("got heartbeat chunk");
-                        },
+                        }
                         ChunkKind::Data => {
-                            stdout
-                                .write_all(&chunk.buf[..])
-                                .context("writing chunk to stdout")?;
+                            stdout.write_all(&chunk.buf[..]).context("writing chunk to stdout")?;
 
                             if let Err(e) = stdout.flush() {
                                 if e.kind() == std::io::ErrorKind::WouldBlock {
@@ -393,7 +354,7 @@ impl Client {
                                 }
                             }
                             debug!("flushed stdout");
-                        },
+                        }
                     }
                 }
             });
@@ -424,8 +385,11 @@ impl Client {
                             // is to shut down at this point, we can resolve this
                             // by just hard-exiting the whole process. This allows
                             // us to use simple blocking IO.
-                            warn!("exiting due to a stuck IO thread stdin_to_sock_finished={} sock_to_stdout_finished={}",
-                                  stdin_to_sock_h.is_finished(), sock_to_stdout_h.is_finished());
+                            warn!(
+                                "exiting due to a stuck IO thread stdin_to_sock_finished={} sock_to_stdout_finished={}",
+                                stdin_to_sock_h.is_finished(),
+                                sock_to_stdout_h.is_finished()
+                            );
                             // make sure that we restore the tty flags on the input
                             // tty before exiting the process.
                             drop(tty_guard);

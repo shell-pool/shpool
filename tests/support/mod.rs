@@ -4,21 +4,14 @@
 #![allow(dead_code)]
 
 use std::{
-    env,
-    io,
+    env, io,
     io::BufRead,
-    path::{
-        Path,
-        PathBuf,
-    },
+    path::{Path, PathBuf},
     process::Command,
     sync::Mutex,
 };
 
-use anyhow::{
-    anyhow,
-    Context,
-};
+use anyhow::{anyhow, Context};
 
 pub mod attach;
 pub mod daemon;
@@ -73,10 +66,7 @@ pub fn shpool_bin() -> anyhow::Result<PathBuf> {
         let entry: serde_json::Value =
             serde_json::from_str(&line).context("parsing an output line from cargo")?;
 
-        let src_path = entry
-            .get("target")
-            .and_then(|v| v.get("src_path"))
-            .and_then(|v| v.as_str());
+        let src_path = entry.get("target").and_then(|v| v.get("src_path")).and_then(|v| v.as_str());
         let exe = entry.get("executable").and_then(|v| v.as_str());
         let kind = entry
             .get("target")
