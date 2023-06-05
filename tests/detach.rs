@@ -18,7 +18,7 @@ fn single_running() -> anyhow::Result<()> {
             .unwrap()
             .waiter(["daemon-bidi-stream-enter", "daemon-bidi-stream-done"]);
         let _attach_proc =
-            daemon_proc.attach("sh1", false, vec![]).context("starting attach proc")?;
+            daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
         waiter.wait_event("daemon-bidi-stream-enter")?;
 
         let out = daemon_proc.detach(vec![String::from("sh1")])?;
@@ -89,7 +89,7 @@ fn running_env_var() -> anyhow::Result<()> {
             .unwrap()
             .waiter(["daemon-bidi-stream-enter", "daemon-bidi-stream-done"]);
         let _attach_proc =
-            daemon_proc.attach("sh1", false, vec![]).context("starting attach proc")?;
+            daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
         waiter.wait_event("daemon-bidi-stream-enter")?;
 
         let out = Command::new(support::shpool_bin()?)
@@ -121,7 +121,8 @@ fn reattach() -> anyhow::Result<()> {
             support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
 
         let bidi_done_w = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
-        let mut sess1 = daemon_proc.attach("sh1", false, vec![]).context("starting attach proc")?;
+        let mut sess1 =
+            daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
 
         let mut lm1 = sess1.line_matcher()?;
         sess1.run_cmd("export MYVAR=first ; echo hi")?;
@@ -138,7 +139,8 @@ fn reattach() -> anyhow::Result<()> {
 
         daemon_proc.events = Some(bidi_done_w.wait_final_event("daemon-bidi-stream-done")?);
 
-        let mut sess2 = daemon_proc.attach("sh1", false, vec![]).context("starting attach proc")?;
+        let mut sess2 =
+            daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
         let mut lm2 = sess2.line_matcher()?;
         sess2.run_cmd("echo ${MYVAR:-second}")?;
         lm2.match_re("first$")?;
@@ -160,10 +162,12 @@ fn multiple_running() -> anyhow::Result<()> {
             "daemon-bidi-stream-done",
             "daemon-bidi-stream-done",
         ]);
-        let _sess1 = daemon_proc.attach("sh1", false, vec![]).context("starting attach proc")?;
+        let _sess1 =
+            daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
         waiter.wait_event("daemon-bidi-stream-enter")?;
 
-        let _sess2 = daemon_proc.attach("sh2", false, vec![]).context("starting attach proc")?;
+        let _sess2 =
+            daemon_proc.attach("sh2", Default::default()).context("starting attach proc")?;
         waiter.wait_event("daemon-bidi-stream-enter")?;
 
         let out = daemon_proc.detach(vec![String::from("sh1"), String::from("sh2")])?;
@@ -194,7 +198,7 @@ fn multiple_mixed() -> anyhow::Result<()> {
             .unwrap()
             .waiter(["daemon-bidi-stream-enter", "daemon-bidi-stream-done"]);
         let _attach_proc =
-            daemon_proc.attach("sh1", false, vec![]).context("starting attach proc")?;
+            daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
         waiter.wait_event("daemon-bidi-stream-enter")?;
 
         let out = daemon_proc.detach(vec![String::from("sh1"), String::from("sh2")])?;
@@ -224,7 +228,7 @@ fn double_tap() -> anyhow::Result<()> {
             .unwrap()
             .waiter(["daemon-bidi-stream-enter", "daemon-bidi-stream-done"]);
         let _attach_proc =
-            daemon_proc.attach("sh1", false, vec![]).context("starting attach proc")?;
+            daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
         waiter.wait_event("daemon-bidi-stream-enter")?;
 
         let out1 = daemon_proc.detach(vec![String::from("sh1")])?;

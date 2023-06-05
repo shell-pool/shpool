@@ -79,18 +79,22 @@ impl Server {
 
         let header = parse_connect_header(&mut stream).context("parsing connect header")?;
 
-        if let Err(err) = check_peer(&stream) {
-            if let protocol::ConnectHeader::Attach(_) = header {
-                write_reply(
-                    &mut stream,
-                    protocol::AttachReplyHeader {
-                        status: protocol::AttachStatus::Forbidden(format!("{:?}", err)),
-                    },
-                )?;
+        let warnings = match check_peer(&stream) {
+            Ok(warnings) => warnings,
+            Err(err) => {
+                if let protocol::ConnectHeader::Attach(_) = header {
+                    write_reply(
+                        &mut stream,
+                        protocol::AttachReplyHeader {
+                            status: protocol::AttachStatus::Forbidden(format!("{:?}", err)),
+                        },
+                    )?;
+                }
+                stream.shutdown(net::Shutdown::Both).context("closing stream")?;
+                return Err(err);
             }
-            stream.shutdown(net::Shutdown::Both).context("closing stream")?;
-            return Err(err).context("bad peer")?;
-        }
+        };
+        info!("checked peer with warnings: {:?}", warnings);
 
         // Unset the read timeout before we pass things off to a
         // worker thread because it is perfectly fine for there to
@@ -99,7 +103,7 @@ impl Server {
         stream.set_read_timeout(None).context("unsetting read timout on inbound session")?;
 
         match header {
-            protocol::ConnectHeader::Attach(h) => self.handle_attach(stream, h),
+            protocol::ConnectHeader::Attach(h) => self.handle_attach(stream, h, warnings),
             protocol::ConnectHeader::Detach(r) => self.handle_detach(stream, r),
             protocol::ConnectHeader::Kill(r) => self.handle_kill(stream, r),
             protocol::ConnectHeader::List => self.handle_list(stream),
@@ -114,12 +118,14 @@ impl Server {
         &self,
         mut stream: UnixStream,
         header: protocol::AttachHeader,
+        warnings: Vec<String>,
     ) -> anyhow::Result<()> {
         let (inner_to_stream, status) = {
             // we unwrap to propagate the poison as an unwind
             let mut shells = self.shells.lock().unwrap();
+            info!("locked shells table");
 
-            let mut status = protocol::AttachStatus::Attached;
+            let mut status = protocol::AttachStatus::Attached { warnings: warnings.clone() };
             if let Some(session) = shells.get(&header.name) {
                 info!("found entry for '{}'", header.name);
                 if let Ok(mut inner) = session.inner.try_lock() {
@@ -152,7 +158,7 @@ impl Server {
                         Err(TryRecvError::Disconnected) => {
                             // the channel is closed so we know the subshell exited
                             info!("stale inner={:?}, clobbering with new subshell", inner);
-                            status = protocol::AttachStatus::Created;
+                            status = protocol::AttachStatus::Created { warnings };
                         }
                     }
 
@@ -168,10 +174,10 @@ impl Server {
                     return Ok(());
                 }
             } else {
-                status = protocol::AttachStatus::Created;
+                status = protocol::AttachStatus::Created { warnings };
             }
 
-            if status == protocol::AttachStatus::Created {
+            if matches!(status, protocol::AttachStatus::Created { .. }) {
                 info!("creating new subshell");
                 let session = self.spawn_subshell(stream, &header)?;
 
@@ -657,7 +663,7 @@ where
 /// check_peer makes sure that a process dialing in on the shpool
 /// control socket has the same UID as the current user and that
 /// both have the same executable path.
-fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
+fn check_peer(sock: &UnixStream) -> anyhow::Result<Vec<String>> {
     use nix::{sys::socket, unistd};
 
     let peer_creds = socket::getsockopt(sock.as_raw_fd(), socket::sockopt::PeerCredentials)
@@ -673,10 +679,12 @@ fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
     let peer_exe = exe_for_pid(peer_pid).context("could not resolve exe from the pid")?;
     let self_exe = exe_for_pid(self_pid).context("could not resolve our own exe")?;
     if peer_exe != self_exe {
-        return Err(anyhow!("shpool prohibits connecting to a daemon with a different exe"));
+        return Ok(vec![String::from(
+            "attach binary differs from daemon binary",
+        )]);
     }
 
-    Ok(())
+    Ok(vec![])
 }
 
 fn exe_for_pid(pid: Pid) -> anyhow::Result<PathBuf> {

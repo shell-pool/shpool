@@ -1,4 +1,5 @@
 use std::{
+    default::Default,
     env,
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
@@ -23,6 +24,17 @@ pub struct Proc {
     pub tmp_dir: PathBuf,
     pub events: Option<Events>,
     pub socket_path: PathBuf,
+}
+
+pub struct AttachArgs {
+    pub force: bool,
+    pub extra_env: Vec<(String, String)>,
+}
+
+impl Default for AttachArgs {
+    fn default() -> Self {
+        AttachArgs { force: false, extra_env: vec![] }
+    }
 }
 
 impl Proc {
@@ -92,12 +104,7 @@ impl Proc {
         })
     }
 
-    pub fn attach(
-        &mut self,
-        name: &str,
-        force: bool,
-        extra_env: Vec<(String, String)>,
-    ) -> anyhow::Result<attach::Proc> {
+    pub fn attach(&mut self, name: &str, args: AttachArgs) -> anyhow::Result<attach::Proc> {
         let log_file = self.tmp_dir.join(format!("attach_{}_{}.log", name, self.subproc_counter));
         let test_hook_socket_path =
             self.tmp_dir.join(format!("attach_test_hook_{}_{}.socket", name, self.subproc_counter));
@@ -116,9 +123,9 @@ impl Proc {
             .env_clear()
             .env("XDG_RUNTIME_DIR", env::var("XDG_RUNTIME_DIR")?)
             .env("SHPOOL_TEST_HOOK_SOCKET_PATH", &test_hook_socket_path)
-            .envs(extra_env)
+            .envs(args.extra_env)
             .arg("attach");
-        if force {
+        if args.force {
             cmd.arg("-f");
         }
         let proc = cmd.arg(name).spawn().context(format!("spawning attach proc for {}", name))?;

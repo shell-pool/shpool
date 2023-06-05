@@ -184,10 +184,10 @@ pub struct Session {
 pub enum AttachStatus {
     /// Attached indicates that there was an existing shell session with
     /// the given name, and `shpool attach` successfully connected to it.
-    Attached,
+    Attached { warnings: Vec<String> },
     /// Created indicates that there was no existing shell session with the
     /// given name, so `shpool` created a new one.
-    Created,
+    Created { warnings: Vec<String> },
     /// Busy indicates that there is an existing shell session with the given
     /// name, but another shpool session is currently connected to
     /// it, so the connection attempt was rejected.

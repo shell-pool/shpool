@@ -106,10 +106,16 @@ fn do_attach(name: &str, socket: &PathBuf) -> anyhow::Result<()> {
                 eprintln!("forbidden: {}", reason);
                 return Err(anyhow!("forbidden: {}", reason));
             }
-            Attached => {
+            Attached { warnings } => {
+                for warning in warnings.into_iter() {
+                    eprintln!("shpool: warn: {}", warning);
+                }
                 info!("attached to an existing session: '{}'", name);
             }
-            Created => {
+            Created { warnings } => {
+                for warning in warnings.into_iter() {
+                    eprintln!("shpool: warn: {}", warning);
+                }
                 info!("created a new session: '{}'", name);
             }
             UnexpectedError(err) => {
