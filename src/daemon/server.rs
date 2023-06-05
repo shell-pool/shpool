@@ -25,6 +25,7 @@ use super::{
 
 const SHELL_KILL_TIMEOUT: time::Duration = time::Duration::from_millis(500);
 const STDERR_FD: i32 = 2;
+const DEFAULT_INITIAL_SHELL_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
 
 #[derive(Debug)]
 pub struct Server {
@@ -506,6 +507,14 @@ impl Server {
             // to avoid breakage and vars the user has asked us to inject.
             .env_clear()
             .env("HOME", user_info.home_dir)
+            .env(
+                "PATH",
+                self.config
+                    .initial_path
+                    .as_ref()
+                    .map(|x| x.as_ref())
+                    .unwrap_or(DEFAULT_INITIAL_SHELL_PATH),
+            )
             .env("SHPOOL_SESSION_NAME", &header.name)
             .env("USER", user_info.user)
             .env("SSH_AUTH_SOCK", self.ssh_auth_sock_symlink(PathBuf::from(&header.name)));
@@ -615,7 +624,6 @@ impl Server {
             pty_master: fork,
             client_stream: Some(client_stream),
             config: self.config.clone(),
-            // outer: sync::Weak::new(),
         };
         session_inner.set_pty_size(&header.local_tty_size).context("setting initial pty size")?;
         Ok(shell::Session {

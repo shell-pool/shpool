@@ -571,6 +571,24 @@ fn injects_term_even_with_env_config() -> anyhow::Result<()> {
     })
 }
 
+#[test]
+#[timeout(30000)]
+fn has_right_default_path() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc =
+            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut attach_proc =
+            daemon_proc.attach("sh1", false, vec![]).context("starting attach proc")?;
+
+        let mut line_matcher = attach_proc.line_matcher()?;
+
+        attach_proc.run_cmd("echo $PATH")?;
+        line_matcher.match_re("/usr/bin:/bin:/usr/sbin:/sbin$")?;
+
+        Ok(())
+    })
+}
+
 #[ignore] // TODO: re-enable, this test if flaky
 #[test]
 fn up_arrow_no_crash() -> anyhow::Result<()> {

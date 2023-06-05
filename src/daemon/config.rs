@@ -42,6 +42,10 @@ pub struct Config {
     /// to complete. 30 seconds by default.
     pub ssh_handshake_timeout_ms: Option<u64>,
 
+    /// The initial path to spawn shell processes with. By default
+    /// `/usr/bin:/bin:/usr/sbin:/sbin` (copying openssh).
+    pub initial_path: Option<String>,
+
     /// The user supplied keybindings.
     pub keybinding: Option<Vec<Keybinding>>,
 }
