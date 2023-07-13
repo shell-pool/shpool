@@ -13,7 +13,7 @@
 edition = "2018"
 rust-version = "1.36"
 name = "itoa"
-version = "1.0.4"
+version = "1.0.6"
 authors = ["David Tolnay <dtolnay@gmail.com>"]
 exclude = [
     "performance.png",
@@ -32,6 +32,9 @@ repository = "https://github.com/dtolnay/itoa"
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
+
+[lib]
+doc-scrape-examples = false
 
 [dependencies.no-panic]
 version = "0.1"

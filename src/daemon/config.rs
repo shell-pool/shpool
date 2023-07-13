@@ -36,15 +36,18 @@ pub struct Config {
     /// initial shell
     pub env: Option<HashMap<String, String>>,
 
-    /// A duration, in milliseconds, that the shpool
-    /// daemon should wait for the handshake performed
-    /// by the two component threads of the ssh plugin
-    /// to complete. 30 seconds by default.
-    pub ssh_handshake_timeout_ms: Option<u64>,
-
     /// The initial path to spawn shell processes with. By default
     /// `/usr/bin:/bin:/usr/sbin:/sbin` (copying openssh).
     pub initial_path: Option<String>,
+
+    /// Indicates what shpool should do when it reattaches to an
+    /// existing session.
+    pub session_restore_mode: Option<SessionRestoreMode>,
+
+    /// The number of lines worth of output to keep in the output
+    /// spool which is maintained along side a shell session.
+    /// By default, 10000 lines.
+    pub output_spool_lines: Option<usize>,
 
     /// The user supplied keybindings.
     pub keybinding: Option<Vec<Keybinding>>,
@@ -57,4 +60,56 @@ pub struct Keybinding {
     pub binding: String,
     /// The action to perform in response to the keybinding.
     pub action: keybindings::Action,
+}
+
+#[derive(Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionRestoreMode {
+    /// Just reattach to the pty and issue SIGWINCH to force apps like
+    /// vim and emacs to redraw. Don't emit anything from the output
+    /// spool at all.
+    #[default]
+    Simple,
+    /// Emit enough data from the output spool to restore the screen
+    /// full of text which would have been present on the screen if
+    /// the connection never dropped. If a command drops while generating
+    /// output, it will restore a screen showing the most recent output
+    /// rather than the screen visible right before disconnect.
+    Screen,
+    /// Emit enough output data to restore the last n lines of
+    /// history from the output spool.
+    Lines(usize),
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use ntest::timeout;
+
+    #[test]
+    #[timeout(30000)]
+    fn parse() -> anyhow::Result<()> {
+        let cases = vec![
+            r#"
+            session_restore_mode = "simple"
+            "#,
+            r#"
+            session_restore_mode = { lines = 10 }
+            "#,
+            r#"
+            session_restore_mode = "screen"
+            "#,
+            r#"
+            [[keybinding]]
+            binding = "Ctrl-q a"
+            action = "detach"
+            "#,
+        ];
+
+        for case in cases.into_iter() {
+            let _: Config = toml::from_str(case)?;
+        }
+
+        Ok(())
+    }
 }

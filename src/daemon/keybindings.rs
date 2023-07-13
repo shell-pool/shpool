@@ -168,6 +168,7 @@ impl Bindings {
 }
 
 #[derive(Eq, PartialEq, Debug, Deserialize, Copy, Clone)]
+#[serde(rename_all = "lowercase")]
 pub enum Action {
     /// detaches the current shpool session
     Detach,

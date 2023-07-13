@@ -2,10 +2,11 @@ use std::{
     io,
     io::{Read, Write},
     net,
+    ops::Add,
     os::unix::{io::AsRawFd, net::UnixStream},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex, TryLockError,
+        Arc, Mutex,
     },
     thread, time,
 };
@@ -21,40 +22,27 @@ use crate::{
 };
 
 const SUPERVISOR_POLL_DUR: time::Duration = time::Duration::from_millis(300);
-const RPC_LOOP_POLL_DUR: time::Duration = time::Duration::from_millis(300);
-const SESSION_MESSAGE_TIMEOUT: time::Duration = time::Duration::from_secs(10);
+
+// Chosen experimentally. This value is small enough that no human will likely
+// recognize it, and it seems to be large enough that emacs consistently picks
+// up the "jiggle" trick where we oversize the pty then put it back to the right
+// size.
+const REATTACH_RESIZE_DELAY: time::Duration = time::Duration::from_millis(50);
+
+// The reader thread should wake up relatively frequently so it can detect
+// reattach, but we don't need to go crazy since reattach is not part of
+// the inner loop.
+const READER_POLL_MS: libc::c_int = 100;
 
 /// Session represent a shell session
 #[derive(Debug)]
 pub struct Session {
     pub started_at: time::SystemTime,
-    pub caller: Arc<Mutex<SessionCaller>>,
+    pub reader_ctl: Arc<Mutex<ReaderCtl>>,
     /// Mutable state with the lock held by the servicing handle_attach thread
     /// while a tty is attached to the session. Probing the mutex can be used
     /// to determine if someone is currently attached to the session.
     pub inner: Arc<Mutex<SessionInner>>,
-}
-
-impl Session {
-    #[instrument(skip_all)]
-    pub fn rpc_call(
-        &self,
-        arg: protocol::SessionMessageRequestPayload,
-    ) -> anyhow::Result<protocol::SessionMessageReply> {
-        // make a best effort attempt to avoid sending messages
-        // to a session with no attached terminal
-        match self.inner.try_lock() {
-            // if it is locked, someone is attached
-            Err(TryLockError::WouldBlock) => {}
-            // if we can lock it, there is no one to get our msg
-            _ => {
-                return Ok(protocol::SessionMessageReply::NotAttached);
-            }
-        }
-
-        let caller = self.caller.lock().unwrap();
-        caller.call(arg)
-    }
 }
 
 /// ShellSessionInner contains values that the pipe thread needs to be
@@ -62,62 +50,250 @@ impl Session {
 #[derive(Debug)]
 pub struct SessionInner {
     pub name: String, // to improve logging
-    pub caller: Arc<Mutex<SessionCaller>>,
-    pub rpc_in: crossbeam_channel::Receiver<protocol::SessionMessageRequestPayload>,
-    pub rpc_out: crossbeam_channel::Sender<protocol::SessionMessageReply>,
+    pub reader_ctl: Arc<Mutex<ReaderCtl>>,
     pub child_exited: crossbeam_channel::Receiver<()>,
     pub pty_master: pty::fork::Fork,
     pub client_stream: Option<UnixStream>,
     pub config: config::Config,
+
+    /// The join handle for the always-on background reader thread.
+    /// Only wrapped in an option so we can spawn the thread after
+    /// constructing the SessionInner.
+    pub reader_join_h: Option<thread::JoinHandle<anyhow::Result<()>>>,
+}
+
+/// A notification that a new client has connected, sent to the
+/// reader thread.
+pub struct ClientConnection {
+    /// All output data should be written to this sink rather than
+    /// directly to the unix stream. The mutex makes sure that we don't
+    /// accidentally interleave with heartbeat frames.
+    sink: Arc<Mutex<io::BufWriter<UnixStream>>>,
+    /// The size of the client tty.
+    size: tty::Size,
+    /// The raw unix socket stream. The reader should never write
+    /// to this directly, just use it for control operations like
+    /// shutdown.
+    stream: UnixStream,
+}
+
+#[derive(Debug)]
+pub enum ClientConnectionStatus {
+    /// The new session replaced an existing session client.
+    Replaced,
+    /// The new session attached to a shell with no existing client.
+    New,
+    /// We detached an existing client.
+    Detached,
+    /// An instruction to detach had no effect, since there was already
+    /// no client attached.
+    DetachNone,
+}
+
+struct ResizeCmd {
+    /// The actual size to set to
+    size: tty::Size,
+    /// Only perform the resize after this point in time.
+    /// Allows for delays to work around emacs being a special
+    /// snowflake.
+    when: time::Instant,
 }
 
 impl SessionInner {
-    #[instrument(skip_all)]
-    pub fn handle_resize_rpc(
+    /// Spawn the reader thread which continually reads from the pty
+    /// and sends data both to the output spool and to the client,
+    /// if one is attached.
+    pub fn spawn_reader(
         &self,
-        req: protocol::ResizeRequest,
-    ) -> anyhow::Result<protocol::ResizeReply> {
-        self.set_pty_size(&req.tty_size)?;
-        Ok(protocol::ResizeReply::Ok)
+        tty_size: tty::Size,
+        scrollback_lines: usize,
+        client_connection: crossbeam_channel::Receiver<Option<ClientConnection>>,
+        client_connection_ack: crossbeam_channel::Sender<ClientConnectionStatus>,
+        tty_size_change: crossbeam_channel::Receiver<tty::Size>,
+        tty_size_change_ack: crossbeam_channel::Sender<()>,
+    ) -> anyhow::Result<thread::JoinHandle<anyhow::Result<()>>> {
+        use nix::poll;
+
+        let mut pty_master = self.pty_master.is_parent()?.clone();
+        let name = self.name.clone();
+        Ok(thread::spawn(move || {
+            let _s = span!(Level::INFO, "reader", s = name).entered();
+
+            let mut output_spool =
+                vt100::Parser::new(tty_size.rows, tty_size.cols, scrollback_lines);
+            let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
+            let mut poll_fds = [poll::PollFd::new(pty_master.as_raw_fd(), poll::PollFlags::POLLIN)];
+
+            // block until we get the first connection attached so that we don't drop
+            // the initial prompt on the floor
+            info!("waiting for initial client connection");
+            let mut client_conn: Option<ClientConnection> =
+                client_connection.recv().context("waiting for initial client connection")?;
+            client_connection_ack
+                .send(ClientConnectionStatus::New)
+                .context("sending initial client connection ack")?;
+            info!("got initial client connection");
+
+            let mut resize_cmd: Option<ResizeCmd> = None;
+            loop {
+                crossbeam_channel::select! {
+                    recv(client_connection) -> new_connection => {
+                        match new_connection {
+                            Ok(Some(conn)) => {
+                                let ack = if client_conn.is_some() {
+                                    ClientConnectionStatus::Replaced
+                                } else {
+                                    ClientConnectionStatus::New
+                                };
+                                // Resize the pty to be bigger than it needs to be,
+                                // we do this immediately so that the extra size
+                                // can "bake" for a little bit, which emacs seems
+                                // to require in order to pick up the jiggle.
+                                let oversize = tty::Size {
+                                    rows: conn.size.rows + 1,
+                                    cols: conn.size.cols + 1,
+                                };
+                                oversize.set_fd(pty_master.as_raw_fd())?;
+
+                                resize_cmd = Some(ResizeCmd {
+                                    size: conn.size.clone(),
+                                    when: time::Instant::now().add(REATTACH_RESIZE_DELAY),
+                                });
+                                client_conn = Some(conn);
+
+                                client_connection_ack.send(ack)
+                                    .context("sending client connection ack")?;
+                            }
+                            Ok(None) => {
+                                let ack = if let Some(old_conn) = client_conn {
+                                    old_conn.stream.shutdown(net::Shutdown::Both)?;
+                                    ClientConnectionStatus::Detached
+                                } else {
+                                    ClientConnectionStatus::DetachNone
+                                };
+                                client_conn = None;
+
+                                client_connection_ack.send(ack)
+                                    .context("sending client connection ack")?;
+                            }
+
+                            // SessionInner getting dropped, so this thread should go away.
+                            Err(crossbeam_channel::RecvError) => return Ok(()),
+                        }
+                    }
+                    recv(tty_size_change) -> new_size => {
+                        if let Ok(size) = new_size {
+                            info!("resize size={:?}", size);
+                            resize_cmd = Some(ResizeCmd {
+                                size: size,
+                                // No delay needed for ordinary resizes, just
+                                // for reconnects.
+                                when: time::Instant::now(),
+                            });
+                            tty_size_change_ack.send(())
+                                .context("sending size change ack")?;
+                        }
+                    }
+
+                    // make this select non-blocking so we spend most of our time parked
+                    // in poll
+                    default => {}
+                }
+
+                let mut executed_resize = false;
+                if let Some(resize_cmd) = resize_cmd.as_ref() {
+                    if resize_cmd.when.saturating_duration_since(time::Instant::now())
+                        == time::Duration::ZERO
+                    {
+                        output_spool.set_size(resize_cmd.size.rows, resize_cmd.size.cols);
+                        resize_cmd.size.set_fd(pty_master.as_raw_fd())?;
+                        executed_resize = true;
+                    }
+                }
+                if executed_resize {
+                    resize_cmd = None;
+                }
+
+                // Block until the shell has some data for us so we can be sure our reads
+                // always succeed. We don't want to end up blocked forever on a read while
+                // a client is trying to attach.
+                let nready = poll::poll(&mut poll_fds, READER_POLL_MS)?;
+                if nready == 0 {
+                    // if timeout
+                    continue;
+                }
+                if nready != 1 {
+                    return Err(anyhow!("reader thread: expected exactly 1 ready fd"));
+                }
+                let len = pty_master.read(&mut buf).context("reading pty master chunk")?;
+                trace!("read pty master len={} '{}'", len, String::from_utf8_lossy(&buf[..len]));
+                if len == 0 {
+                    continue;
+                }
+
+                output_spool.write(&buf[..len])?;
+
+                let mut reset_client_conn = false;
+                if let Some(conn) = client_conn.as_ref() {
+                    let chunk =
+                        protocol::Chunk { kind: protocol::ChunkKind::Data, buf: &buf[..len] };
+                    let mut s = conn.sink.lock().unwrap();
+                    let write_result = chunk.write_to(&mut *s).and_then(|_| s.flush());
+                    if let Err(err) = write_result {
+                        info!("client_stream write err, assuming hangup: {:?}", err);
+                        reset_client_conn = true;
+                    } else {
+                        test_hooks::emit("daemon-wrote-s2c-chunk");
+                    }
+                }
+                if reset_client_conn {
+                    client_conn = None;
+                }
+            }
+        }))
     }
 
-    pub fn set_pty_size(&self, size: &tty::Size) -> anyhow::Result<()> {
-        let pty_master =
-            self.pty_master.is_parent().context("internal error: executing in child fork")?;
-        size.set_fd(pty_master.as_raw_fd())
-    }
-}
-
-impl SessionInner {
     /// bidi_stream shuffles bytes between the subprocess and
     /// the client connection. It returns true if the subprocess
     /// has exited, and false if it is still running.
-    ///
-    /// `spawned_handlers` is a channel that gets closed once all the threads
-    /// for servicing the connection have been spawned. It should be a bounded
-    /// unbuffered channel.
     #[instrument(skip_all, fields(s = self.name))]
-    pub fn bidi_stream(
-        &mut self,
-        spawned_handlers: crossbeam_channel::Sender<()>,
-    ) -> anyhow::Result<bool> {
+    pub fn bidi_stream(&mut self, init_tty_size: tty::Size) -> anyhow::Result<bool> {
         test_hooks::emit("daemon-bidi-stream-enter");
         let _bidi_stream_test_guard = test_hooks::scoped("daemon-bidi-stream-done");
 
         // we take the client stream so that it gets closed when this routine
         // returns
-        let mut client_stream = match self.client_stream.take() {
+        let client_stream = match self.client_stream.take() {
             Some(s) => s,
             None => return Err(anyhow!("no client stream to take for bidi streaming")),
         };
 
-        let mut reader_client_stream =
+        let mut client_to_shell_client_stream =
             client_stream.try_clone().context("creating reader client stream")?;
         let closable_client_stream =
             client_stream.try_clone().context("creating closable client stream handle")?;
-        let client_stream_m = Mutex::new(io::BufWriter::new(
+        let reader_client_stream =
+            client_stream.try_clone().context("creating reader client stream handle")?;
+        let client_stream_m = Arc::new(Mutex::new(io::BufWriter::new(
             client_stream.try_clone().context("wrapping stream in bufwriter")?,
-        ));
+        )));
+
+        {
+            let reader_ctl = self.reader_ctl.lock().unwrap();
+            reader_ctl
+                .client_connection
+                .send(Some(ClientConnection {
+                    sink: Arc::clone(&client_stream_m),
+                    size: init_tty_size,
+                    stream: reader_client_stream,
+                }))
+                .context("attaching new client stream to reader thread")?;
+            let status = reader_ctl
+                .client_connection_ack
+                .recv()
+                .context("waiting for client connection ack")?;
+            info!("client connection status={:?}", status);
+        }
 
         let pty_master =
             self.pty_master.is_parent().context("internal error: executing in child fork")?;
@@ -130,9 +306,7 @@ impl SessionInner {
         thread::scope(|s| -> anyhow::Result<()> {
             // Spawn the main data transport threads
             let client_to_shell_h = self.spawn_client_to_shell(
-                s, &stop, &pty_master, &mut reader_client_stream);
-            let shell_to_client_h = self.spawn_shell_to_client(
-                s, &stop, &pty_master, &client_stream_m, &mut client_stream);
+                s, &stop, &pty_master, &mut client_to_shell_client_stream);
 
             // Send a steady stream of heartbeats to the client
             // so that if the connection unexpectedly goes
@@ -145,21 +319,14 @@ impl SessionInner {
             let supervisor_h = self.spawn_supervisor(
                 s, &stop, &child_done, &pty_master);
 
-            // handle SessionMessage RPCs
-            let rpc_h = self.spawn_rpc(s, &stop, &closable_client_stream);
-
-            drop(spawned_handlers);
-
             loop {
                 let c_done = child_done.load(Ordering::Acquire);
-                if client_to_shell_h.is_finished() || shell_to_client_h.is_finished()
-                    || heartbeat_h.is_finished() || supervisor_h.is_finished() || rpc_h.is_finished() || c_done {
-                    debug!("signaling for threads to stop: client_to_shell_finished={} shell_to_client_finished={} heartbeat_finished={} supervisor_finished={} rpc_finished={} child_done={}",
+                if client_to_shell_h.is_finished()
+                    || heartbeat_h.is_finished() || supervisor_h.is_finished() || c_done {
+                    debug!("signaling for threads to stop: client_to_shell_finished={} heartbeat_finished={} supervisor_finished={} child_done={}",
                         client_to_shell_h.is_finished(),
-                        shell_to_client_h.is_finished(),
                         heartbeat_h.is_finished(),
                         supervisor_h.is_finished(),
-                        rpc_h.is_finished(),
                         c_done,
                     );
                     stop.store(true, Ordering::Relaxed);
@@ -176,11 +343,6 @@ impl SessionInner {
                     std::panic::resume_unwind(panic_err)
                 },
             }
-            debug!("joining shell_to_client_h");
-            match shell_to_client_h.join() {
-                Ok(v) => v.context("joining shell_to_client_h")?,
-                Err(panic_err) => std::panic::resume_unwind(panic_err),
-            }
             debug!("joining heartbeat_h");
             match heartbeat_h.join() {
                 Ok(v) => v.context("joining heartbeat_h")?,
@@ -190,6 +352,16 @@ impl SessionInner {
             match supervisor_h.join() {
                 Ok(v) => v.context("joining supervisor_h")?,
                 Err(panic_err) => std::panic::resume_unwind(panic_err),
+            }
+            debug!("joined all threads");
+
+            {
+                let reader_ctl = self.reader_ctl.lock().unwrap();
+                reader_ctl.client_connection.send(None)
+                    .context("signaling client detach to reader thread")?;
+                let status = reader_ctl.client_connection_ack.recv()
+                    .context("waiting for client connection ack")?;
+                info!("detached from reader, status = {:?}", status);
             }
 
             Ok(())
@@ -293,7 +465,7 @@ impl SessionInner {
                             info!("{:?} keybinding action fired", action);
                             let keybinding_len = partial_keybinding.len() + 1;
                             if keybinding_len < i {
-                                // this keybinding is wholely contained in buf
+                                // this keybinding is wholly contained in buf
                                 debug!("snipping keybinding_len={} i={}", keybinding_len, i);
                                 snip_sections.push((keybinding_len, i));
                             } else {
@@ -337,75 +509,11 @@ impl SessionInner {
     }
 
     #[instrument(skip_all)]
-    fn spawn_shell_to_client<'scope>(
-        &'scope self,
-        scope: &'scope thread::Scope<'scope, '_>,
-        stop: &'scope AtomicBool,
-        pty_master: &'scope pty::fork::Master,
-        client_stream_m: &'scope Mutex<io::BufWriter<UnixStream>>,
-        client_stream: &'scope mut UnixStream,
-    ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
-        scope.spawn(move || -> anyhow::Result<()> {
-            let _s1 = span!(Level::INFO, "shell->client", s = self.name).entered();
-
-            info!("spawned");
-
-            let mut master_reader = pty_master.clone();
-
-            let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
-
-            loop {
-                if stop.load(Ordering::Relaxed) {
-                    info!("recvd stop msg");
-                    return Ok(());
-                }
-
-                // select so we only perform reads that will succeed, avoiding deadlocks.
-                let mut fdset = nix::sys::select::FdSet::new();
-                fdset.insert(master_reader.as_raw_fd());
-                let mut poll_dur = consts::PIPE_POLL_DURATION_TIMEVAL.clone();
-                let nready = match nix::sys::select::select(
-                    None,
-                    Some(&mut fdset),
-                    None,
-                    None,
-                    Some(&mut poll_dur),
-                ) {
-                    Ok(n) => n,
-                    Err(nix::errno::Errno::EBADF) => {
-                        info!("shell went down");
-                        return Ok(());
-                    }
-                    Err(e) => return Err(e).context("selecting on pty master"),
-                };
-                if nready == 0 {
-                    continue;
-                }
-                let len = master_reader.read(&mut buf).context("reading pty master chunk")?;
-                let chunk = protocol::Chunk { kind: protocol::ChunkKind::Data, buf: &buf[..len] };
-                trace!("read pty master len={} '{}'", len, String::from_utf8_lossy(chunk.buf),);
-                {
-                    let mut s = client_stream_m.lock().unwrap();
-                    chunk
-                        .write_to(&mut *s)
-                        .and_then(|_| s.flush())
-                        .context("writing stdout chunk to client stream")?;
-                }
-                debug!("wrote {} pty master bytes", chunk.buf.len());
-                test_hooks::emit("daemon-wrote-s2c-chunk");
-
-                // flush immediately
-                client_stream.flush().context("flushing client stream")?;
-            }
-        })
-    }
-
-    #[instrument(skip_all)]
     fn spawn_heartbeat<'scope>(
         &'scope self,
         scope: &'scope thread::Scope<'scope, '_>,
         stop: &'scope AtomicBool,
-        client_stream_m: &'scope Mutex<io::BufWriter<UnixStream>>,
+        client_stream_m: &'scope Arc<Mutex<io::BufWriter<UnixStream>>>,
     ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
         scope.spawn(move || -> anyhow::Result<()> {
             let _s1 = span!(Level::INFO, "heartbeat", s = self.name).entered();
@@ -474,98 +582,47 @@ impl SessionInner {
         })
     }
 
-    #[instrument(skip_all)]
-    fn spawn_rpc<'scope>(
-        &'scope self,
-        scope: &'scope thread::Scope<'scope, '_>,
-        stop: &'scope AtomicBool,
-        client_stream: &'scope UnixStream,
-    ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
-        scope.spawn(|| -> anyhow::Result<()> {
-            let _s1 = span!(Level::INFO, "rpc", s = self.name).entered();
-
-            loop {
-                if stop.load(Ordering::Relaxed) {
-                    info!("recvd stop msg");
-                    return Ok(());
-                }
-
-                let req = match self.rpc_in.recv_timeout(RPC_LOOP_POLL_DUR) {
-                    Ok(r) => r,
-                    Err(RecvTimeoutError::Timeout) => continue,
-                    Err(e) => Err(e).context("recving sessession msg")?,
-                };
-                let resp = match req {
-                    protocol::SessionMessageRequestPayload::Resize(req) => {
-                        debug!("handling resize");
-                        protocol::SessionMessageReply::Resize(match self.handle_resize_rpc(req) {
-                            Ok(_) => protocol::ResizeReply::Ok,
-                            Err(err) => {
-                                // only log about resize errors since they seem to happen in
-                                // headless test environments, but we don't actually care in
-                                // such situations
-                                error!("resize failed: {:?}", err);
-                                protocol::ResizeReply::Failed
-                            }
-                        })
-                    }
-                    protocol::SessionMessageRequestPayload::Detach => {
-                        debug!("handling detach");
-                        stop.store(true, Ordering::Relaxed);
-                        client_stream.shutdown(net::Shutdown::Both)?;
-                        protocol::SessionMessageReply::Detach(
-                            protocol::SessionMessageDetachReply::Ok,
-                        )
-                    }
-                };
-
-                // A timeout here is a hard error because it represents
-                // lost data. We could technically write a retry loop
-                // around the timeout, but it is an unbounded channel,
-                // so a timeout seems very unlikely.
-                self.rpc_out
-                    .send_timeout(resp, RPC_LOOP_POLL_DUR)
-                    .context("sending session reply")?
-            }
-        })
-    }
-
     //
     // actions which can be bound to keybindings
     //
 
     #[instrument(skip_all)]
     fn action_detach(&self) -> anyhow::Result<()> {
-        let caller = self.caller.lock().unwrap();
-        let reply = caller.call(protocol::SessionMessageRequestPayload::Detach)?;
-        info!("action detach, reply={:?}", reply);
+        let reader_ctl = self.reader_ctl.lock().unwrap();
+        reader_ctl
+            .client_connection
+            .send(None)
+            .context("signaling client detach to reader thread")?;
+        let status =
+            reader_ctl.client_connection_ack.recv().context("waiting for client connection ack")?;
+
+        info!("action detach, status={:?}", status);
         Ok(())
     }
 }
 
-/// A handle for making calls to the rpc handler thread for an active session.
+/// A handle for poking at the always-running reader thread.
 /// Shared between the session struct (for calls originating with the cli)
 /// and the session inner struct (for calls resulting from keybindings).
 #[derive(Debug)]
-pub struct SessionCaller {
-    pub rpc_in: crossbeam_channel::Sender<protocol::SessionMessageRequestPayload>,
-    pub rpc_out: crossbeam_channel::Receiver<protocol::SessionMessageReply>,
-}
+pub struct ReaderCtl {
+    /// A control channel for the reader thread. Whenever a new client dials in,
+    /// the output stream for that client must be attached to the reader
+    /// thread by sending it down this channel. A disconnect is signaled by
+    /// sending None down this channel. Dropping the channel entirely causes
+    /// the reader thread to exit.
+    pub client_connection: crossbeam_channel::Sender<Option<ClientConnection>>,
+    /// A control channel for the reader thread. Acks the addition of a fresh
+    /// client connection.
+    pub client_connection_ack: crossbeam_channel::Receiver<ClientConnectionStatus>,
 
-impl SessionCaller {
-    #[instrument(skip_all)]
-    pub fn call(
-        &self,
-        arg: protocol::SessionMessageRequestPayload,
-    ) -> anyhow::Result<protocol::SessionMessageReply> {
-        self.rpc_in
-            .send_timeout(arg, SESSION_MESSAGE_TIMEOUT)
-            .context("sending session message")?;
-        Ok(self
-            .rpc_out
-            .recv_timeout(SESSION_MESSAGE_TIMEOUT)
-            .context("receiving session message reply")?)
-    }
+    /// A control channel for the reader thread. Used to signal size changes so
+    /// that the output spool will correctly reflect the size of the user's
+    /// tty.
+    pub tty_size_change: crossbeam_channel::Sender<tty::Size>,
+    /// A control channel for the reader thread. Acks the completion of a spool
+    /// resize.
+    pub tty_size_change_ack: crossbeam_channel::Receiver<()>,
 }
 
 /// Given a buffer, a length after which the data is not valid, a list of
@@ -610,8 +667,8 @@ fn snip_buf(
         // Saftey: we are copying sections of buf into itself, just overwriting
         //         little sections of the buffer. This should be fine because it
         //         is all happening within the same section of memory and
-        //         std::ptr::copy (memmove in c). Also, these assertions should
-        //         make it safer.
+        //         std::ptr::copy (memmove in c) allows overlapping buffers.
+        //         Also, these assertions should make it safer.
         assert!(last_end + section_len < buf.len());
         assert!(*start + section_len - 1 < buf.len());
         unsafe {

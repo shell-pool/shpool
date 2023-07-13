@@ -16,7 +16,7 @@ use std::{
 use anyhow::{anyhow, Context};
 use crossbeam_channel::{RecvTimeoutError, TryRecvError};
 use nix::{sys::signal, unistd::Pid};
-use tracing::{error, info, instrument, warn};
+use tracing::{error, info, instrument, trace, warn};
 
 use super::{
     super::{consts, protocol, test_hooks, tty},
@@ -26,6 +26,7 @@ use super::{
 const SHELL_KILL_TIMEOUT: time::Duration = time::Duration::from_millis(500);
 const STDERR_FD: i32 = 2;
 const DEFAULT_INITIAL_SHELL_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
+const DEFAULT_OUTPUT_SPOOL_LINES: usize = 10_000;
 
 #[derive(Debug)]
 pub struct Server {
@@ -118,8 +119,6 @@ impl Server {
             // we unwrap to propagate the poison as an unwind
             let mut shells = self.shells.lock().unwrap();
 
-            info!("locked shells table");
-
             let mut status = protocol::AttachStatus::Attached;
             if let Some(session) = shells.get(&header.name) {
                 info!("found entry for '{}'", header.name);
@@ -146,10 +145,6 @@ impl Server {
                         Err(TryRecvError::Empty) => {
                             // the channel is still open so the subshell is still running
                             info!("taking over existing session inner={:?}", inner);
-
-                            inner
-                                .set_pty_size(&header.local_tty_size)
-                                .context("resetting pty size on reattach")?;
                             inner.client_stream = Some(stream.try_clone()?);
 
                             // status is already attached
@@ -193,6 +188,7 @@ impl Server {
                 (None, status)
             }
         };
+        info!("released lock on shells table");
 
         self.link_ssh_auth_sock(&header).context("linking SSH_AUTH_SOCK")?;
 
@@ -211,10 +207,8 @@ impl Server {
                 error!("error writing reply status: {:?}", e);
             }
 
-            let spawned_threads_tx = self.send_sigwinch_after_attach(&header)?;
-
             info!("starting bidi stream loop");
-            match inner.bidi_stream(spawned_threads_tx) {
+            match inner.bidi_stream(header.local_tty_size.clone()) {
                 Ok(done) => {
                     child_done = done;
                 }
@@ -236,63 +230,6 @@ impl Server {
         }
 
         Ok(())
-    }
-
-    fn send_sigwinch_after_attach(
-        &self,
-        header: &protocol::AttachHeader,
-    ) -> anyhow::Result<crossbeam_channel::Sender<()>> {
-        use protocol::SessionMessageRequestPayload;
-
-        let local_tty_size = header.local_tty_size.clone();
-        let shells_arc = Arc::clone(&self.shells);
-        let sess_name = header.name.clone();
-        let (spawned_threads_tx, spawned_threads_rx) = crossbeam_channel::bounded(0);
-        thread::spawn(move || {
-            match spawned_threads_rx.recv_timeout(time::Duration::from_secs(2)) {
-                Ok(()) => {
-                    warn!("unexpected send on spawned_threads chan");
-                    return;
-                }
-                Err(RecvTimeoutError::Timeout) => {
-                    warn!("timed out waiting for bidi_stream threads to spawn");
-                    return;
-                }
-                // fallthrough because channel closure indicates all threads have
-                // been spawned and are ready for us
-                Err(RecvTimeoutError::Disconnected) => {}
-            }
-
-            let tty_oversize =
-                tty::Size { rows: local_tty_size.rows + 1, cols: local_tty_size.cols + 1 };
-
-            // For some reason, emacs will correctly re-draw when we jiggle
-            // the tty size via a ResizeRequest RPC call, but directly calling
-            // local_tty_size.set_fd(...) from here does not force the redraw.
-            // This doesn't make any sense because the resize RPC is just a
-            // more convoluted way to make that call as far as I can tell.
-            // It doesn't seem to be a timing issue since I've added some
-            // long sleeps to ensure there is no race causing problems.
-            {
-                let shells = shells_arc.lock().unwrap();
-
-                if let Some(session) = shells.get(&sess_name) {
-                    if let Err(e) = session.rpc_call(SessionMessageRequestPayload::Resize(
-                        protocol::ResizeRequest { tty_size: tty_oversize },
-                    )) {
-                        error!("making oversize resize rpc: {:?}", e);
-                    }
-
-                    if let Err(e) = session.rpc_call(SessionMessageRequestPayload::Resize(
-                        protocol::ResizeRequest { tty_size: local_tty_size },
-                    )) {
-                        error!("making normal size resize rpc: {:?}", e);
-                    }
-                }
-            }
-        });
-
-        Ok(spawned_threads_tx)
     }
 
     #[instrument(skip_all)]
@@ -339,11 +276,22 @@ impl Server {
         let mut not_found_sessions = vec![];
         let mut not_attached_sessions = vec![];
         {
+            trace!("about to lock shells table 3");
             let shells = self.shells.lock().unwrap();
+            trace!("locked shells table 3");
             for session in request.sessions.into_iter() {
                 if let Some(s) = shells.get(&session) {
-                    let reply = s.rpc_call(protocol::SessionMessageRequestPayload::Detach)?;
-                    if reply == protocol::SessionMessageReply::NotAttached {
+                    let reader_ctl = s.reader_ctl.lock().unwrap();
+                    reader_ctl
+                        .client_connection
+                        .send(None)
+                        .context("sending client detach to reader")?;
+                    let status = reader_ctl
+                        .client_connection_ack
+                        .recv()
+                        .context("getting client conn ack")?;
+                    info!("detached session({}), status = {:?}", session, status);
+                    if let shell::ClientConnectionStatus::DetachNone = status {
                         not_attached_sessions.push(session);
                     }
                 } else {
@@ -374,11 +322,17 @@ impl Server {
             let mut to_remove = Vec::with_capacity(request.sessions.len());
             for session in request.sessions.into_iter() {
                 if let Some(s) = shells.get(&session) {
-                    let reply = s.rpc_call(protocol::SessionMessageRequestPayload::Detach)?;
-                    if reply == protocol::SessionMessageReply::NotAttached {
-                        info!("killing already detached session '{}'", session);
-                    } else {
-                        info!("killing attached session '{}'", session);
+                    {
+                        let reader_ctl = s.reader_ctl.lock().unwrap();
+                        reader_ctl
+                            .client_connection
+                            .send(None)
+                            .context("sending client detach to reader")?;
+                        let status = reader_ctl
+                            .client_connection_ack
+                            .recv()
+                            .context("getting client conn ack")?;
+                        info!("detached session({}) before kill, status = {:?}", session, status);
                     }
 
                     let inner = s.inner.lock().unwrap();
@@ -464,7 +418,32 @@ impl Server {
         let reply = {
             let shells = self.shells.lock().unwrap();
             if let Some(session) = shells.get(&header.session_name) {
-                session.rpc_call(header.payload)?
+                match header.payload {
+                    protocol::SessionMessageRequestPayload::Resize(resize_request) => {
+                        let reader_ctl = session.reader_ctl.lock().unwrap();
+                        reader_ctl
+                            .tty_size_change
+                            .send(resize_request.tty_size)
+                            .context("sending tty size change to reader")?;
+                        reader_ctl.tty_size_change_ack.recv().context("recving tty size ack")?;
+                        protocol::SessionMessageReply::Resize(protocol::ResizeReply::Ok)
+                    }
+                    protocol::SessionMessageRequestPayload::Detach => {
+                        let reader_ctl = session.reader_ctl.lock().unwrap();
+                        reader_ctl
+                            .client_connection
+                            .send(None)
+                            .context("sending client detach to reader")?;
+                        let status = reader_ctl
+                            .client_connection_ack
+                            .recv()
+                            .context("getting client conn ack")?;
+                        info!("detached session({}), status = {:?}", header.session_name, status);
+                        protocol::SessionMessageReply::Detach(
+                            protocol::SessionMessageDetachReply::Ok,
+                        )
+                    }
+                }
             } else {
                 protocol::SessionMessageReply::NotFound
             }
@@ -611,23 +590,37 @@ impl Server {
             info!("s({}): reaped child shell: {:?}", session_name, waitable_child);
         });
 
-        let (in_tx, in_rx) = crossbeam_channel::unbounded();
-        let (out_tx, out_rx) = crossbeam_channel::unbounded();
-        let session_caller =
-            Arc::new(Mutex::new(shell::SessionCaller { rpc_in: in_tx, rpc_out: out_rx }));
-        let session_inner = shell::SessionInner {
+        let (client_connection_tx, client_connection_rx) = crossbeam_channel::bounded(0);
+        let (client_connection_ack_tx, client_connection_ack_rx) = crossbeam_channel::bounded(0);
+        let (tty_size_change_tx, tty_size_change_rx) = crossbeam_channel::bounded(0);
+        let (tty_size_change_ack_tx, tty_size_change_ack_rx) = crossbeam_channel::bounded(0);
+
+        let reader_ctl = Arc::new(Mutex::new(shell::ReaderCtl {
+            client_connection: client_connection_tx,
+            client_connection_ack: client_connection_ack_rx,
+            tty_size_change: tty_size_change_tx,
+            tty_size_change_ack: tty_size_change_ack_rx,
+        }));
+        let mut session_inner = shell::SessionInner {
             name: header.name.clone(),
-            caller: Arc::clone(&session_caller),
-            rpc_in: in_rx,
-            rpc_out: out_tx,
+            reader_ctl: Arc::clone(&reader_ctl),
             child_exited: child_exited_rx,
             pty_master: fork,
             client_stream: Some(client_stream),
             config: self.config.clone(),
+            reader_join_h: None,
         };
-        session_inner.set_pty_size(&header.local_tty_size).context("setting initial pty size")?;
+        session_inner.reader_join_h = Some(session_inner.spawn_reader(
+            header.local_tty_size.clone(),
+            self.config.output_spool_lines.unwrap_or(DEFAULT_OUTPUT_SPOOL_LINES),
+            client_connection_rx,
+            client_connection_ack_tx,
+            tty_size_change_rx,
+            tty_size_change_ack_tx,
+        )?);
+
         Ok(shell::Session {
-            caller: session_caller,
+            reader_ctl,
             started_at: time::SystemTime::now(),
             inner: Arc::new(Mutex::new(session_inner)),
         })

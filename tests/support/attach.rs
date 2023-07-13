@@ -50,7 +50,7 @@ impl Proc {
             r.as_raw_fd(),
             nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
         )
-        .context("setting stdin nonblocking")?;
+        .context("setting stdout nonblocking")?;
 
         Ok(LineMatcher { out: io::BufReader::new(r) })
     }
@@ -63,7 +63,7 @@ impl Proc {
             r.as_raw_fd(),
             nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
         )
-        .context("setting stdin nonblocking")?;
+        .context("setting stderr nonblocking")?;
 
         Ok(LineMatcher { out: io::BufReader::new(r) })
     }

@@ -25,6 +25,9 @@ where
         let start = time::Instant::now();
         loop {
             let mut line = String::new();
+            if line.len() > 0 {
+                eprintln!("LINE: {}", line);
+            }
             match self.out.read_line(&mut line) {
                 Ok(0) => {
                     return Err(anyhow!("LineMatcher: EOF"));

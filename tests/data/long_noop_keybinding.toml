@@ -8,4 +8,4 @@ TERM = ""
 
 [[keybinding]]
 binding = "a a a a a"
-action = "NoOp"
+action = "noop"

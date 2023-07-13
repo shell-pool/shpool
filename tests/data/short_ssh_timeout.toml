@@ -1,8 +1,0 @@
-norc = true
-noecho = true
-shell = "/bin/bash"
-ssh_handshake_timeout_ms = 100
-
-[env]
-PS1 = "prompt> "
-TERM = ""

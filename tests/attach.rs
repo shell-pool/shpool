@@ -1,6 +1,6 @@
-use std::{fs, io::Read, thread, time};
+use std::{fs, io::BufRead, io::Read, thread, time};
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use ntest::timeout;
 
 mod support;
@@ -87,6 +87,28 @@ fn missing_ssh_auth_sock() -> anyhow::Result<()> {
         waiter.wait_event("daemon-wrote-s2c-chunk")?; // resize prompt re-draw
         attach_proc.run_cmd("ls -l $SSH_AUTH_SOCK")?;
         line_matcher.match_re(r#".*No such file or directory$"#)?;
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
+fn fresh_shell_draws_prompt() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc =
+            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+
+        let mut attach_proc =
+            daemon_proc.attach("sh1", false, vec![]).context("starting attach proc")?;
+        let mut reader = std::io::BufReader::new(
+            attach_proc.proc.stdout.take().ok_or(anyhow!("missing stdout"))?,
+        );
+
+        let mut output = vec![];
+        reader.read_until(b'>', &mut output)?;
+        let chunk = String::from_utf8_lossy(&output[..]);
+        assert!(chunk.contains("prompt"));
 
         Ok(())
     })

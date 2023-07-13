@@ -1,7 +1,23 @@
 
 - There is a lot of heartbeat overhead. See if we can reduce that.
+   - maybe we can get rid of the heartbeat thread and just have the
+     reader thread to zero length writes every so often?
+- See about replacing the supervisor thread with the reader thread.
 - Implement spooling logic to handle subprocesses which generate
-  a bunch of output after we have detached.
+  a bunch of output after we have detached. This requires implementing
+  a terminal parser so we can maintain screen state for blitting on
+  reattach.
+  - https://vt100.net/emu/dec_ansi_parser is a good resource about
+    parsing terminal codes. https://crates.io/crates/vt100 seems like
+    it will basically do all the heavy lifting for us, this could be
+    a lot easier than I thought. It seems like we can restore with
+    `contents_formatted`, though we might need to reset the client
+    terminal first to be sure we wind up in the right state.
+
+    https://crates.io/crates/termwiz seems like it might be more
+    maintained, but the API is weird. I don't immediately see
+    a way to just stuff bytes into an in-memory data structure.
+    Maybe I need to manually drive the InputParser to use it.
 - Exit with a success error code when a session gets manually detached (either
   via shpool detach or with the upcoming detach keybinding).
 - Allow users to specify a command to run instead of their default shell.

@@ -30,7 +30,7 @@
 //!
 //! ![performance](https://raw.githubusercontent.com/dtolnay/itoa/master/performance.png)
 
-#![doc(html_root_url = "https://docs.rs/itoa/1.0.4")]
+#![doc(html_root_url = "https://docs.rs/itoa/1.0.6")]
 #![no_std]
 #![allow(
     clippy::cast_lossless,

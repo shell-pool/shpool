@@ -132,7 +132,6 @@ pub enum SessionMessageDetachReply {
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub enum ResizeReply {
     Ok,
-    Failed,
 }
 
 /// AttachHeader is the blob of metadata that a client transmits when it

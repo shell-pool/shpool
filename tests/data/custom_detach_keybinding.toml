@@ -8,4 +8,4 @@ TERM = ""
 
 [[keybinding]]
 binding = "Ctrl-v Ctrl-w Ctrl-g"
-action = "Detach"
+action = "detach"
