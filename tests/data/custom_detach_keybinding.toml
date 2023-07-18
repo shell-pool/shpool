@@ -1,6 +1,7 @@
 norc = true
 noecho = true
 shell = "/bin/bash"
+session_restore_mode = "simple"
 
 [env]
 PS1 = "prompt> "

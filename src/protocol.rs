@@ -10,7 +10,7 @@ use std::{
 use anyhow::{anyhow, Context};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use serde_derive::{Deserialize, Serialize};
-use tracing::{debug, instrument, span, trace, warn, Level};
+use tracing::{debug, error, instrument, span, trace, warn, Level};
 
 use super::{consts, tty};
 
@@ -323,8 +323,13 @@ impl Client {
                 let mut buf = vec![0; consts::BUF_SIZE];
 
                 loop {
-                    let chunk = Chunk::read_into(&mut read_client_stream, &mut buf)
-                        .context("reading output chunk from daemon")?;
+                    let chunk = match Chunk::read_into(&mut read_client_stream, &mut buf) {
+                        Ok(c) => c,
+                        Err(err) => {
+                            error!("reading chunk: {:?}", err);
+                            return Err(err);
+                        }
+                    };
 
                     if chunk.buf.len() > 0 {
                         debug!(

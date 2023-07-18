@@ -25,9 +25,6 @@ where
         let start = time::Instant::now();
         loop {
             let mut line = String::new();
-            if line.len() > 0 {
-                eprintln!("LINE: {}", line);
-            }
             match self.out.read_line(&mut line) {
                 Ok(0) => {
                     return Err(anyhow!("LineMatcher: EOF"));
@@ -57,7 +54,9 @@ where
                 }
             }
 
-            eprintln!("testing /{}/ against '{}'", re, &line);
+            // Don't print the whole line so we don't include any control codes.
+            // eprintln!("testing /{}/ against '{}'", re, &line);
+            eprintln!("testing /{}/ against line", re);
             return match Regex::new(re)?.captures(&line) {
                 Some(caps) => Ok(caps
                     .iter()

@@ -13,7 +13,7 @@
 //!
 //! The keybinding language has the grammar:
 //!
-//! ```
+//! ```text
 //! sequence ::= chord
 //!            | chord chord
 //!

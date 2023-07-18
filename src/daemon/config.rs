@@ -78,7 +78,7 @@ pub enum SessionRestoreMode {
     Screen,
     /// Emit enough output data to restore the last n lines of
     /// history from the output spool.
-    Lines(usize),
+    Lines(u16),
 }
 
 #[cfg(test)]

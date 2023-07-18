@@ -13,7 +13,7 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use crossbeam_channel::RecvTimeoutError;
-use tracing::{debug, error, info, instrument, span, trace, Level};
+use tracing::{debug, error, info, instrument, span, trace, warn, Level};
 
 use crate::{
     consts,
@@ -107,6 +107,7 @@ impl SessionInner {
         &self,
         tty_size: tty::Size,
         scrollback_lines: usize,
+        session_restore_mode: config::SessionRestoreMode,
         client_connection: crossbeam_channel::Receiver<Option<ClientConnection>>,
         client_connection_ack: crossbeam_channel::Sender<ClientConnectionStatus>,
         tty_size_change: crossbeam_channel::Receiver<tty::Size>,
@@ -136,10 +137,12 @@ impl SessionInner {
 
             let mut resize_cmd: Option<ResizeCmd> = None;
             loop {
+                let mut do_reattach = false;
                 crossbeam_channel::select! {
                     recv(client_connection) -> new_connection => {
                         match new_connection {
                             Ok(Some(conn)) => {
+                                do_reattach = true;
                                 let ack = if client_conn.is_some() {
                                     ClientConnectionStatus::Replaced
                                 } else {
@@ -155,6 +158,9 @@ impl SessionInner {
                                 };
                                 oversize.set_fd(pty_master.as_raw_fd())?;
 
+                                // Always instantly resize the spool, since we don't
+                                // need to inject a delay into that.
+                                output_spool.set_size(conn.size.rows, conn.size.cols);
                                 resize_cmd = Some(ResizeCmd {
                                     size: conn.size.clone(),
                                     when: time::Instant::now().add(REATTACH_RESIZE_DELAY),
@@ -184,6 +190,7 @@ impl SessionInner {
                     recv(tty_size_change) -> new_size => {
                         if let Ok(size) = new_size {
                             info!("resize size={:?}", size);
+                            output_spool.set_size(size.rows, size.cols);
                             resize_cmd = Some(ResizeCmd {
                                 size: size,
                                 // No delay needed for ordinary resizes, just
@@ -205,13 +212,39 @@ impl SessionInner {
                     if resize_cmd.when.saturating_duration_since(time::Instant::now())
                         == time::Duration::ZERO
                     {
-                        output_spool.set_size(resize_cmd.size.rows, resize_cmd.size.cols);
                         resize_cmd.size.set_fd(pty_master.as_raw_fd())?;
                         executed_resize = true;
                     }
                 }
                 if executed_resize {
                     resize_cmd = None;
+                }
+
+                if do_reattach {
+                    use config::SessionRestoreMode::*;
+                    let (do_restore, reset_spool_size_to) = match session_restore_mode {
+                        Simple => (false, None),
+                        Screen => (true, None),
+                        Lines(nlines) => {
+                            let old_size = output_spool.screen().size();
+                            output_spool.set_size(nlines, old_size.1);
+                            (true, Some(old_size))
+                        }
+                    };
+                    if let (true, Some(conn)) = (do_restore, client_conn.as_ref()) {
+                        let screen = output_spool.screen().contents_formatted();
+                        let chunk =
+                            protocol::Chunk { kind: protocol::ChunkKind::Data, buf: &screen[..] };
+
+                        let mut s = conn.sink.lock().unwrap();
+                        if let Err(err) = chunk.write_to(&mut *s).and_then(|_| s.flush()) {
+                            warn!("write err session-restoring screen: {:?}", err);
+                        }
+
+                        if let Some((rows, cols)) = reset_spool_size_to {
+                            output_spool.set_size(rows, cols);
+                        }
+                    }
                 }
 
                 // Block until the shell has some data for us so we can be sure our reads
@@ -231,7 +264,7 @@ impl SessionInner {
                     continue;
                 }
 
-                output_spool.write(&buf[..len])?;
+                output_spool.process(&buf[..len]);
 
                 let mut reset_client_conn = false;
                 if let Some(conn) = client_conn.as_ref() {

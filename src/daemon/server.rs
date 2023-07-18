@@ -616,14 +616,20 @@ impl Server {
             config: self.config.clone(),
             reader_join_h: None,
         };
-        session_inner.reader_join_h = Some(session_inner.spawn_reader(
-            header.local_tty_size.clone(),
-            self.config.output_spool_lines.unwrap_or(DEFAULT_OUTPUT_SPOOL_LINES),
-            client_connection_rx,
-            client_connection_ack_tx,
-            tty_size_change_rx,
-            tty_size_change_ack_tx,
-        )?);
+        session_inner.reader_join_h = Some(
+            session_inner.spawn_reader(
+                header.local_tty_size.clone(),
+                self.config.output_spool_lines.unwrap_or(DEFAULT_OUTPUT_SPOOL_LINES),
+                self.config
+                    .session_restore_mode
+                    .clone()
+                    .unwrap_or(config::SessionRestoreMode::default()),
+                client_connection_rx,
+                client_connection_ack_tx,
+                tty_size_change_rx,
+                tty_size_change_ack_tx,
+            )?,
+        );
 
         Ok(shell::Session {
             reader_ctl,
@@ -679,9 +685,7 @@ fn check_peer(sock: &UnixStream) -> anyhow::Result<Vec<String>> {
     let peer_exe = exe_for_pid(peer_pid).context("could not resolve exe from the pid")?;
     let self_exe = exe_for_pid(self_pid).context("could not resolve our own exe")?;
     if peer_exe != self_exe {
-        return Ok(vec![String::from(
-            "attach binary differs from daemon binary",
-        )]);
+        return Ok(vec![String::from("attach binary differs from daemon binary")]);
     }
 
     Ok(vec![])

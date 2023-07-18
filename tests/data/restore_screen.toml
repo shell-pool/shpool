@@ -1,8 +1,8 @@
 norc = true
 noecho = true
 shell = "/bin/bash"
-session_restore_mode = "simple"
+session_restore_mode = "screen"
 
 [env]
 PS1 = "prompt> "
-SOME_CUSTOM_ENV_VAR = "customvalue"
+TERM = ""
