@@ -1,3 +1,10 @@
+shpool (0.2.0) unstable; urgency=low
+
+  * Add support for session_restore_mode option
+  * Loosen exe mismatch restriction
+  * [BREAKING] Change config identifiers to be lower case
+
+ -- Ethan Pailes <pailes@google.com>  Tue, 18 August 2023 16:02:00 -0400
 shpool (0.1.2) unstable; urgency=low
 
   * Fix bug in how PATH is set in new shells
