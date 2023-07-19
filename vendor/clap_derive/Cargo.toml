@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.56.1"
 name = "clap_derive"
-version = "3.2.18"
+version = "3.2.25"
 include = [
     "build.rs",
     "src/**/*",
@@ -38,22 +38,21 @@ categories = [
 ]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/clap-rs/clap/tree/master/clap_derive"
-resolver = "2"
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
 
 [package.metadata.release]
-shared-version = true
 dependent-version = "upgrade"
+shared-version = true
 tag-name = "v{{version}}"
 
 [[package.metadata.release.pre-release-replacements]]
-file = "README.md"
-search = "github.com/clap-rs/clap/blob/[^/]+/"
-replace = "github.com/clap-rs/clap/blob/{{tag_name}}/"
 exactly = 2
+file = "README.md"
 prerelease = true
+replace = "github.com/clap-rs/clap/blob/{{tag_name}}/"
+search = "github.com/clap-rs/clap/blob/[^/]+/"
 
 [lib]
 bench = false

@@ -24,6 +24,7 @@ pub(crate) fn parse_document(raw: &str) -> Result<crate::Document, TomlError> {
     let b = new_input(raw);
     let mut doc = document::document
         .parse(b)
+        .finish()
         .map_err(|e| TomlError::new(e, b))?;
     doc.span = Some(0..(raw.len()));
     doc.original = Some(raw.to_owned());
@@ -34,7 +35,7 @@ pub(crate) fn parse_key(raw: &str) -> Result<crate::Key, TomlError> {
     use prelude::*;
 
     let b = new_input(raw);
-    let result = key::simple_key.parse(b);
+    let result = key::simple_key.parse(b).finish();
     match result {
         Ok((raw, key)) => {
             Ok(crate::Key::new(key).with_repr_unchecked(crate::Repr::new_unchecked(raw)))
@@ -47,7 +48,7 @@ pub(crate) fn parse_key_path(raw: &str) -> Result<Vec<crate::Key>, TomlError> {
     use prelude::*;
 
     let b = new_input(raw);
-    let result = key::key.parse(b);
+    let result = key::key.parse(b).finish();
     match result {
         Ok(mut keys) => {
             for key in &mut keys {
@@ -63,7 +64,7 @@ pub(crate) fn parse_value(raw: &str) -> Result<crate::Value, TomlError> {
     use prelude::*;
 
     let b = new_input(raw);
-    let parsed = value::value(RecursionCheck::default()).parse(b);
+    let parsed = value::value(RecursionCheck::default()).parse(b).finish();
     match parsed {
         Ok(mut value) => {
             // Only take the repr and not decor, as its probably not intended
@@ -79,21 +80,21 @@ pub(crate) mod prelude {
     pub(crate) use super::errors::Context;
     pub(crate) use super::errors::ParserError;
     pub(crate) use super::errors::ParserValue;
-    pub(crate) use winnow::IResult;
-    pub(crate) use winnow::Parser as _;
+    pub(crate) use nom8::IResult;
+    pub(crate) use nom8::Parser as _;
 
-    pub(crate) type Input<'b> = winnow::Located<&'b winnow::BStr>;
+    pub(crate) use nom8::FinishIResult as _;
+
+    pub(crate) type Input<'b> = nom8::input::Located<&'b [u8]>;
 
     pub(crate) fn new_input(s: &str) -> Input<'_> {
-        winnow::Located::new(winnow::BStr::new(s))
+        nom8::input::Located::new(s.as_bytes())
     }
 
-    pub(crate) fn ok_error<I, O, E>(
-        res: IResult<I, O, E>,
-    ) -> Result<Option<(I, O)>, winnow::error::ErrMode<E>> {
+    pub(crate) fn ok_error<I, O, E>(res: IResult<I, O, E>) -> Result<Option<(I, O)>, nom8::Err<E>> {
         match res {
             Ok(ok) => Ok(Some(ok)),
-            Err(winnow::error::ErrMode::Backtrack(_)) => Ok(None),
+            Err(nom8::Err::Error(_)) => Ok(None),
             Err(err) => Err(err),
         }
     }
@@ -101,13 +102,13 @@ pub(crate) mod prelude {
     #[allow(dead_code)]
     pub(crate) fn trace<I: std::fmt::Debug, O: std::fmt::Debug, E: std::fmt::Debug>(
         context: impl std::fmt::Display,
-        mut parser: impl winnow::Parser<I, O, E>,
+        mut parser: impl nom8::Parser<I, O, E>,
     ) -> impl FnMut(I) -> IResult<I, O, E> {
         static DEPTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         move |input: I| {
             let depth = DEPTH.fetch_add(1, std::sync::atomic::Ordering::SeqCst) * 2;
             eprintln!("{:depth$}--> {} {:?}", "", context, input);
-            match parser.parse_next(input) {
+            match parser.parse(input) {
                 Ok((i, o)) => {
                     DEPTH.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                     eprintln!("{:depth$}<-- {} {:?}", "", context, i);
@@ -141,15 +142,15 @@ pub(crate) mod prelude {
         pub(crate) fn recursing(
             mut self,
             input: Input<'_>,
-        ) -> Result<Self, winnow::error::ErrMode<ParserError<'_>>> {
+        ) -> Result<Self, nom8::Err<ParserError<'_>>> {
             self.current += 1;
             if self.current < 128 {
                 Ok(self)
             } else {
-                Err(winnow::error::ErrMode::Backtrack(
-                    winnow::error::FromExternalError::from_external_error(
+                Err(nom8::Err::Error(
+                    nom8::error::FromExternalError::from_external_error(
                         input,
-                        winnow::error::ErrorKind::Eof,
+                        nom8::error::ErrorKind::Eof,
                         super::errors::CustomError::RecursionLimitExceeded,
                     ),
                 ))
@@ -170,7 +171,7 @@ pub(crate) mod prelude {
         pub(crate) fn recursing(
             self,
             _input: Input<'_>,
-        ) -> Result<Self, winnow::error::ErrMode<ParserError<'_>>> {
+        ) -> Result<Self, nom8::Err<ParserError<'_>>> {
             Ok(self)
         }
     }

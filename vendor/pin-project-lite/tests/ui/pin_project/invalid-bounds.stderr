@@ -3,12 +3,24 @@ error: no rules expected the token `:`
   |
 4 |     struct Generics1<T: 'static : Sized> { //~ ERROR no rules expected the token `:`
   |                                 ^ no rules expected this token in macro call
+  |
+note: while trying to match `>`
+ --> src/lib.rs
+  |
+  |         >)?
+  |         ^
 
 error: no rules expected the token `:`
   --> tests/ui/pin_project/invalid-bounds.rs:10:33
    |
 10 |     struct Generics2<T: 'static : ?Sized> { //~ ERROR no rules expected the token `:`
    |                                 ^ no rules expected this token in macro call
+   |
+note: while trying to match `>`
+  --> src/lib.rs
+   |
+   |         >)?
+   |         ^
 
 error: expected one of `+`, `,`, `=`, or `>`, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:15:1
@@ -24,7 +36,7 @@ error: expected one of `+`, `,`, `=`, or `>`, found `:`
    | |_unexpected token
    |   in this macro invocation
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: expected one of `+`, `,`, `=`, or `>`, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:15:1
@@ -39,7 +51,8 @@ error: expected one of `+`, `,`, `=`, or `>`, found `:`
    | |_expected one of `+`, `,`, `=`, or `>`
    |   unexpected token
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: type ascription syntax has been removed, see issue #101728 <https://github.com/rust-lang/rust/issues/101728>
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: expected one of `+`, `,`, `=`, or `>`, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:15:1
@@ -55,7 +68,7 @@ error: expected one of `+`, `,`, `=`, or `>`, found `:`
    | |_unexpected token
    |   in this macro invocation
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: expected one of `+`, `,`, `=`, or `>`, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:15:1
@@ -71,7 +84,7 @@ error: expected one of `+`, `,`, `=`, or `>`, found `:`
    | |_unexpected token
    |   in this macro invocation
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: expected one of `+`, `,`, `=`, or `>`, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:21:1
@@ -87,7 +100,7 @@ error: expected one of `+`, `,`, `=`, or `>`, found `:`
    | |_unexpected token
    |   in this macro invocation
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: expected one of `+`, `,`, `=`, or `>`, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:21:1
@@ -102,7 +115,8 @@ error: expected one of `+`, `,`, `=`, or `>`, found `:`
    | |_expected one of `+`, `,`, `=`, or `>`
    |   unexpected token
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: type ascription syntax has been removed, see issue #101728 <https://github.com/rust-lang/rust/issues/101728>
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: expected one of `+`, `,`, `=`, or `>`, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:21:1
@@ -118,7 +132,7 @@ error: expected one of `+`, `,`, `=`, or `>`, found `:`
    | |_unexpected token
    |   in this macro invocation
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: expected one of `+`, `,`, `=`, or `>`, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:21:1
@@ -134,7 +148,7 @@ error: expected one of `+`, `,`, `=`, or `>`, found `:`
    | |_unexpected token
    |   in this macro invocation
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: expected one of `+`, `,`, `=`, or `>`, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:27:1
@@ -150,7 +164,7 @@ error: expected one of `+`, `,`, `=`, or `>`, found `:`
    | |_unexpected token
    |   in this macro invocation
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: expected one of `+`, `,`, `=`, or `>`, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:27:1
@@ -165,7 +179,8 @@ error: expected one of `+`, `,`, `=`, or `>`, found `:`
    | |_expected one of `+`, `,`, `=`, or `>`
    |   unexpected token
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: type ascription syntax has been removed, see issue #101728 <https://github.com/rust-lang/rust/issues/101728>
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: expected one of `+`, `,`, `=`, or `>`, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:27:1
@@ -181,7 +196,7 @@ error: expected one of `+`, `,`, `=`, or `>`, found `:`
    | |_unexpected token
    |   in this macro invocation
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: expected one of `+`, `,`, `=`, or `>`, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:27:1
@@ -197,25 +212,43 @@ error: expected one of `+`, `,`, `=`, or `>`, found `:`
    | |_unexpected token
    |   in this macro invocation
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: no rules expected the token `Sized`
   --> tests/ui/pin_project/invalid-bounds.rs:34:34
    |
 34 |     struct Generics6<T: ?Sized : Sized> { //~ ERROR no rules expected the token `Sized`
    |                                  ^^^^^ no rules expected this token in macro call
+   |
+note: while trying to match meta-variable `$generics_lifetime_bound:lifetime`
+  --> src/lib.rs
+   |
+   |                 $(: $generics_lifetime_bound:lifetime)?
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 error: no rules expected the token `:`
   --> tests/ui/pin_project/invalid-bounds.rs:42:20
    |
 42 |         T: 'static : Sized //~ ERROR no rules expected the token `:`
    |                    ^ no rules expected this token in macro call
+   |
+note: while trying to match `{`
+  --> src/lib.rs
+   |
+   |         {
+   |         ^
 
 error: no rules expected the token `:`
   --> tests/ui/pin_project/invalid-bounds.rs:51:20
    |
 51 |         T: 'static : ?Sized //~ ERROR no rules expected the token `:`
    |                    ^ no rules expected this token in macro call
+   |
+note: while trying to match `{`
+  --> src/lib.rs
+   |
+   |         {
+   |         ^
 
 error: expected `{` after struct name, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:57:1
@@ -232,7 +265,7 @@ error: expected `{` after struct name, found `:`
    | |_expected `{` after struct name
    |   in this macro invocation
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: expected one of `+`, `,`, or `{`, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:57:1
@@ -249,7 +282,8 @@ error: expected one of `+`, `,`, or `{`, found `:`
    | |_expected one of `+`, `,`, or `{`
    |   unexpected token
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: type ascription syntax has been removed, see issue #101728 <https://github.com/rust-lang/rust/issues/101728>
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: expected `{` after struct name, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:57:1
@@ -266,7 +300,7 @@ error: expected `{` after struct name, found `:`
    | |_expected `{` after struct name
    |   in this macro invocation
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: expected `{` after struct name, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:57:1
@@ -283,7 +317,7 @@ error: expected `{` after struct name, found `:`
    | |_expected `{` after struct name
    |   in this macro invocation
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: expected `{` after struct name, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:66:1
@@ -300,7 +334,7 @@ error: expected `{` after struct name, found `:`
    | |_expected `{` after struct name
    |   in this macro invocation
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: expected one of `+`, `,`, or `{`, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:66:1
@@ -317,7 +351,8 @@ error: expected one of `+`, `,`, or `{`, found `:`
    | |_expected one of `+`, `,`, or `{`
    |   unexpected token
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: type ascription syntax has been removed, see issue #101728 <https://github.com/rust-lang/rust/issues/101728>
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: expected `{` after struct name, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:66:1
@@ -334,7 +369,7 @@ error: expected `{` after struct name, found `:`
    | |_expected `{` after struct name
    |   in this macro invocation
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: expected `{` after struct name, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:66:1
@@ -351,7 +386,7 @@ error: expected `{` after struct name, found `:`
    | |_expected `{` after struct name
    |   in this macro invocation
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: expected `{` after struct name, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:75:1
@@ -368,7 +403,7 @@ error: expected `{` after struct name, found `:`
    | |_expected `{` after struct name
    |   in this macro invocation
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: expected one of `+`, `,`, or `{`, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:75:1
@@ -385,7 +420,8 @@ error: expected one of `+`, `,`, or `{`, found `:`
    | |_expected one of `+`, `,`, or `{`
    |   unexpected token
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: type ascription syntax has been removed, see issue #101728 <https://github.com/rust-lang/rust/issues/101728>
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: expected `{` after struct name, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:75:1
@@ -402,7 +438,7 @@ error: expected `{` after struct name, found `:`
    | |_expected `{` after struct name
    |   in this macro invocation
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: expected `{` after struct name, found `:`
   --> tests/ui/pin_project/invalid-bounds.rs:75:1
@@ -419,10 +455,16 @@ error: expected `{` after struct name, found `:`
    | |_expected `{` after struct name
    |   in this macro invocation
    |
-   = note: this error originates in the macro `$crate::__pin_project_parse_generics` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: this error originates in the macro `$crate::__pin_project_parse_generics` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: no rules expected the token `Sized`
   --> tests/ui/pin_project/invalid-bounds.rs:87:21
    |
 87 |         T: ?Sized : Sized //~ ERROR no rules expected the token `Sized`
    |                     ^^^^^ no rules expected this token in macro call
+   |
+note: while trying to match meta-variable `$where_clause_lifetime_bound:lifetime`
+  --> src/lib.rs
+   |
+   |                 $(: $where_clause_lifetime_bound:lifetime)?
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

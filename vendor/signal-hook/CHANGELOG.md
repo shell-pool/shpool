@@ -1,3 +1,16 @@
+# 0.3.17
+
+* Fix race condition leading into a panic in SignalsInfo::forever (#148).
+
+# 0.3.16
+
+* Fix compilation on OpenBSD (#147).
+
+# 0.3.15
+# signal-hook-registry-1.4.1
+
+* AIX support (experimental/not guaranteed to work).
+
 # 0.3.14
 
 * Added the SIGINFO signal (where available).

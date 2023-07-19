@@ -1,8 +1,6 @@
-use std::cmp;
-use std::fmt;
-use std::mem;
-use std::u16;
-use std::usize;
+use core::{cmp, fmt, mem, u16, usize};
+
+use alloc::{string::String, vec, vec::Vec};
 
 use crate::packed::api::MatchKind;
 
@@ -86,7 +84,8 @@ impl Patterns {
     ///
     /// If the kind is not set, then the default is leftmost-first.
     pub fn set_match_kind(&mut self, kind: MatchKind) {
-        match kind {
+        self.kind = kind;
+        match self.kind {
             MatchKind::LeftmostFirst => {
                 self.order.sort();
             }
@@ -99,7 +98,6 @@ impl Patterns {
                         .reverse()
                 });
             }
-            MatchKind::__Nonexhaustive => unreachable!(),
         }
     }
 
@@ -117,7 +115,7 @@ impl Patterns {
 
     /// Returns the approximate total amount of heap used by these patterns, in
     /// units of bytes.
-    pub fn heap_bytes(&self) -> usize {
+    pub fn memory_usage(&self) -> usize {
         self.order.len() * mem::size_of::<PatternID>()
             + self.by_id.len() * mem::size_of::<Vec<u8>>()
             + self.total_pattern_bytes
@@ -166,7 +164,7 @@ impl Patterns {
     ///
     /// Callers must ensure that a pattern with the given identifier exists
     /// before using this method.
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "std", target_arch = "x86_64"))]
     pub unsafe fn get_unchecked(&self, id: PatternID) -> Pattern<'_> {
         Pattern(self.by_id.get_unchecked(id as usize))
     }
@@ -246,7 +244,7 @@ impl<'p> Pattern<'p> {
 
     /// Returns the first `len` low nybbles from this pattern. If this pattern
     /// is shorter than `len`, then this panics.
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(feature = "std", target_arch = "x86_64"))]
     pub fn low_nybbles(&self, len: usize) -> Vec<u8> {
         let mut nybs = vec![];
         for &b in self.bytes().iter().take(len) {
@@ -273,46 +271,59 @@ impl<'p> Pattern<'p> {
         // This results in an improvement in just about every benchmark. Some
         // smaller than others, but in some cases, up to 30% faster.
 
-        if self.len() != bytes.len() {
+        let (x, y) = (self.bytes(), bytes);
+        if x.len() != y.len() {
             return false;
         }
-        if self.len() < 8 {
-            for (&b1, &b2) in self.bytes().iter().zip(bytes) {
+        // If we don't have enough bytes to do 4-byte at a time loads, then
+        // fall back to the naive slow version.
+        if x.len() < 4 {
+            for (&b1, &b2) in x.iter().zip(y) {
                 if b1 != b2 {
                     return false;
                 }
             }
             return true;
         }
-        // When we have 8 or more bytes to compare, then proceed in chunks of
-        // 8 at a time using unaligned loads.
-        let mut p1 = self.bytes().as_ptr();
-        let mut p2 = bytes.as_ptr();
-        let p1end = self.bytes()[self.len() - 8..].as_ptr();
-        let p2end = bytes[bytes.len() - 8..].as_ptr();
-        // SAFETY: Via the conditional above, we know that both `p1` and `p2`
-        // have the same length, so `p1 < p1end` implies that `p2 < p2end`.
-        // Thus, derefencing both `p1` and `p2` in the loop below is safe.
+        // When we have 4 or more bytes to compare, then proceed in chunks of 4
+        // at a time using unaligned loads.
         //
-        // Moreover, we set `p1end` and `p2end` to be 8 bytes before the actual
-        // end of of `p1` and `p2`. Thus, the final dereference outside of the
-        // loop is guaranteed to be valid.
+        // Also, why do 4 byte loads instead of, say, 8 byte loads? The reason
+        // is that this particular version of memcmp is likely to be called
+        // with tiny needles. That means that if we do 8 byte loads, then a
+        // higher proportion of memcmp calls will use the slower variant above.
+        // With that said, this is a hypothesis and is only loosely supported
+        // by benchmarks. There's likely some improvement that could be made
+        // here. The main thing here though is to optimize for latency, not
+        // throughput.
+
+        // SAFETY: Via the conditional above, we know that both `px` and `py`
+        // have the same length, so `px < pxend` implies that `py < pyend`.
+        // Thus, derefencing both `px` and `py` in the loop below is safe.
         //
-        // Finally, we needn't worry about 64-bit alignment here, since we
-        // do unaligned loads.
+        // Moreover, we set `pxend` and `pyend` to be 4 bytes before the actual
+        // end of of `px` and `py`. Thus, the final dereference outside of the
+        // loop is guaranteed to be valid. (The final comparison will overlap
+        // with the last comparison done in the loop for lengths that aren't
+        // multiples of four.)
+        //
+        // Finally, we needn't worry about alignment here, since we do
+        // unaligned loads.
         unsafe {
-            while p1 < p1end {
-                let v1 = (p1 as *const u64).read_unaligned();
-                let v2 = (p2 as *const u64).read_unaligned();
-                if v1 != v2 {
+            let (mut px, mut py) = (x.as_ptr(), y.as_ptr());
+            let (pxend, pyend) = (px.add(x.len() - 4), py.add(y.len() - 4));
+            while px < pxend {
+                let vx = (px as *const u32).read_unaligned();
+                let vy = (py as *const u32).read_unaligned();
+                if vx != vy {
                     return false;
                 }
-                p1 = p1.add(8);
-                p2 = p2.add(8);
+                px = px.add(4);
+                py = py.add(4);
             }
-            let v1 = (p1end as *const u64).read_unaligned();
-            let v2 = (p2end as *const u64).read_unaligned();
-            v1 == v2
+            let vx = (pxend as *const u32).read_unaligned();
+            let vy = (pyend as *const u32).read_unaligned();
+            vx == vy
         }
     }
 }

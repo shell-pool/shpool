@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.60.0"
 name = "toml_datetime"
-version = "0.6.1"
+version = "0.6.0"
 authors = ["Alex Crichton <alex@alexcrichton.com>"]
 include = [
     "src/**/*",
@@ -75,13 +75,6 @@ replace = """
 <!-- next-url -->
 [Unreleased]: https://github.com/toml-rs/toml/compare/{{tag_name}}...HEAD"""
 exactly = 1
-
-[package.metadata.docs.rs]
-rustdoc-args = [
-    "--cfg",
-    "docsrs",
-]
-all-features = true
 
 [dependencies.serde]
 version = "1.0.145"

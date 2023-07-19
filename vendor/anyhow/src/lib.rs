@@ -210,7 +210,7 @@
 //! will require an explicit `.map_err(Error::msg)` when working with a
 //! non-Anyhow error type inside a function that returns Anyhow's error type.
 
-#![doc(html_root_url = "https://docs.rs/anyhow/1.0.65")]
+#![doc(html_root_url = "https://docs.rs/anyhow/1.0.72")]
 #![cfg_attr(backtrace, feature(error_generic_member_access, provide_any))]
 #![cfg_attr(doc_cfg, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
@@ -219,6 +219,8 @@
     clippy::doc_markdown,
     clippy::enum_glob_use,
     clippy::explicit_auto_deref,
+    clippy::extra_unused_type_parameters,
+    clippy::let_underscore_untyped,
     clippy::missing_errors_doc,
     clippy::missing_panics_doc,
     clippy::module_name_repetitions,
@@ -264,6 +266,7 @@ trait StdError: Debug + Display {
     }
 }
 
+#[doc(no_inline)]
 pub use anyhow as format_err;
 
 /// The `Error` type, a wrapper around a dynamic error type.
@@ -367,7 +370,7 @@ pub use anyhow as format_err;
 ///     # Ok(())
 /// }
 /// ```
-#[repr(transparent)]
+#[cfg_attr(not(doc), repr(transparent))]
 pub struct Error {
     inner: Own<ErrorImpl>,
 }

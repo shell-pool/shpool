@@ -85,10 +85,10 @@
 //! # untyped_example().unwrap();
 //! ```
 //!
-//! [macro]: https://docs.serde.rs/serde_json/macro.json.html
-//! [from_str]: https://docs.serde.rs/serde_json/de/fn.from_str.html
-//! [from_slice]: https://docs.serde.rs/serde_json/de/fn.from_slice.html
-//! [from_reader]: https://docs.serde.rs/serde_json/de/fn.from_reader.html
+//! [macro]: crate::json
+//! [from_str]: crate::de::from_str
+//! [from_slice]: crate::de::from_slice
+//! [from_reader]: crate::de::from_reader
 
 use crate::error::Error;
 use crate::io;
@@ -182,11 +182,11 @@ impl Debug for Value {
             Value::Number(number) => Debug::fmt(number, formatter),
             Value::String(string) => write!(formatter, "String({:?})", string),
             Value::Array(vec) => {
-                formatter.write_str("Array ")?;
+                tri!(formatter.write_str("Array "));
                 Debug::fmt(vec, formatter)
             }
             Value::Object(map) => {
-                formatter.write_str("Object ")?;
+                tri!(formatter.write_str("Object "));
                 Debug::fmt(map, formatter)
             }
         }
@@ -889,7 +889,6 @@ mod ser;
 /// ```
 /// use serde::Serialize;
 /// use serde_json::json;
-///
 /// use std::error::Error;
 ///
 /// #[derive(Serialize)]
@@ -898,7 +897,7 @@ mod ser;
 ///     location: String,
 /// }
 ///
-/// fn compare_json_values() -> Result<(), Box<Error>> {
+/// fn compare_json_values() -> Result<(), Box<dyn Error>> {
 ///     let u = User {
 ///         fingerprint: "0xF9BA143B95FF6D82".to_owned(),
 ///         location: "Menlo Park, CA".to_owned(),

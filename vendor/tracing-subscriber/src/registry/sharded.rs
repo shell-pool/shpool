@@ -422,7 +422,7 @@ impl<'a> SpanData<'a> for Data<'a> {
     }
 
     fn metadata(&self) -> &'static Metadata<'static> {
-        (*self).inner.metadata
+        self.inner.metadata
     }
 
     fn parent(&self) -> Option<&Id> {
@@ -902,7 +902,7 @@ mod tests {
 
             drop(span3);
 
-            state.assert_closed_in_order(&["child", "parent", "grandparent"]);
+            state.assert_closed_in_order(["child", "parent", "grandparent"]);
         });
     }
 }

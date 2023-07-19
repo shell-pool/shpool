@@ -1,8 +1,16 @@
 use std::collections::HashMap;
-use std::usize;
 
-use crate::packed::{Config, MatchKind};
-use crate::Match;
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
+
+use crate::{
+    packed::{Config, MatchKind},
+    util::search::Match,
+};
 
 /// A description of a single test against a multi-pattern searcher.
 ///
@@ -144,6 +152,9 @@ const BASICS: &'static [SearchTest] = &[
     t!(basic200, &["abc"], "abc", &[(0, 0, 3)]),
     t!(basic210, &["abc"], "zazabzabcz", &[(0, 6, 9)]),
     t!(basic220, &["abc"], "zazabczabcz", &[(0, 3, 6), (0, 7, 10)]),
+    t!(basic230, &["abcd"], "abcd", &[(0, 0, 4)]),
+    t!(basic240, &["abcd"], "zazabzabcdz", &[(0, 6, 10)]),
+    t!(basic250, &["abcd"], "zazabcdzabcdz", &[(0, 3, 7), (0, 8, 12)]),
     t!(basic300, &["a", "b"], "", &[]),
     t!(basic310, &["a", "b"], "z", &[]),
     t!(basic320, &["a", "b"], "b", &[(1, 0, 1)]),
@@ -433,7 +444,7 @@ testconfig!(
     PACKED_LEFTMOST_FIRST,
     |c: &mut Config| {
         c.force_teddy(true);
-        if is_x86_feature_detected!("ssse3") {
+        if std::is_x86_feature_detected!("ssse3") {
             c.force_avx(Some(false));
         }
     }
@@ -445,7 +456,7 @@ testconfig!(
     PACKED_LEFTMOST_LONGEST,
     |c: &mut Config| {
         c.force_teddy(true).match_kind(MatchKind::LeftmostLongest);
-        if is_x86_feature_detected!("ssse3") {
+        if std::is_x86_feature_detected!("ssse3") {
             c.force_avx(Some(false));
         }
     }
@@ -457,7 +468,7 @@ testconfig!(
     PACKED_LEFTMOST_FIRST,
     |c: &mut Config| {
         c.force_teddy(true);
-        if is_x86_feature_detected!("avx2") {
+        if std::is_x86_feature_detected!("avx2") {
             c.force_avx(Some(true));
         }
     }
@@ -469,7 +480,7 @@ testconfig!(
     PACKED_LEFTMOST_LONGEST,
     |c: &mut Config| {
         c.force_teddy(true).match_kind(MatchKind::LeftmostLongest);
-        if is_x86_feature_detected!("avx2") {
+        if std::is_x86_feature_detected!("avx2") {
             c.force_avx(Some(true));
         }
     }
@@ -481,7 +492,7 @@ testconfig!(
     PACKED_LEFTMOST_FIRST,
     |c: &mut Config| {
         c.force_teddy(true);
-        if is_x86_feature_detected!("avx2") {
+        if std::is_x86_feature_detected!("avx2") {
             c.force_teddy_fat(Some(true));
         }
     }
@@ -493,7 +504,7 @@ testconfig!(
     PACKED_LEFTMOST_LONGEST,
     |c: &mut Config| {
         c.force_teddy(true).match_kind(MatchKind::LeftmostLongest);
-        if is_x86_feature_detected!("avx2") {
+        if std::is_x86_feature_detected!("avx2") {
             c.force_teddy_fat(Some(true));
         }
     }
@@ -547,7 +558,7 @@ fn run_search_tests<F: FnMut(&SearchTestOwned) -> Vec<Match>>(
         |matches: Vec<Match>| -> Vec<(usize, usize, usize)> {
             matches
                 .into_iter()
-                .map(|m| (m.pattern(), m.start(), m.end()))
+                .map(|m| (m.pattern().as_usize(), m.start(), m.end()))
                 .collect()
         };
     for &tests in which {

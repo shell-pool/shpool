@@ -5,14 +5,10 @@
 
 use std::{
     cell::{Cell, UnsafeCell},
-    hint::unreachable_unchecked,
-    marker::PhantomData,
     panic::{RefUnwindSafe, UnwindSafe},
     sync::atomic::{AtomicBool, AtomicPtr, Ordering},
     thread::{self, Thread},
 };
-
-use crate::take_unchecked;
 
 #[derive(Debug)]
 pub(crate) struct OnceCell<T> {
@@ -25,7 +21,6 @@ pub(crate) struct OnceCell<T> {
     // State is encoded in two low bits. Only `INCOMPLETE` and `RUNNING` states
     // allow waiters.
     queue: AtomicPtr<Waiter>,
-    _marker: PhantomData<*mut Waiter>,
     value: UnsafeCell<Option<T>>,
 }
 
@@ -42,19 +37,11 @@ impl<T: UnwindSafe> UnwindSafe for OnceCell<T> {}
 
 impl<T> OnceCell<T> {
     pub(crate) const fn new() -> OnceCell<T> {
-        OnceCell {
-            queue: AtomicPtr::new(INCOMPLETE_PTR),
-            _marker: PhantomData,
-            value: UnsafeCell::new(None),
-        }
+        OnceCell { queue: AtomicPtr::new(INCOMPLETE_PTR), value: UnsafeCell::new(None) }
     }
 
     pub(crate) const fn with_value(value: T) -> OnceCell<T> {
-        OnceCell {
-            queue: AtomicPtr::new(COMPLETE_PTR),
-            _marker: PhantomData,
-            value: UnsafeCell::new(Some(value)),
-        }
+        OnceCell { queue: AtomicPtr::new(COMPLETE_PTR), value: UnsafeCell::new(Some(value)) }
     }
 
     /// Safety: synchronizes with store to value via Release/(Acquire|SeqCst).
@@ -81,7 +68,7 @@ impl<T> OnceCell<T> {
         initialize_or_wait(
             &self.queue,
             Some(&mut || {
-                let f = unsafe { take_unchecked(&mut f) };
+                let f = unsafe { f.take().unwrap_unchecked() };
                 match f() {
                     Ok(value) => {
                         unsafe { *slot = Some(value) };
@@ -111,15 +98,8 @@ impl<T> OnceCell<T> {
     /// the contents are acquired by (synchronized to) this thread.
     pub(crate) unsafe fn get_unchecked(&self) -> &T {
         debug_assert!(self.is_initialized());
-        let slot: &Option<T> = &*self.value.get();
-        match slot {
-            Some(value) => value,
-            // This unsafe does improve performance, see `examples/bench`.
-            None => {
-                debug_assert!(false);
-                unreachable_unchecked()
-            }
-        }
+        let slot = &*self.value.get();
+        slot.as_ref().unwrap_unchecked()
     }
 
     /// Gets the mutable reference to the underlying value.
@@ -219,7 +199,7 @@ fn initialize_or_wait(queue: &AtomicPtr<Waiter>, mut init: Option<&mut dyn FnMut
                 return;
             }
             (INCOMPLETE, None) | (RUNNING, _) => {
-                wait(&queue, curr_queue);
+                wait(queue, curr_queue);
                 curr_queue = queue.load(Ordering::Acquire);
             }
             _ => debug_assert!(false),

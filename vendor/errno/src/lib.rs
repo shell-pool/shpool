@@ -17,14 +17,7 @@
 //! println!("Error {}: {}", code, e);
 //! ```
 
-#![cfg_attr(target_os = "wasi", feature(thread_local))]
 #![cfg_attr(not(feature = "std"), no_std)]
-
-#[cfg(unix)] extern crate libc;
-#[cfg(windows)] extern crate winapi;
-#[cfg(target_os = "dragonfly")] extern crate errno_dragonfly;
-#[cfg(target_os = "wasi")] extern crate libc;
-#[cfg(target_os = "hermit")] extern crate libc;
 
 #[cfg_attr(unix, path = "unix.rs")]
 #[cfg_attr(windows, path = "windows.rs")]
@@ -32,12 +25,11 @@
 #[cfg_attr(target_os = "hermit", path = "hermit.rs")]
 mod sys;
 
-#[cfg(feature = "std")]
-use std::fmt;
-#[cfg(feature = "std")]
-use std::io;
+use core::fmt;
 #[cfg(feature = "std")]
 use std::error::Error;
+#[cfg(feature = "std")]
+use std::io;
 
 /// Wraps a platform-specific error code.
 ///
@@ -50,7 +42,6 @@ use std::error::Error;
 #[derive(Copy, Clone, Eq, Ord, PartialEq, PartialOrd, Hash)]
 pub struct Errno(pub i32);
 
-#[cfg(feature = "std")]
 impl fmt::Debug for Errno {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         sys::with_description(*self, |desc| {
@@ -62,21 +53,24 @@ impl fmt::Debug for Errno {
     }
 }
 
-#[cfg(feature = "std")]
 impl fmt::Display for Errno {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         sys::with_description(*self, |desc| match desc {
-            Ok(desc) => fmt.write_str(&desc),
+            Ok(desc) => fmt.write_str(desc),
             Err(fm_err) => write!(
-                fmt, "OS error {} ({} returned error {})",
-                self.0, sys::STRERROR_NAME, fm_err.0),
+                fmt,
+                "OS error {} ({} returned error {})",
+                self.0,
+                sys::STRERROR_NAME,
+                fm_err.0
+            ),
         })
     }
 }
 
-impl Into<i32> for Errno {
-    fn into(self) -> i32 {
-        self.0
+impl From<Errno> for i32 {
+    fn from(e: Errno) -> Self {
+        e.0
     }
 }
 
@@ -128,16 +122,27 @@ fn check_description() {
         "Not owner"
     } else if cfg!(target_os = "wasi") {
         "Argument list too long"
+    } else if cfg!(target_os = "haiku") {
+        "Operation not allowed"
     } else {
         "Operation not permitted"
     };
 
-    set_errno(Errno(1));
+    let errno_code = if cfg!(target_os = "haiku") {
+        -2147483633
+    } else {
+        1
+    };
+    set_errno(Errno(errno_code));
 
     assert_eq!(errno().to_string(), expect);
     assert_eq!(
         format!("{:?}", errno()),
-        format!("Errno {{ code: 1, description: Some({:?}) }}", expect));
+        format!(
+            "Errno {{ code: {}, description: Some({:?}) }}",
+            errno_code, expect
+        )
+    );
 }
 
 #[cfg(feature = "std")]

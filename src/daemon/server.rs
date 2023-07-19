@@ -150,7 +150,7 @@ impl Server {
                         }
                         Err(TryRecvError::Empty) => {
                             // the channel is still open so the subshell is still running
-                            info!("taking over existing session inner={:?}", inner);
+                            info!("taking over existing session inner");
                             inner.client_stream = Some(stream.try_clone()?);
 
                             // status is already attached

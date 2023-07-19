@@ -1,15 +1,15 @@
 use std::ops::RangeInclusive;
 
-use winnow::branch::alt;
-use winnow::bytes::one_of;
-use winnow::bytes::tag;
-use winnow::bytes::take;
-use winnow::combinator::cut_err;
-use winnow::combinator::opt;
-use winnow::combinator::peek;
-use winnow::combinator::rest;
-use winnow::multi::many0;
-use winnow::sequence::preceded;
+use nom8::branch::alt;
+use nom8::bytes::one_of;
+use nom8::bytes::tag;
+use nom8::bytes::take;
+use nom8::combinator::cut;
+use nom8::combinator::opt;
+use nom8::combinator::peek;
+use nom8::combinator::rest;
+use nom8::multi::many0_count;
+use nom8::sequence::preceded;
 
 use crate::parser::prelude::*;
 use crate::parser::trivia::from_utf8_unchecked;
@@ -19,18 +19,16 @@ use crate::parser::trivia::from_utf8_unchecked;
 // boolean = true / false
 #[allow(dead_code)] // directly define in `fn value`
 pub(crate) fn boolean(input: Input<'_>) -> IResult<Input<'_>, bool, ParserError<'_>> {
-    alt((true_, false_)).parse_next(input)
+    alt((true_, false_)).parse(input)
 }
 
 pub(crate) fn true_(input: Input<'_>) -> IResult<Input<'_>, bool, ParserError<'_>> {
-    (peek(TRUE[0]), cut_err(TRUE)).value(true).parse_next(input)
+    (peek(TRUE[0]), cut(TRUE)).value(true).parse(input)
 }
 const TRUE: &[u8] = b"true";
 
 pub(crate) fn false_(input: Input<'_>) -> IResult<Input<'_>, bool, ParserError<'_>> {
-    (peek(FALSE[0]), cut_err(FALSE))
-        .value(false)
-        .parse_next(input)
+    (peek(FALSE[0]), cut(FALSE)).value(false).parse(input)
 }
 const FALSE: &[u8] = b"false";
 
@@ -39,13 +37,13 @@ const FALSE: &[u8] = b"false";
 // integer = dec-int / hex-int / oct-int / bin-int
 pub(crate) fn integer(input: Input<'_>) -> IResult<Input<'_>, i64, ParserError<'_>> {
     dispatch! {peek(opt::<_, &[u8], _, _>(take(2usize)));
-        Some(b"0x") => cut_err(hex_int.map_res(|s| i64::from_str_radix(&s.replace('_', ""), 16))),
-        Some(b"0o") => cut_err(oct_int.map_res(|s| i64::from_str_radix(&s.replace('_', ""), 8))),
-        Some(b"0b") => cut_err(bin_int.map_res(|s| i64::from_str_radix(&s.replace('_', ""), 2))),
-        _ => dec_int.and_then(cut_err(rest
+        Some(b"0x") => cut(hex_int.map_res(|s| i64::from_str_radix(&s.replace('_', ""), 16))),
+        Some(b"0o") => cut(oct_int.map_res(|s| i64::from_str_radix(&s.replace('_', ""), 8))),
+        Some(b"0b") => cut(bin_int.map_res(|s| i64::from_str_radix(&s.replace('_', ""), 2))),
+        _ => dec_int.and_then(cut(rest
             .map_res(|s: &str| s.replace('_', "").parse())))
     }
-    .parse_next(input)
+    .parse(input)
 }
 
 // dec-int = [ minus / plus ] unsigned-dec-int
@@ -56,16 +54,14 @@ pub(crate) fn dec_int(input: Input<'_>) -> IResult<Input<'_>, &str, ParserError<
         alt((
             (
                 one_of(DIGIT1_9),
-                many0(alt((
+                many0_count(alt((
                     digit.value(()),
                     (
                         one_of(b'_'),
-                        cut_err(digit)
-                            .context(Context::Expected(ParserValue::Description("digit"))),
+                        cut(digit).context(Context::Expected(ParserValue::Description("digit"))),
                     )
                         .value(()),
-                )))
-                .map(|()| ()),
+                ))),
             )
                 .value(()),
             digit.value(()),
@@ -74,7 +70,7 @@ pub(crate) fn dec_int(input: Input<'_>) -> IResult<Input<'_>, &str, ParserError<
         .recognize()
         .map(|b: &[u8]| unsafe { from_utf8_unchecked(b, "`digit` and `_` filter out non-ASCII") })
         .context(Context::Expression("integer"))
-        .parse_next(input)
+        .parse(input)
 }
 const DIGIT1_9: RangeInclusive<u8> = b'1'..=b'9';
 
@@ -83,23 +79,22 @@ const DIGIT1_9: RangeInclusive<u8> = b'1'..=b'9';
 pub(crate) fn hex_int(input: Input<'_>) -> IResult<Input<'_>, &str, ParserError<'_>> {
     preceded(
         HEX_PREFIX,
-        cut_err((
+        cut((
             hexdig,
-            many0(alt((
+            many0_count(alt((
                 hexdig.value(()),
                 (
                     one_of(b'_'),
-                    cut_err(hexdig).context(Context::Expected(ParserValue::Description("digit"))),
+                    cut(hexdig).context(Context::Expected(ParserValue::Description("digit"))),
                 )
                     .value(()),
-            )))
-            .map(|()| ()),
+            ))),
         ))
         .recognize(),
     )
     .map(|b| unsafe { from_utf8_unchecked(b, "`hexdig` and `_` filter out non-ASCII") })
     .context(Context::Expression("hexadecimal integer"))
-    .parse_next(input)
+    .parse(input)
 }
 const HEX_PREFIX: &[u8] = b"0x";
 
@@ -108,24 +103,23 @@ const HEX_PREFIX: &[u8] = b"0x";
 pub(crate) fn oct_int(input: Input<'_>) -> IResult<Input<'_>, &str, ParserError<'_>> {
     preceded(
         OCT_PREFIX,
-        cut_err((
+        cut((
             one_of(DIGIT0_7),
-            many0(alt((
+            many0_count(alt((
                 one_of(DIGIT0_7).value(()),
                 (
                     one_of(b'_'),
-                    cut_err(one_of(DIGIT0_7))
+                    cut(one_of(DIGIT0_7))
                         .context(Context::Expected(ParserValue::Description("digit"))),
                 )
                     .value(()),
-            )))
-            .map(|()| ()),
+            ))),
         ))
         .recognize(),
     )
     .map(|b| unsafe { from_utf8_unchecked(b, "`DIGIT0_7` and `_` filter out non-ASCII") })
     .context(Context::Expression("octal integer"))
-    .parse_next(input)
+    .parse(input)
 }
 const OCT_PREFIX: &[u8] = b"0o";
 const DIGIT0_7: RangeInclusive<u8> = b'0'..=b'7';
@@ -135,24 +129,23 @@ const DIGIT0_7: RangeInclusive<u8> = b'0'..=b'7';
 pub(crate) fn bin_int(input: Input<'_>) -> IResult<Input<'_>, &str, ParserError<'_>> {
     preceded(
         BIN_PREFIX,
-        cut_err((
+        cut((
             one_of(DIGIT0_1),
-            many0(alt((
+            many0_count(alt((
                 one_of(DIGIT0_1).value(()),
                 (
                     one_of(b'_'),
-                    cut_err(one_of(DIGIT0_1))
+                    cut(one_of(DIGIT0_1))
                         .context(Context::Expected(ParserValue::Description("digit"))),
                 )
                     .value(()),
-            )))
-            .map(|()| ()),
+            ))),
         ))
         .recognize(),
     )
     .map(|b| unsafe { from_utf8_unchecked(b, "`DIGIT0_1` and `_` filter out non-ASCII") })
     .context(Context::Expression("binary integer"))
-    .parse_next(input)
+    .parse(input)
 }
 const BIN_PREFIX: &[u8] = b"0b";
 const DIGIT0_1: RangeInclusive<u8> = b'0'..=b'1';
@@ -164,14 +157,13 @@ const DIGIT0_1: RangeInclusive<u8> = b'0'..=b'1';
 // float-int-part = dec-int
 pub(crate) fn float(input: Input<'_>) -> IResult<Input<'_>, f64, ParserError<'_>> {
     alt((
-        float_.and_then(cut_err(
-            rest.map_res(|s: &str| s.replace('_', "").parse())
-                .verify(|f: &f64| *f != f64::INFINITY),
-        )),
+        float_.and_then(cut(rest
+            .map_res(|s: &str| s.replace('_', "").parse())
+            .verify(|f: &f64| *f != f64::INFINITY))),
         special_float,
     ))
     .context(Context::Expression("floating-point number"))
-    .parse_next(input)
+    .parse(input)
 }
 
 pub(crate) fn float_(input: Input<'_>) -> IResult<Input<'_>, &str, ParserError<'_>> {
@@ -183,7 +175,7 @@ pub(crate) fn float_(input: Input<'_>) -> IResult<Input<'_>, &str, ParserError<'
                 "`dec_int`, `one_of`, `exp`, and `frac` filter out non-ASCII",
             )
         })
-        .parse_next(input)
+        .parse(input)
 }
 
 // frac = decimal-point zero-prefixable-int
@@ -191,7 +183,7 @@ pub(crate) fn float_(input: Input<'_>) -> IResult<Input<'_>, &str, ParserError<'
 pub(crate) fn frac(input: Input<'_>) -> IResult<Input<'_>, &str, ParserError<'_>> {
     (
         b'.',
-        cut_err(zero_prefixable_int).context(Context::Expected(ParserValue::Description("digit"))),
+        cut(zero_prefixable_int).context(Context::Expected(ParserValue::Description("digit"))),
     )
         .recognize()
         .map(|b: &[u8]| unsafe {
@@ -200,26 +192,25 @@ pub(crate) fn frac(input: Input<'_>) -> IResult<Input<'_>, &str, ParserError<'_>
                 "`.` and `parse_zero_prefixable_int` filter out non-ASCII",
             )
         })
-        .parse_next(input)
+        .parse(input)
 }
 
 // zero-prefixable-int = DIGIT *( DIGIT / underscore DIGIT )
 pub(crate) fn zero_prefixable_int(input: Input<'_>) -> IResult<Input<'_>, &str, ParserError<'_>> {
     (
         digit,
-        many0(alt((
+        many0_count(alt((
             digit.value(()),
             (
                 one_of(b'_'),
-                cut_err(digit).context(Context::Expected(ParserValue::Description("digit"))),
+                cut(digit).context(Context::Expected(ParserValue::Description("digit"))),
             )
                 .value(()),
-        )))
-        .map(|()| ()),
+        ))),
     )
         .recognize()
         .map(|b: &[u8]| unsafe { from_utf8_unchecked(b, "`digit` and `_` filter out non-ASCII") })
-        .parse_next(input)
+        .parse(input)
 }
 
 // exp = "e" float-exp-part
@@ -228,7 +219,7 @@ pub(crate) fn exp(input: Input<'_>) -> IResult<Input<'_>, &str, ParserError<'_>>
     (
         one_of((b'e', b'E')),
         opt(one_of([b'+', b'-'])),
-        cut_err(zero_prefixable_int),
+        cut(zero_prefixable_int),
     )
         .recognize()
         .map(|b: &[u8]| unsafe {
@@ -237,7 +228,7 @@ pub(crate) fn exp(input: Input<'_>) -> IResult<Input<'_>, &str, ParserError<'_>>
                 "`one_of` and `parse_zero_prefixable_int` filter out non-ASCII",
             )
         })
-        .parse_next(input)
+        .parse(input)
 }
 
 // special-float = [ minus / plus ] ( inf / nan )
@@ -248,28 +239,28 @@ pub(crate) fn special_float(input: Input<'_>) -> IResult<Input<'_>, f64, ParserE
             Some(b'-') => -f,
             _ => unreachable!("one_of should prevent this"),
         })
-        .parse_next(input)
+        .parse(input)
 }
 // inf = %x69.6e.66  ; inf
 pub(crate) fn inf(input: Input<'_>) -> IResult<Input<'_>, f64, ParserError<'_>> {
-    tag(INF).value(f64::INFINITY).parse_next(input)
+    tag(INF).value(f64::INFINITY).parse(input)
 }
 const INF: &[u8] = b"inf";
 // nan = %x6e.61.6e  ; nan
 pub(crate) fn nan(input: Input<'_>) -> IResult<Input<'_>, f64, ParserError<'_>> {
-    tag(NAN).value(f64::NAN).parse_next(input)
+    tag(NAN).value(f64::NAN).parse(input)
 }
 const NAN: &[u8] = b"nan";
 
 // DIGIT = %x30-39 ; 0-9
 pub(crate) fn digit(input: Input<'_>) -> IResult<Input<'_>, u8, ParserError<'_>> {
-    one_of(DIGIT).parse_next(input)
+    one_of(DIGIT).parse(input)
 }
 const DIGIT: RangeInclusive<u8> = b'0'..=b'9';
 
 // HEXDIG = DIGIT / "A" / "B" / "C" / "D" / "E" / "F"
 pub(crate) fn hexdig(input: Input<'_>) -> IResult<Input<'_>, u8, ParserError<'_>> {
-    one_of(HEXDIG).parse_next(input)
+    one_of(HEXDIG).parse(input)
 }
 pub(crate) const HEXDIG: (RangeInclusive<u8>, RangeInclusive<u8>, RangeInclusive<u8>) =
     (DIGIT, b'A'..=b'F', b'a'..=b'f');
@@ -296,12 +287,12 @@ mod test {
         ];
         for &(input, expected) in &cases {
             dbg!(input);
-            let parsed = integer.parse(new_input(input));
+            let parsed = integer.parse(new_input(input)).finish();
             assert_eq!(parsed, Ok(expected), "Parsing {input:?}");
         }
 
         let overflow = "1000000000000000000000000000000000";
-        let parsed = integer.parse(new_input(overflow));
+        let parsed = integer.parse(new_input(overflow)).finish();
         assert!(parsed.is_err());
     }
 
@@ -342,11 +333,11 @@ mod test {
         ];
         for &(input, expected) in &cases {
             dbg!(input);
-            let parsed = float.parse(new_input(input)).unwrap();
+            let parsed = float.parse(new_input(input)).finish().unwrap();
             assert_float_eq(parsed, expected);
 
             let overflow = "9e99999";
-            let parsed = float.parse(new_input(overflow));
+            let parsed = float.parse(new_input(overflow)).finish();
             assert!(parsed.is_err(), "{:?}", parsed);
         }
     }

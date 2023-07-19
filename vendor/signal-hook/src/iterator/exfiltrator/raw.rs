@@ -85,7 +85,7 @@ unsafe impl Exfiltrator for WithRawSiginfo {
     }
 
     fn init(&self, slot: &Self::Storage, _: c_int) {
-        let new = Box::new(Channel::default());
+        let new = Box::default();
         let old = slot.0.swap(Box::into_raw(new), Ordering::Release);
         // We leak the pointer on purpose here. This is invalid state anyway and must not happen,
         // but if it still does, we can't drop that while some other thread might still be having

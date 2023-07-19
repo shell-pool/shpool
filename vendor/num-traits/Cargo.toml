@@ -10,8 +10,10 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
+edition = "2018"
+rust-version = "1.31"
 name = "num-traits"
-version = "0.2.15"
+version = "0.2.16"
 authors = ["The Rust Project Developers"]
 build = "build.rs"
 exclude = [
@@ -37,6 +39,7 @@ repository = "https://github.com/rust-num/num-traits"
 
 [package.metadata.docs.rs]
 features = ["std"]
+rustdoc-args = ["--generate-link-to-definition"]
 
 [dependencies.libm]
 version = "0.2.0"

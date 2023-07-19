@@ -4,13 +4,13 @@ use crate::parser::errors::CustomError;
 use crate::parser::prelude::*;
 use crate::parser::trivia::from_utf8_unchecked;
 
+use nom8::branch::alt;
+use nom8::bytes::one_of;
+use nom8::bytes::take_while_m_n;
+use nom8::combinator::cut;
+use nom8::combinator::opt;
+use nom8::sequence::preceded;
 use toml_datetime::*;
-use winnow::branch::alt;
-use winnow::bytes::one_of;
-use winnow::bytes::take_while_m_n;
-use winnow::combinator::cut_err;
-use winnow::combinator::opt;
-use winnow::sequence::preceded;
 
 // ;; Date and Time (as defined in RFC 3339)
 
@@ -44,14 +44,14 @@ pub(crate) fn date_time(input: Input<'_>) -> IResult<Input<'_>, Datetime, Parser
             .map(|t| t.into())
             .context(Context::Expression("time")),
     ))
-    .parse_next(input)
+    .parse(input)
 }
 
 // full-date      = date-fullyear "-" date-month "-" date-mday
 pub(crate) fn full_date(input: Input<'_>) -> IResult<Input<'_>, Date, ParserError<'_>> {
-    (date_fullyear, b'-', cut_err((date_month, b'-', date_mday)))
+    (date_fullyear, b'-', cut((date_month, b'-', date_mday)))
         .map(|(year, _, (month, _, day))| Date { year, month, day })
-        .parse_next(input)
+        .parse(input)
 }
 
 // partial-time   = time-hour ":" time-minute ":" time-second [time-secfrac]
@@ -59,7 +59,7 @@ pub(crate) fn partial_time(input: Input<'_>) -> IResult<Input<'_>, Time, ParserE
     (
         time_hour,
         b':',
-        cut_err((time_minute, b':', time_second, opt(time_secfrac))),
+        cut((time_minute, b':', time_second, opt(time_secfrac))),
     )
         .map(|(hour, _, (minute, _, second, nanosecond))| Time {
             hour,
@@ -67,7 +67,7 @@ pub(crate) fn partial_time(input: Input<'_>) -> IResult<Input<'_>, Time, ParserE
             second,
             nanosecond: nanosecond.unwrap_or_default(),
         })
-        .parse_next(input)
+        .parse(input)
 }
 
 // time-offset    = "Z" / time-numoffset
@@ -75,10 +75,7 @@ pub(crate) fn partial_time(input: Input<'_>) -> IResult<Input<'_>, Time, ParserE
 pub(crate) fn time_offset(input: Input<'_>) -> IResult<Input<'_>, Offset, ParserError<'_>> {
     alt((
         one_of((b'Z', b'z')).value(Offset::Z),
-        (
-            one_of((b'+', b'-')),
-            cut_err((time_hour, b':', time_minute)),
-        )
+        (one_of((b'+', b'-')), cut((time_hour, b':', time_minute)))
             .map(|(sign, (hours, _, minutes))| {
                 let sign = match sign {
                     b'+' => 1,
@@ -91,14 +88,14 @@ pub(crate) fn time_offset(input: Input<'_>) -> IResult<Input<'_>, Offset, Parser
             .map(|minutes| Offset::Custom { minutes }),
     ))
     .context(Context::Expression("time offset"))
-    .parse_next(input)
+    .parse(input)
 }
 
 // date-fullyear  = 4DIGIT
 pub(crate) fn date_fullyear(input: Input<'_>) -> IResult<Input<'_>, u16, ParserError<'_>> {
     unsigned_digits::<4, 4>
         .map(|s: &str| s.parse::<u16>().expect("4DIGIT should match u8"))
-        .parse_next(input)
+        .parse(input)
 }
 
 // date-month     = 2DIGIT  ; 01-12
@@ -112,7 +109,7 @@ pub(crate) fn date_month(input: Input<'_>) -> IResult<Input<'_>, u8, ParserError
                 Err(CustomError::OutOfRange)
             }
         })
-        .parse_next(input)
+        .parse(input)
 }
 
 // date-mday      = 2DIGIT  ; 01-28, 01-29, 01-30, 01-31 based on month/year
@@ -126,12 +123,12 @@ pub(crate) fn date_mday(input: Input<'_>) -> IResult<Input<'_>, u8, ParserError<
                 Err(CustomError::OutOfRange)
             }
         })
-        .parse_next(input)
+        .parse(input)
 }
 
 // time-delim     = "T" / %x20 ; T, t, or space
 pub(crate) fn time_delim(input: Input<'_>) -> IResult<Input<'_>, u8, ParserError<'_>> {
-    one_of(TIME_DELIM).parse_next(input)
+    one_of(TIME_DELIM).parse(input)
 }
 
 const TIME_DELIM: (u8, u8, u8) = (b'T', b't', b' ');
@@ -147,7 +144,7 @@ pub(crate) fn time_hour(input: Input<'_>) -> IResult<Input<'_>, u8, ParserError<
                 Err(CustomError::OutOfRange)
             }
         })
-        .parse_next(input)
+        .parse(input)
 }
 
 // time-minute    = 2DIGIT  ; 00-59
@@ -161,7 +158,7 @@ pub(crate) fn time_minute(input: Input<'_>) -> IResult<Input<'_>, u8, ParserErro
                 Err(CustomError::OutOfRange)
             }
         })
-        .parse_next(input)
+        .parse(input)
 }
 
 // time-second    = 2DIGIT  ; 00-58, 00-59, 00-60 based on leap second rules
@@ -175,7 +172,7 @@ pub(crate) fn time_second(input: Input<'_>) -> IResult<Input<'_>, u8, ParserErro
                 Err(CustomError::OutOfRange)
             }
         })
-        .parse_next(input)
+        .parse(input)
 }
 
 // time-secfrac   = "." 1*DIGIT
@@ -211,7 +208,7 @@ pub(crate) fn time_secfrac(input: Input<'_>) -> IResult<Input<'_>, u32, ParserEr
             let v = v.checked_mul(*scale).ok_or(CustomError::OutOfRange)?;
             Ok(v)
         })
-        .parse_next(input)
+        .parse(input)
 }
 
 pub(crate) fn unsigned_digits<const MIN: usize, const MAX: usize>(
@@ -219,7 +216,7 @@ pub(crate) fn unsigned_digits<const MIN: usize, const MAX: usize>(
 ) -> IResult<Input<'_>, &str, ParserError<'_>> {
     take_while_m_n(MIN, MAX, DIGIT)
         .map(|b: &[u8]| unsafe { from_utf8_unchecked(b, "`is_ascii_digit` filters out on-ASCII") })
-        .parse_next(input)
+        .parse(input)
 }
 
 // DIGIT = %x30-39 ; 0-9
@@ -303,7 +300,7 @@ mod test {
         ];
         for (input, expected) in inputs {
             dbg!(input);
-            let actual = date_time.parse(new_input(input)).unwrap();
+            let actual = date_time.parse(new_input(input)).finish().unwrap();
             assert_eq!(expected, actual);
         }
     }
@@ -348,7 +345,7 @@ mod test {
         ];
         for (input, expected) in inputs {
             dbg!(input);
-            let actual = date_time.parse(new_input(input)).unwrap();
+            let actual = date_time.parse(new_input(input)).finish().unwrap();
             assert_eq!(expected, actual);
         }
     }
@@ -383,7 +380,7 @@ mod test {
         ];
         for (input, expected) in inputs {
             dbg!(input);
-            let actual = date_time.parse(new_input(input)).unwrap();
+            let actual = date_time.parse(new_input(input)).finish().unwrap();
             assert_eq!(expected, actual);
         }
     }
@@ -420,7 +417,7 @@ mod test {
         ];
         for (input, expected) in inputs {
             dbg!(input);
-            let actual = date_time.parse(new_input(input)).unwrap();
+            let actual = date_time.parse(new_input(input)).finish().unwrap();
             assert_eq!(expected, actual);
         }
     }
@@ -428,6 +425,6 @@ mod test {
     #[test]
     fn time_fraction_truncated() {
         let input = "1987-07-05T17:45:00.123456789012345Z";
-        date_time.parse(new_input(input)).unwrap();
+        date_time.parse(new_input(input)).finish().unwrap();
     }
 }

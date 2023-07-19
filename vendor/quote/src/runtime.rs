@@ -1,11 +1,13 @@
+use self::get_span::{GetSpan, GetSpanBase, GetSpanInner};
 use crate::{IdentFragment, ToTokens, TokenStreamExt};
 use core::fmt;
 use core::iter;
 use core::ops::BitOr;
+use proc_macro2::{Group, Ident, Punct, Spacing, TokenTree};
 
+pub use alloc::format;
 pub use core::option::Option;
-pub use proc_macro2::*;
-pub use std::format;
+pub use proc_macro2::{Delimiter, Span, TokenStream};
 
 pub struct HasIterator; // True
 pub struct ThereIsNoIteratorInRepetition; // False
@@ -48,8 +50,8 @@ pub mod ext {
     use super::RepInterp;
     use super::{HasIterator as HasIter, ThereIsNoIteratorInRepetition as DoesNotHaveIter};
     use crate::ToTokens;
+    use alloc::collections::btree_set::{self, BTreeSet};
     use core::slice;
-    use std::collections::btree_set::{self, BTreeSet};
 
     /// Extension trait providing the `quote_into_iter` method on iterators.
     pub trait RepIteratorExt: Iterator + Sized {
@@ -161,6 +163,62 @@ impl<T: Iterator> Iterator for RepInterp<T> {
 impl<T: ToTokens> ToTokens for RepInterp<T> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         self.0.to_tokens(tokens);
+    }
+}
+
+#[inline]
+pub fn get_span<T>(span: T) -> GetSpan<T> {
+    GetSpan(GetSpanInner(GetSpanBase(span)))
+}
+
+mod get_span {
+    use core::ops::Deref;
+    use proc_macro2::extra::DelimSpan;
+    use proc_macro2::Span;
+
+    pub struct GetSpan<T>(pub(crate) GetSpanInner<T>);
+
+    pub struct GetSpanInner<T>(pub(crate) GetSpanBase<T>);
+
+    pub struct GetSpanBase<T>(pub(crate) T);
+
+    impl GetSpan<Span> {
+        #[inline]
+        pub fn __into_span(self) -> Span {
+            ((self.0).0).0
+        }
+    }
+
+    impl GetSpanInner<DelimSpan> {
+        #[inline]
+        pub fn __into_span(&self) -> Span {
+            (self.0).0.join()
+        }
+    }
+
+    impl<T> GetSpanBase<T> {
+        #[allow(clippy::unused_self)]
+        pub fn __into_span(&self) -> T {
+            unreachable!()
+        }
+    }
+
+    impl<T> Deref for GetSpan<T> {
+        type Target = GetSpanInner<T>;
+
+        #[inline]
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    impl<T> Deref for GetSpanInner<T> {
+        type Target = GetSpanBase<T>;
+
+        #[inline]
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
     }
 }
 
@@ -385,8 +443,8 @@ pub fn mk_ident(id: &str, span: Option<Span>) -> Ident {
 }
 
 fn ident_maybe_raw(id: &str, span: Span) -> Ident {
-    if id.starts_with("r#") {
-        Ident::new_raw(&id[2..], span)
+    if let Some(id) = id.strip_prefix("r#") {
+        Ident::new_raw(id, span)
     } else {
         Ident::new(id, span)
     }

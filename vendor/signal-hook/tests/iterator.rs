@@ -73,6 +73,8 @@ fn forever_terminates_when_closed() {
     controller.close();
 
     thread.join().unwrap();
+
+    assert!(stopped.load(Ordering::SeqCst));
 }
 
 // A reproducer for #16: if we had the mio-support enabled (which is enabled also by the

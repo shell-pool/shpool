@@ -117,8 +117,6 @@ impl ParseState {
 
         self.current_table_position += 1;
         self.current_table.decor = decor;
-        self.current_table.set_implicit(false);
-        self.current_table.set_dotted(false);
         self.current_table.set_position(self.current_table_position);
         self.current_table.span = Some(span);
         self.current_is_array = true;
@@ -154,8 +152,6 @@ impl ParseState {
 
         self.current_table_position += 1;
         self.current_table.decor = decor;
-        self.current_table.set_implicit(false);
-        self.current_table.set_dotted(false);
         self.current_table.set_position(self.current_table_position);
         self.current_table.span = Some(span);
         self.current_is_array = false;

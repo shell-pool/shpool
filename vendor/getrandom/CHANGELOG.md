@@ -4,7 +4,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.9] - 2023-04-03
+## [0.2.10] - 2023-06-06
+### Added
+- Support for PS Vita (`armv7-sony-vita-newlibeabihf`) [#359]
+
+### Changed
+- Use getentropy from libc on Emscripten targets [#362]
+
+[#359]: https://github.com/rust-random/getrandom/pull/359
+[#362]: https://github.com/rust-random/getrandom/pull/362
+
+## [0.2.9] - 2023-04-06
 ### Added
 - AIX support [#282]
 - `getrandom_uninit` function [#291]
@@ -381,6 +391,7 @@ Publish initial implementation.
 ## [0.0.0] - 2019-01-19
 Publish an empty template library.
 
+[0.2.10]: https://github.com/rust-random/getrandom/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/rust-random/getrandom/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/rust-random/getrandom/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/rust-random/getrandom/compare/v0.2.6...v0.2.7

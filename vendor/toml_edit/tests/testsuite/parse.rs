@@ -232,19 +232,6 @@ fn empty_table() {
 }
 
 #[test]
-fn mixed_table_issue_527() {
-    let input = r#"
-[package]
-metadata.msrv = "1.65.0"
-
-[package.metadata.release.pre-release-replacements]
-"#;
-    let document = input.parse::<Document>().unwrap();
-    let actual = document.to_string();
-    assert_eq(input, actual);
-}
-
-#[test]
 fn fruit() {
     let table = r#"
 [[fruit]]
@@ -1458,20 +1445,4 @@ expected newline, `#`
 expected newline, `#`
 "#
     );
-}
-
-#[test]
-fn dont_use_dotted_key_prefix_on_table_fuzz_57049() {
-    // This could generate
-    // ```toml
-    // [
-    // p.o]
-    // ```
-    let input = r#"
-p.a=4
-[p.o]
-"#;
-    let document = input.parse::<Document>().unwrap();
-    let actual = document.to_string();
-    assert_eq(input, actual);
 }

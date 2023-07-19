@@ -72,8 +72,8 @@ pub fn gen_for_enum(
             clippy::nursery,
             clippy::cargo,
             clippy::suspicious_else_formatting,
+            clippy::almost_swapped,
         )]
-        #[deny(clippy::correctness)]
         impl #impl_generics clap::Subcommand for #enum_name #ty_generics #where_clause {
             fn augment_subcommands <'b>(__clap_app: clap::Command<'b>) -> clap::Command<'b> {
                 #augmentation
@@ -119,8 +119,8 @@ fn gen_from_arg_matches_for_enum(
             clippy::nursery,
             clippy::cargo,
             clippy::suspicious_else_formatting,
+            clippy::almost_swapped,
         )]
-        #[deny(clippy::correctness)]
         impl #impl_generics clap::FromArgMatches for #name #ty_generics #where_clause {
             fn from_arg_matches(__clap_arg_matches: &clap::ArgMatches) -> ::std::result::Result<Self, clap::Error> {
                 Self::from_arg_matches_mut(&mut __clap_arg_matches.clone())

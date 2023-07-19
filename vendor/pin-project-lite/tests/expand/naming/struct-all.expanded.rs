@@ -47,6 +47,7 @@ struct StructProjReplace<T, U> {
 #[allow(clippy::used_underscore_binding)]
 const _: () = {
     impl<T, U> Struct<T, U> {
+        #[inline]
         fn project<'__pin>(
             self: ::pin_project_lite::__private::Pin<&'__pin mut Self>,
         ) -> StructProj<'__pin, T, U> {
@@ -58,6 +59,7 @@ const _: () = {
                 }
             }
         }
+        #[inline]
         fn project_ref<'__pin>(
             self: ::pin_project_lite::__private::Pin<&'__pin Self>,
         ) -> StructProjRef<'__pin, T, U> {
@@ -69,6 +71,7 @@ const _: () = {
                 }
             }
         }
+        #[inline]
         fn project_replace(
             self: ::pin_project_lite::__private::Pin<&mut Self>,
             replacement: Self,
@@ -86,7 +89,9 @@ const _: () = {
                 };
                 {
                     (
-                        ::pin_project_lite::__private::UnsafeDropInPlaceGuard::new(pinned),
+                        ::pin_project_lite::__private::UnsafeDropInPlaceGuard::new(
+                            pinned,
+                        ),
                         (),
                     );
                 }
@@ -100,10 +105,10 @@ const _: () = {
         pinned: T,
         unpinned: ::pin_project_lite::__private::AlwaysUnpin<U>,
     }
-    impl<'__pin, T, U> ::pin_project_lite::__private::Unpin for Struct<T, U> where
-        __Origin<'__pin, T, U>: ::pin_project_lite::__private::Unpin
-    {
-    }
+    impl<'__pin, T, U> ::pin_project_lite::__private::Unpin for Struct<T, U>
+    where
+        __Origin<'__pin, T, U>: ::pin_project_lite::__private::Unpin,
+    {}
     trait MustNotImplDrop {}
     #[allow(clippy::drop_bounds, drop_bounds)]
     impl<T: ::pin_project_lite::__private::Drop> MustNotImplDrop for T {}

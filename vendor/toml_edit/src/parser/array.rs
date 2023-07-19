@@ -1,7 +1,7 @@
-use winnow::combinator::cut_err;
-use winnow::combinator::opt;
-use winnow::multi::separated1;
-use winnow::sequence::delimited;
+use nom8::combinator::cut;
+use nom8::combinator::opt;
+use nom8::multi::separated_list1;
+use nom8::sequence::delimited;
 
 use crate::parser::trivia::ws_comment_newline;
 use crate::parser::value::value;
@@ -18,12 +18,12 @@ pub(crate) fn array(
     move |input| {
         delimited(
             ARRAY_OPEN,
-            cut_err(array_values(check)),
-            cut_err(ARRAY_CLOSE)
+            cut(array_values(check)),
+            cut(ARRAY_CLOSE)
                 .context(Context::Expression("array"))
                 .context(Context::Expected(ParserValue::CharLiteral(']'))),
         )
-        .parse_next(input)
+        .parse(input)
     }
 }
 
@@ -45,16 +45,16 @@ pub(crate) fn array_values(
     move |input| {
         let check = check.recursing(input)?;
         (
-            opt(
-                (separated1(array_value(check), ARRAY_SEP), opt(ARRAY_SEP)).map(
-                    |(v, trailing): (Vec<Value>, Option<u8>)| {
-                        (
-                            Array::with_vec(v.into_iter().map(Item::Value).collect()),
-                            trailing.is_some(),
-                        )
-                    },
-                ),
-            ),
+            opt((
+                separated_list1(ARRAY_SEP, array_value(check)),
+                opt(ARRAY_SEP),
+            )
+                .map(|(v, trailing): (Vec<Value>, Option<u8>)| {
+                    (
+                        Array::with_vec(v.into_iter().map(Item::Value).collect()),
+                        trailing.is_some(),
+                    )
+                })),
             ws_comment_newline.span(),
         )
             .map_res::<_, _, std::str::Utf8Error>(|(array, trailing)| {
@@ -63,7 +63,7 @@ pub(crate) fn array_values(
                 array.set_trailing(RawString::with_span(trailing));
                 Ok(array)
             })
-            .parse_next(input)
+            .parse(input)
     }
 }
 
@@ -77,7 +77,7 @@ pub(crate) fn array_value(
             ws_comment_newline.span(),
         )
             .map(|(ws1, v, ws2)| v.decorated(RawString::with_span(ws1), RawString::with_span(ws2)))
-            .parse_next(input)
+            .parse(input)
     }
 }
 
@@ -124,7 +124,7 @@ mod test {
         ];
         for input in inputs {
             dbg!(input);
-            let mut parsed = array(Default::default()).parse(new_input(input));
+            let mut parsed = array(Default::default()).parse(new_input(input)).finish();
             if let Ok(parsed) = &mut parsed {
                 parsed.despan(input);
             }
@@ -137,7 +137,7 @@ mod test {
         let invalid_inputs = [r#"["#, r#"[,]"#, r#"[,2]"#, r#"[1e165,,]"#];
         for input in invalid_inputs {
             dbg!(input);
-            let mut parsed = array(Default::default()).parse(new_input(input));
+            let mut parsed = array(Default::default()).parse(new_input(input)).finish();
             if let Ok(parsed) = &mut parsed {
                 parsed.despan(input);
             }

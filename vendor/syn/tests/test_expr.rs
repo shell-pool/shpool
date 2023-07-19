@@ -1,9 +1,10 @@
+#![allow(clippy::uninlined_format_args)]
+
 #[macro_use]
 mod macros;
 
 use proc_macro2::{Delimiter, Group, Ident, Punct, Spacing, Span, TokenStream, TokenTree};
 use quote::quote;
-use std::iter::FromIterator;
 use syn::{Expr, ExprRange};
 
 #[test]
@@ -11,8 +12,8 @@ fn test_expr_parse() {
     let tokens = quote!(..100u32);
     snapshot!(tokens as Expr, @r###"
     Expr::Range {
-        limits: HalfOpen,
-        to: Some(Expr::Lit {
+        limits: RangeLimits::HalfOpen,
+        end: Some(Expr::Lit {
             lit: 100u32,
         }),
     }
@@ -21,8 +22,8 @@ fn test_expr_parse() {
     let tokens = quote!(..100u32);
     snapshot!(tokens as ExprRange, @r###"
     ExprRange {
-        limits: HalfOpen,
-        to: Some(Expr::Lit {
+        limits: RangeLimits::HalfOpen,
+        end: Some(Expr::Lit {
             lit: 100u32,
         }),
     }
@@ -41,7 +42,6 @@ fn test_await() {
                 segments: [
                     PathSegment {
                         ident: "fut",
-                        arguments: None,
                     },
                 ],
             },
@@ -53,39 +53,39 @@ fn test_await() {
 #[rustfmt::skip]
 #[test]
 fn test_tuple_multi_index() {
+    let expected = snapshot!("tuple.0.0" as Expr, @r###"
+    Expr::Field {
+        base: Expr::Field {
+            base: Expr::Path {
+                path: Path {
+                    segments: [
+                        PathSegment {
+                            ident: "tuple",
+                        },
+                    ],
+                },
+            },
+            member: Member::Unnamed(Index {
+                index: 0,
+            }),
+        },
+        member: Member::Unnamed(Index {
+            index: 0,
+        }),
+    }
+    "###);
+
     for &input in &[
-        "tuple.0.0",
         "tuple .0.0",
         "tuple. 0.0",
         "tuple.0 .0",
         "tuple.0. 0",
         "tuple . 0 . 0",
     ] {
-        snapshot!(input as Expr, @r###"
-        Expr::Field {
-            base: Expr::Field {
-                base: Expr::Path {
-                    path: Path {
-                        segments: [
-                            PathSegment {
-                                ident: "tuple",
-                                arguments: None,
-                            },
-                        ],
-                    },
-                },
-                member: Unnamed(Index {
-                    index: 0,
-                }),
-            },
-            member: Unnamed(Index {
-                index: 0,
-            }),
-        }
-        "###);
+        assert_eq!(expected, syn::parse_str(input).unwrap());
     }
 
-    for tokens in vec![
+    for tokens in [
         quote!(tuple.0.0),
         quote!(tuple .0.0),
         quote!(tuple. 0.0),
@@ -93,28 +93,7 @@ fn test_tuple_multi_index() {
         quote!(tuple.0. 0),
         quote!(tuple . 0 . 0),
     ] {
-        snapshot!(tokens as Expr, @r###"
-        Expr::Field {
-            base: Expr::Field {
-                base: Expr::Path {
-                    path: Path {
-                        segments: [
-                            PathSegment {
-                                ident: "tuple",
-                                arguments: None,
-                            },
-                        ],
-                    },
-                },
-                member: Unnamed(Index {
-                    index: 0,
-                }),
-            },
-            member: Unnamed(Index {
-                index: 0,
-            }),
-        }
-        "###);
+        assert_eq!(expected, syn::parse2(tokens).unwrap());
     }
 }
 
@@ -134,7 +113,6 @@ fn test_macro_variable_func() {
                     segments: [
                         PathSegment {
                             ident: "f",
-                            arguments: None,
                         },
                     ],
                 },
@@ -154,39 +132,34 @@ fn test_macro_variable_func() {
     Expr::Call {
         attrs: [
             Attribute {
-                style: Outer,
-                path: Path {
+                style: AttrStyle::Outer,
+                meta: Meta::Path {
                     segments: [
                         PathSegment {
                             ident: "outside",
-                            arguments: None,
                         },
                     ],
                 },
-                tokens: TokenStream(``),
             },
         ],
         func: Expr::Group {
             expr: Expr::Path {
                 attrs: [
                     Attribute {
-                        style: Outer,
-                        path: Path {
+                        style: AttrStyle::Outer,
+                        meta: Meta::Path {
                             segments: [
                                 PathSegment {
                                     ident: "inside",
-                                    arguments: None,
                                 },
                             ],
                         },
-                        tokens: TokenStream(``),
                     },
                 ],
                 path: Path {
                     segments: [
                         PathSegment {
                             ident: "f",
-                            arguments: None,
                         },
                     ],
                 },
@@ -212,11 +185,10 @@ fn test_macro_variable_macro() {
                 segments: [
                     PathSegment {
                         ident: "m",
-                        arguments: None,
                     },
                 ],
             },
-            delimiter: Paren,
+            delimiter: MacroDelimiter::Paren,
             tokens: TokenStream(``),
         },
     }
@@ -237,7 +209,6 @@ fn test_macro_variable_struct() {
             segments: [
                 PathSegment {
                     ident: "S",
-                    arguments: None,
                 },
             ],
         },
@@ -269,7 +240,6 @@ fn test_macro_variable_match_arm() {
                 segments: [
                     PathSegment {
                         ident: "v",
-                        arguments: None,
                     },
                 ],
             },
@@ -281,16 +251,14 @@ fn test_macro_variable_match_arm() {
                     expr: Expr::Tuple {
                         attrs: [
                             Attribute {
-                                style: Outer,
-                                path: Path {
+                                style: AttrStyle::Outer,
+                                meta: Meta::Path {
                                     segments: [
                                         PathSegment {
                                             ident: "a",
-                                            arguments: None,
                                         },
                                     ],
                                 },
-                                tokens: TokenStream(``),
                             },
                         ],
                     },
@@ -309,9 +277,9 @@ fn test_closure_vs_rangefull() {
     snapshot!(tokens as Expr, @r###"
     Expr::MethodCall {
         receiver: Expr::Closure {
-            output: Default,
+            output: ReturnType::Default,
             body: Expr::Range {
-                limits: HalfOpen,
+                limits: RangeLimits::HalfOpen,
             },
         },
         method: "method",
@@ -323,4 +291,22 @@ fn test_closure_vs_rangefull() {
 fn test_postfix_operator_after_cast() {
     syn::parse_str::<Expr>("|| &x as T[0]").unwrap_err();
     syn::parse_str::<Expr>("|| () as ()()").unwrap_err();
+}
+
+#[test]
+fn test_ranges() {
+    syn::parse_str::<Expr>("..").unwrap();
+    syn::parse_str::<Expr>("..hi").unwrap();
+    syn::parse_str::<Expr>("lo..").unwrap();
+    syn::parse_str::<Expr>("lo..hi").unwrap();
+
+    syn::parse_str::<Expr>("..=").unwrap_err();
+    syn::parse_str::<Expr>("..=hi").unwrap();
+    syn::parse_str::<Expr>("lo..=").unwrap_err();
+    syn::parse_str::<Expr>("lo..=hi").unwrap();
+
+    syn::parse_str::<Expr>("...").unwrap_err();
+    syn::parse_str::<Expr>("...hi").unwrap_err();
+    syn::parse_str::<Expr>("lo...").unwrap_err();
+    syn::parse_str::<Expr>("lo...hi").unwrap_err();
 }

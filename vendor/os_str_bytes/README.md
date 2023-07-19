@@ -19,7 +19,7 @@ Add the following lines to your "Cargo.toml" file:
 
 ```toml
 [dependencies]
-os_str_bytes = "6.3"
+os_str_bytes = "6.5"
 ```
 
 See the [documentation] for available functionality and examples.
@@ -42,7 +42,7 @@ The minimum supported Rust toolchain version depends on the platform:
     <tr>
         <td>HermitCore</td>
         <td><code>*-*-hermit</code></td>
-        <td>1.57.0</td>
+        <td>nightly (<a href="https://github.com/hermitcore/rusty-hermit/blob/86232e295ff5c50db6c283a47cff3f38a0d1b012/rust-toolchain.toml#L3"><code>rust-toolchain.toml</code></a>)</td>
     </tr>
     <tr>
         <td>SOLID</td>
@@ -69,6 +69,11 @@ The minimum supported Rust toolchain version depends on the platform:
         <td><code>*-*-windows-*</code></td>
         <td>1.57.0</td>
     </tr>
+    <tr>
+        <td>Xous</td>
+        <td><code>*-*-xous-*</code></td>
+        <td>unstable</td>
+    </tr>
 </table>
 
 Minor version updates may increase these version requirements. However, the
@@ -78,7 +83,7 @@ crate's minor version:
 
 ```toml
 [dependencies]
-os_str_bytes = "~6.3"
+os_str_bytes = "~6.5"
 ```
 
 ## License

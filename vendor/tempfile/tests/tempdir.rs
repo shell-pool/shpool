@@ -67,7 +67,7 @@ fn test_customnamed() {
 
 fn test_rm_tempdir() {
     let (tx, rx) = channel();
-    let f = move || -> () {
+    let f = move || {
         let tmp = t!(TempDir::new());
         tx.send(tmp.path().to_path_buf()).unwrap();
         panic!("panic to unwind past `tmp`");
@@ -78,7 +78,7 @@ fn test_rm_tempdir() {
 
     let tmp = t!(TempDir::new());
     let path = tmp.path().to_path_buf();
-    let f = move || -> () {
+    let f = move || {
         let _tmp = tmp;
         panic!("panic to unwind past `tmp`");
     };
@@ -107,7 +107,7 @@ fn test_rm_tempdir() {
 
 fn test_rm_tempdir_close() {
     let (tx, rx) = channel();
-    let f = move || -> () {
+    let f = move || {
         let tmp = t!(TempDir::new());
         tx.send(tmp.path().to_path_buf()).unwrap();
         t!(tmp.close());
@@ -119,7 +119,7 @@ fn test_rm_tempdir_close() {
 
     let tmp = t!(TempDir::new());
     let path = tmp.path().to_path_buf();
-    let f = move || -> () {
+    let f = move || {
         let tmp = tmp;
         t!(tmp.close());
         panic!("panic when unwinding past `tmp`");

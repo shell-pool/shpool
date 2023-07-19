@@ -4,7 +4,7 @@ Rust Quasi-Quoting
 [<img alt="github" src="https://img.shields.io/badge/github-dtolnay/quote-8da0cb?style=for-the-badge&labelColor=555555&logo=github" height="20">](https://github.com/dtolnay/quote)
 [<img alt="crates.io" src="https://img.shields.io/crates/v/quote.svg?style=for-the-badge&color=fc8d62&logo=rust" height="20">](https://crates.io/crates/quote)
 [<img alt="docs.rs" src="https://img.shields.io/badge/docs.rs-quote-66c2a5?style=for-the-badge&labelColor=555555&logo=docs.rs" height="20">](https://docs.rs/quote)
-[<img alt="build status" src="https://img.shields.io/github/workflow/status/dtolnay/quote/CI/master?style=for-the-badge" height="20">](https://github.com/dtolnay/quote/actions?query=branch%3Amaster)
+[<img alt="build status" src="https://img.shields.io/github/actions/workflow/status/dtolnay/quote/ci.yml?branch=master&style=for-the-badge" height="20">](https://github.com/dtolnay/quote/actions?query=branch%3Amaster)
 
 This crate provides the [`quote!`] macro for turning Rust syntax tree data
 structures into tokens of source code.
@@ -34,7 +34,7 @@ macros.
 quote = "1.0"
 ```
 
-*Version requirement: Quote supports rustc 1.31 and up.*<br>
+*Version requirement: Quote supports rustc 1.56 and up.*<br>
 [*Release notes*](https://github.com/dtolnay/quote/releases)
 
 <br>
@@ -233,15 +233,26 @@ macro.
 ## Non-macro code generators
 
 When using `quote` in a build.rs or main.rs and writing the output out to a
-file, consider having the code generator pass the tokens through [rustfmt]
-before writing (either by shelling out to the `rustfmt` binary or by pulling in
-the `rustfmt` library as a dependency). This way if an error occurs in the
-generated code it is convenient for a human to read and debug.
+file, consider having the code generator pass the tokens through [prettyplease]
+before writing. This way if an error occurs in the generated code it is
+convenient for a human to read and debug.
 
 Be aware that no kind of hygiene or span information is retained when tokens are
 written to a file; the conversion from tokens to source code is lossy.
 
-[rustfmt]: https://github.com/rust-lang/rustfmt
+Example usage in build.rs:
+
+```rust
+let output = quote! { ... };
+let syntax_tree = syn::parse2(output).unwrap();
+let formatted = prettyplease::unparse(&syntax_tree);
+
+let out_dir = env::var_os("OUT_DIR").unwrap();
+let dest_path = Path::new(&out_dir).join("out.rs");
+fs::write(dest_path, formatted).unwrap();
+```
+
+[prettyplease]: https://github.com/dtolnay/prettyplease
 
 <br>
 

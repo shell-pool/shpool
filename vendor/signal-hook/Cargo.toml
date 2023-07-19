@@ -12,7 +12,7 @@
 [package]
 edition = "2018"
 name = "signal-hook"
-version = "0.3.14"
+version = "0.3.17"
 authors = [
     "Michal 'vorner' Vaner <vorner@vorner.cz>",
     "Thomas Himmelstoss <thimm@posteo.de>",
@@ -42,7 +42,7 @@ version = "^0.2"
 version = "^1.4"
 
 [dev-dependencies.serial_test]
-version = "^0.5"
+version = "^0.7"
 
 [build-dependencies.cc]
 version = "^1"

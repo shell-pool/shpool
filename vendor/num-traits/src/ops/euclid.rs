@@ -116,12 +116,8 @@ macro_rules! euclid_uint_impl {
     )*}
 }
 
-euclid_int_impl!(isize i8 i16 i32 i64);
-euclid_uint_impl!(usize u8 u16 u32 u64);
-#[cfg(has_i128)]
-euclid_int_impl!(i128);
-#[cfg(has_i128)]
-euclid_uint_impl!(u128);
+euclid_int_impl!(isize i8 i16 i32 i64 i128);
+euclid_uint_impl!(usize u8 u16 u32 u64 u128);
 
 #[cfg(all(has_div_euclid, feature = "std"))]
 euclid_forward_impl!(f32 f64);
@@ -130,7 +126,7 @@ euclid_forward_impl!(f32 f64);
 impl Euclid for f32 {
     #[inline]
     fn div_euclid(&self, v: &f32) -> f32 {
-        let q = <f32 as ::float::FloatCore>::trunc(self / v);
+        let q = <f32 as crate::float::FloatCore>::trunc(self / v);
         if self % v < 0.0 {
             return if *v > 0.0 { q - 1.0 } else { q + 1.0 };
         }
@@ -141,7 +137,7 @@ impl Euclid for f32 {
     fn rem_euclid(&self, v: &f32) -> f32 {
         let r = self % v;
         if r < 0.0 {
-            r + <f32 as ::float::FloatCore>::abs(*v)
+            r + <f32 as crate::float::FloatCore>::abs(*v)
         } else {
             r
         }
@@ -152,7 +148,7 @@ impl Euclid for f32 {
 impl Euclid for f64 {
     #[inline]
     fn div_euclid(&self, v: &f64) -> f64 {
-        let q = <f64 as ::float::FloatCore>::trunc(self / v);
+        let q = <f64 as crate::float::FloatCore>::trunc(self / v);
         if self % v < 0.0 {
             return if *v > 0.0 { q - 1.0 } else { q + 1.0 };
         }
@@ -163,7 +159,7 @@ impl Euclid for f64 {
     fn rem_euclid(&self, v: &f64) -> f64 {
         let r = self % v;
         if r < 0.0 {
-            r + <f64 as ::float::FloatCore>::abs(*v)
+            r + <f64 as crate::float::FloatCore>::abs(*v)
         } else {
             r
         }
@@ -251,12 +247,8 @@ macro_rules! checked_euclid_uint_impl {
     )*}
 }
 
-checked_euclid_int_impl!(isize i8 i16 i32 i64);
-checked_euclid_uint_impl!(usize u8 u16 u32 u64);
-#[cfg(has_i128)]
-checked_euclid_int_impl!(i128);
-#[cfg(has_i128)]
-checked_euclid_uint_impl!(u128);
+checked_euclid_int_impl!(isize i8 i16 i32 i64 i128);
+checked_euclid_uint_impl!(usize u8 u16 u32 u64 u128);
 
 #[cfg(test)]
 mod tests {
@@ -300,7 +292,7 @@ mod tests {
             };
         }
 
-        test_euclid!(isize i8 i16 i32 i64);
+        test_euclid!(isize i8 i16 i32 i64 i128);
     }
 
     #[test]
@@ -312,13 +304,13 @@ mod tests {
                         let x: $t = 12.1;
                         let y: $t = 3.2;
                         assert!(Euclid::div_euclid(&x, &y) * y + Euclid::rem_euclid(&x, &y) - x
-                        <= 46.4 * <$t as ::float::FloatCore>::epsilon());
+                        <= 46.4 * <$t as crate::float::FloatCore>::epsilon());
                         assert!(Euclid::div_euclid(&x, &-y) * -y + Euclid::rem_euclid(&x, &-y) - x
-                        <= 46.4 * <$t as ::float::FloatCore>::epsilon());
+                        <= 46.4 * <$t as crate::float::FloatCore>::epsilon());
                         assert!(Euclid::div_euclid(&-x, &y) * y + Euclid::rem_euclid(&-x, &y) + x
-                        <= 46.4 * <$t as ::float::FloatCore>::epsilon());
+                        <= 46.4 * <$t as crate::float::FloatCore>::epsilon());
                         assert!(Euclid::div_euclid(&-x, &-y) * -y + Euclid::rem_euclid(&-x, &-y) + x
-                        <= 46.4 * <$t as ::float::FloatCore>::epsilon());
+                        <= 46.4 * <$t as crate::float::FloatCore>::epsilon());
                     }
                 )+
             };
@@ -342,6 +334,6 @@ mod tests {
             };
         }
 
-        test_euclid_checked!(isize i8 i16 i32 i64);
+        test_euclid_checked!(isize i8 i16 i32 i64 i128);
     }
 }

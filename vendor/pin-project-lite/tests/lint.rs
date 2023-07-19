@@ -18,6 +18,7 @@
     box_pointers,
     deprecated_in_future,
     fuzzy_provenance_casts,
+    let_underscore_drop,
     lossy_provenance_casts,
     macro_use_extern_crate,
     meta_variable_misuse,
@@ -27,14 +28,18 @@
     missing_docs,
     non_ascii_idents,
     noop_method_call,
+    private_bounds,
+    private_interfaces,
     single_use_lifetimes,
     trivial_casts,
     trivial_numeric_casts,
+    unnameable_types,
     unreachable_pub,
     unused_import_braces,
     unused_lifetimes,
     unused_qualifications,
     unused_results,
+    unused_tuple_struct_fields,
     variant_size_differences
 )]
 #![warn(clippy::all, clippy::pedantic, clippy::nursery, clippy::restriction)]
@@ -212,11 +217,11 @@ pub mod clippy_type_repetition_in_bounds {
     }
 }
 
+#[allow(missing_debug_implementations)]
 pub mod clippy_used_underscore_binding {
     use pin_project_lite::pin_project;
 
     pin_project! {
-        #[derive(Debug)]
         pub struct Struct<T, U> {
             #[pin]
             pub _pinned: T,
@@ -227,7 +232,6 @@ pub mod clippy_used_underscore_binding {
     pin_project! {
         #[project = EnumProj]
         #[project_ref = EnumProjRef]
-        #[derive(Debug)]
         pub enum Enum<T, U> {
             Struct {
                 #[pin]

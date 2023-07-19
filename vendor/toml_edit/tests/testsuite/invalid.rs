@@ -44,32 +44,6 @@ expected `]`
 }
 
 #[test]
-fn duplicate_table_after_dotted_key_issue_509() {
-    let err = "
-[dependencies.foo]
-version = \"0.16\"
-
-[dependencies]
-libc = \"0.2\"
-
-[dependencies]
-rand = \"0.3.14\"
-"
-    .parse::<toml_edit::Document>()
-    .unwrap_err();
-    snapbox::assert_eq(
-        r#"TOML parse error at line 8, column 1
-  |
-8 | [dependencies]
-  | ^
-invalid table header
-duplicate key `dependencies` in document root
-"#,
-        err.to_string(),
-    );
-}
-
-#[test]
 fn bad() {
     let toml_input = "a = 01";
     let expected_err = "\

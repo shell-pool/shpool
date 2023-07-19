@@ -11,9 +11,9 @@
 
 [package]
 edition = "2018"
-rust-version = "1.50.0"
+rust-version = "1.56.0"
 name = "tracing-subscriber"
-version = "0.3.16"
+version = "0.3.17"
 authors = [
     "Eliza Weisman <eliza@buoyant.io>",
     "David Barsky <me@davidbarsky.com>",
@@ -78,8 +78,12 @@ version = "0.12.1"
 optional = true
 
 [dependencies.regex]
-version = "1"
-features = ["std"]
+version = "1.6.0"
+features = [
+    "std",
+    "unicode-case",
+    "unicode-perl",
+]
 optional = true
 default-features = false
 

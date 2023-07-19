@@ -3,6 +3,8 @@ use core::fmt;
 #[cfg(feature = "rkyv")]
 use rkyv::{Archive, Deserialize, Serialize};
 
+use crate::OutOfRange;
+
 /// The month of the year.
 ///
 /// This enum is just a convenience implementation.
@@ -10,26 +12,26 @@ use rkyv::{Archive, Deserialize, Serialize};
 ///
 /// It is possible to convert from a date to a month independently
 /// ```
-/// use num_traits::FromPrimitive;
 /// use chrono::prelude::*;
-/// let date = Utc.ymd(2019, 10, 28).and_hms(9, 10, 11);
+/// let date = Utc.with_ymd_and_hms(2019, 10, 28, 9, 10, 11).unwrap();
 /// // `2019-10-28T09:10:11Z`
-/// let month = Month::from_u32(date.month());
+/// let month = Month::try_from(u8::try_from(date.month()).unwrap()).ok();
 /// assert_eq!(month, Some(Month::October))
 /// ```
 /// Or from a Month to an integer usable by dates
 /// ```
 /// # use chrono::prelude::*;
 /// let month = Month::January;
-/// let dt = Utc.ymd(2019, month.number_from_month(), 28).and_hms(9, 10, 11);
+/// let dt = Utc.with_ymd_and_hms(2019, month.number_from_month(), 28, 9, 10, 11).unwrap();
 /// assert_eq!((dt.year(), dt.month(), dt.day()), (2019, 1, 28));
 /// ```
 /// Allows mapping from and to month, from 1-January to 12-December.
 /// Can be Serialized/Deserialized with serde
 // Actual implementation is zero-indexed, API intended as 1-indexed for more intuitive behavior.
-#[derive(PartialEq, Eq, Copy, Clone, Debug, Hash)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug, Hash, PartialOrd)]
 #[cfg_attr(feature = "rustc-serialize", derive(RustcEncodable, RustcDecodable))]
 #[cfg_attr(feature = "rkyv", derive(Archive, Deserialize, Serialize))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Month {
     /// January
     January = 0,
@@ -64,7 +66,8 @@ impl Month {
     /// ----------- | ---------  | ---------- | --- | ---------
     /// `m.succ()`: | `February` | `March`    | `...` | `January`
     #[inline]
-    pub fn succ(&self) -> Month {
+    #[must_use]
+    pub const fn succ(&self) -> Month {
         match *self {
             Month::January => Month::February,
             Month::February => Month::March,
@@ -87,7 +90,8 @@ impl Month {
     /// ----------- | ---------  | ---------- | --- | ---------
     /// `m.pred()`: | `December` | `January`  | `...` | `November`
     #[inline]
-    pub fn pred(&self) -> Month {
+    #[must_use]
+    pub const fn pred(&self) -> Month {
         match *self {
             Month::January => Month::December,
             Month::February => Month::January,
@@ -110,7 +114,8 @@ impl Month {
     /// -------------------------| --------- | ---------- | --- | -----
     /// `m.number_from_month()`: | 1         | 2          | `...` | 12
     #[inline]
-    pub fn number_from_month(&self) -> u32 {
+    #[must_use]
+    pub const fn number_from_month(&self) -> u32 {
         match *self {
             Month::January => 1,
             Month::February => 2,
@@ -134,7 +139,8 @@ impl Month {
     ///
     /// assert_eq!(Month::January.name(), "January")
     /// ```
-    pub fn name(&self) -> &'static str {
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
         match *self {
             Month::January => "January",
             Month::February => "February",
@@ -152,8 +158,30 @@ impl Month {
     }
 }
 
+impl TryFrom<u8> for Month {
+    type Error = OutOfRange;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Month::January),
+            2 => Ok(Month::February),
+            3 => Ok(Month::March),
+            4 => Ok(Month::April),
+            5 => Ok(Month::May),
+            6 => Ok(Month::June),
+            7 => Ok(Month::July),
+            8 => Ok(Month::August),
+            9 => Ok(Month::September),
+            10 => Ok(Month::October),
+            11 => Ok(Month::November),
+            12 => Ok(Month::December),
+            _ => Err(OutOfRange::new()),
+        }
+    }
+}
+
 impl num_traits::FromPrimitive for Month {
-    /// Returns an Option<Month> from a i64, assuming a 1-index, January = 1.
+    /// Returns an `Option<Month>` from a i64, assuming a 1-index, January = 1.
     ///
     /// `Month::from_i64(n: i64)`: | `1`                  | `2`                   | ... | `12`
     /// ---------------------------| -------------------- | --------------------- | ... | -----
@@ -191,11 +219,12 @@ impl num_traits::FromPrimitive for Month {
 
 /// A duration in calendar months
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Months(pub(crate) u32);
 
 impl Months {
     /// Construct a new `Months` from a number of months
-    pub fn new(num: u32) -> Self {
+    pub const fn new(num: u32) -> Self {
         Self(num)
     }
 }
@@ -213,6 +242,7 @@ impl fmt::Debug for ParseMonthError {
 }
 
 #[cfg(feature = "serde")]
+#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 mod month_serde {
     use super::Month;
     use serde::{de, ser};
@@ -319,7 +349,22 @@ mod month_serde {
 #[cfg(test)]
 mod tests {
     use super::Month;
-    use crate::{Datelike, TimeZone, Utc};
+    use crate::{Datelike, OutOfRange, TimeZone, Utc};
+
+    #[test]
+    fn test_month_enum_try_from() {
+        assert_eq!(Month::try_from(1), Ok(Month::January));
+        assert_eq!(Month::try_from(2), Ok(Month::February));
+        assert_eq!(Month::try_from(12), Ok(Month::December));
+        assert_eq!(Month::try_from(13), Err(OutOfRange::new()));
+
+        let date = Utc.with_ymd_and_hms(2019, 10, 28, 9, 10, 11).unwrap();
+        assert_eq!(Month::try_from(date.month() as u8), Ok(Month::October));
+
+        let month = Month::January;
+        let dt = Utc.with_ymd_and_hms(2019, month.number_from_month(), 28, 9, 10, 11).unwrap();
+        assert_eq!((dt.year(), dt.month(), dt.day()), (2019, 1, 28));
+    }
 
     #[test]
     fn test_month_enum_primitive_parse() {
@@ -334,11 +379,11 @@ mod tests {
         assert_eq!(dec_opt, Some(Month::December));
         assert_eq!(no_month, None);
 
-        let date = Utc.ymd(2019, 10, 28).and_hms(9, 10, 11);
+        let date = Utc.with_ymd_and_hms(2019, 10, 28, 9, 10, 11).unwrap();
         assert_eq!(Month::from_u32(date.month()), Some(Month::October));
 
         let month = Month::January;
-        let dt = Utc.ymd(2019, month.number_from_month(), 28).and_hms(9, 10, 11);
+        let dt = Utc.with_ymd_and_hms(2019, month.number_from_month(), 28, 9, 10, 11).unwrap();
         assert_eq!((dt.year(), dt.month(), dt.day()), (2019, 1, 28));
     }
 
@@ -348,5 +393,14 @@ mod tests {
         assert_eq!(Month::December.succ(), Month::January);
         assert_eq!(Month::January.pred(), Month::December);
         assert_eq!(Month::February.pred(), Month::January);
+    }
+
+    #[test]
+    fn test_month_partial_ord() {
+        assert!(Month::January <= Month::January);
+        assert!(Month::January < Month::February);
+        assert!(Month::January < Month::December);
+        assert!(Month::July >= Month::May);
+        assert!(Month::September > Month::March);
     }
 }

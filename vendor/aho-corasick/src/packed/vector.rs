@@ -16,7 +16,7 @@
 // inside of TeddySlim3Mask256 can use any of the functions below without any
 // additional checks: its very existence *is* the check.
 
-use std::arch::x86_64::*;
+use core::arch::x86_64::*;
 
 /// Shift `a` to the left by two bytes (removing its two most significant
 /// bytes), and concatenate it with the the two most significant bytes of `b`.
@@ -57,6 +57,15 @@ pub unsafe fn alignr256_14(a: __m256i, b: __m256i) -> __m256i {
     //
     // The reversal being attributed to the fact that we are in little-endian.
     _mm256_alignr_epi8(a, v, 14)
+}
+
+/// Shift `a` to the left by three byte (removing its most significant byte),
+/// and concatenate it with the the most significant byte of `b`.
+#[target_feature(enable = "avx2")]
+pub unsafe fn alignr256_13(a: __m256i, b: __m256i) -> __m256i {
+    // For explanation, see alignr256_14.
+    let v = _mm256_permute2x128_si256(b, a, 0x21);
+    _mm256_alignr_epi8(a, v, 13)
 }
 
 /// Shift `a` to the left by one byte (removing its most significant byte), and

@@ -13,7 +13,7 @@
 edition = "2018"
 rust-version = "1.38"
 name = "crossbeam-utils"
-version = "0.8.12"
+version = "0.8.16"
 description = "Utilities for concurrent programming"
 homepage = "https://github.com/crossbeam-rs/crossbeam/tree/master/crossbeam-utils"
 readme = "README.md"

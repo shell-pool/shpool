@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use super::parser::Cursor;
 use super::timezone::{LocalTimeType, SECONDS_PER_WEEK};
 use super::{
-    rem_euclid, Error, CUMUL_DAY_IN_MONTHS_NORMAL_YEAR, DAYS_PER_WEEK, DAY_IN_MONTHS_NORMAL_YEAR,
+    Error, CUMUL_DAY_IN_MONTHS_NORMAL_YEAR, DAYS_PER_WEEK, DAY_IN_MONTHS_NORMAL_YEAR,
     SECONDS_PER_DAY,
 };
 
@@ -127,7 +127,7 @@ pub(super) struct AlternateTime {
 
 impl AlternateTime {
     /// Construct a transition rule representing alternate local time types
-    fn new(
+    const fn new(
         std: LocalTimeType,
         dst: LocalTimeType,
         dst_start: RuleDay,
@@ -504,7 +504,7 @@ impl RuleDay {
     }
 
     /// Construct a transition rule day represented by a zero-based Julian day in `[0, 365]`, taking occasional Feb 29 into account
-    fn julian_0(julian_day_0: u16) -> Result<Self, Error> {
+    const fn julian_0(julian_day_0: u16) -> Result<Self, Error> {
         if julian_day_0 > 365 {
             return Err(Error::TransitionRule("invalid rule day julian day"));
         }
@@ -589,9 +589,9 @@ impl RuleDay {
                 }
 
                 let week_day_of_first_month_day =
-                    rem_euclid(4 + days_since_unix_epoch(year, month, 1), DAYS_PER_WEEK);
+                    (4 + days_since_unix_epoch(year, month, 1)).rem_euclid(DAYS_PER_WEEK);
                 let first_week_day_occurence_in_month =
-                    1 + rem_euclid(week_day as i64 - week_day_of_first_month_day, DAYS_PER_WEEK);
+                    1 + (week_day as i64 - week_day_of_first_month_day).rem_euclid(DAYS_PER_WEEK);
 
                 let mut month_day =
                     first_week_day_occurence_in_month + (week as i64 - 1) * DAYS_PER_WEEK;
@@ -737,7 +737,7 @@ const DAY_IN_MONTHS_LEAP_YEAR_FROM_MARCH: [i64; 12] =
 /// * `year`: Year
 /// * `month`: Month in `[1, 12]`
 /// * `month_day`: Day of the month in `[1, 31]`
-pub(crate) fn days_since_unix_epoch(year: i32, month: usize, month_day: i64) -> i64 {
+pub(crate) const fn days_since_unix_epoch(year: i32, month: usize, month_day: i64) -> i64 {
     let is_leap_year = is_leap_year(year);
 
     let year = year as i64;
@@ -768,7 +768,7 @@ pub(crate) fn days_since_unix_epoch(year: i32, month: usize, month_day: i64) -> 
 }
 
 /// Check if a year is a leap year
-pub(crate) fn is_leap_year(year: i32) -> bool {
+pub(crate) const fn is_leap_year(year: i32) -> bool {
     year % 400 == 0 || (year % 4 == 0 && year % 100 != 0)
 }
 
@@ -777,7 +777,6 @@ mod tests {
     use super::super::timezone::Transition;
     use super::super::{Error, TimeZone};
     use super::{AlternateTime, LocalTimeType, RuleDay, TransitionRule};
-    use crate::matches;
 
     #[test]
     fn test_quoted() -> Result<(), Error> {

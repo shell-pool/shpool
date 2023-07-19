@@ -19,7 +19,7 @@ use crate::core::Fragment;
 ///
 /// **Note:** Only available when the `smawk` Cargo feature is
 /// enabled.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Penalties {
     /// Per-line penalty. This is added for every line, which makes it
     /// expensive to output more lines than the minimum required.

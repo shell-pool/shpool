@@ -1,3 +1,19 @@
+# Release 0.2.16 (2023-07-20)
+
+- [Upgrade to 2018 edition, **MSRV 1.31**][240]
+- [The new `ToBytes` and `FromBytes` traits][224] convert to and from byte
+  representations of a value, with little, big, and native-endian options.
+- [The new `Float::is_subnormal` method checks for subnormal values][279], with
+  a non-zero magnitude that is less than the normal minimum positive value.
+- Several other improvements to documentation and testing.
+
+**Contributors**: @ctrlcctrlv, @cuviper, @flier, @GuillaumeGomez, @kaidokert,
+@rs017991, @vicsn
+
+[224]: https://github.com/rust-num/num-traits/pull/224
+[240]: https://github.com/rust-num/num-traits/pull/240
+[279]: https://github.com/rust-num/num-traits/pull/279
+
 # Release 0.2.15 (2022-05-02)
 
 - [The new `Euclid` trait calculates Euclidean division][195], where the

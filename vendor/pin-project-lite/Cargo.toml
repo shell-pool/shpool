@@ -13,14 +13,16 @@
 edition = "2018"
 rust-version = "1.37"
 name = "pin-project-lite"
-version = "0.2.9"
+version = "0.2.10"
 exclude = [
     "/.*",
     "/tools",
+    "/DEVELOPMENT.md",
 ]
 description = """
 A lightweight version of pin-project written with declarative macros.
 """
+readme = "README.md"
 keywords = [
     "pin",
     "macros",
@@ -35,11 +37,26 @@ repository = "https://github.com/taiki-e/pin-project-lite"
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
 
+[lib]
+doc-scrape-examples = false
+
+[dev-dependencies.macrotest]
+version = "1.0.9"
+
+[dev-dependencies.once_cell]
+version = "=1.14"
+
 [dev-dependencies.rustversion]
 version = "1"
+
+[dev-dependencies.serde]
+version = "=1.0.156"
 
 [dev-dependencies.static_assertions]
 version = "1"
 
+[dev-dependencies.toml]
+version = "=0.5.9"
+
 [dev-dependencies.trybuild]
-version = "1.0.49"
+version = "=1.0.67"

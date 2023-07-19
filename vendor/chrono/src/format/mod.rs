@@ -16,11 +16,11 @@
 //! C's `strftime` format. The available options can be found [here](./strftime/index.html).
 //!
 //! # Example
-//! ```rust
-//! # use std::error::Error;
-//! use chrono::prelude::*;
+#![cfg_attr(not(feature = "std"), doc = "```ignore")]
+#![cfg_attr(feature = "std", doc = "```rust")]
+//! use chrono::{TimeZone, Utc};
 //!
-//! let date_time = Utc.ymd(2020, 11, 10).and_hms(0, 1, 32);
+//! let date_time = Utc.with_ymd_and_hms(2020, 11, 10, 0, 1, 32).unwrap();
 //!
 //! let formatted = format!("{}", date_time.format("%Y-%m-%d %H:%M:%S"));
 //! assert_eq!(formatted, "2020-11-10 00:01:32");
@@ -40,6 +40,7 @@ use alloc::string::{String, ToString};
 #[cfg(any(feature = "alloc", feature = "std", test))]
 use core::borrow::Borrow;
 use core::fmt;
+use core::fmt::Write;
 use core::str::FromStr;
 #[cfg(any(feature = "std", test))]
 use std::error::Error;
@@ -55,7 +56,7 @@ use crate::{Month, ParseMonthError, ParseWeekdayError, Weekday};
 #[cfg(feature = "unstable-locales")]
 pub(crate) mod locales;
 
-pub use parse::parse;
+pub use parse::{parse, parse_and_remainder};
 pub use parsed::Parsed;
 /// L10n locales.
 #[cfg(feature = "unstable-locales")]
@@ -63,15 +64,16 @@ pub use pure_rust_locales::Locale;
 pub use strftime::StrftimeItems;
 
 #[cfg(not(feature = "unstable-locales"))]
+#[allow(dead_code)]
 #[derive(Debug)]
 struct Locale;
 
 /// An uninhabited type used for `InternalNumeric` and `InternalFixed` below.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 enum Void {}
 
 /// Padding characters for numeric items.
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
 pub enum Pad {
     /// No padding.
     None,
@@ -94,10 +96,10 @@ pub enum Pad {
 /// It also trims the preceding whitespace if any.
 /// It cannot parse the negative number, so some date and time cannot be formatted then
 /// parsed with the same formatting items.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Hash)]
 pub enum Numeric {
     /// Full Gregorian year (FW=4, PW=∞).
-    /// May accept years before 1 BCE or after 9999 CE, given an initial sign.
+    /// May accept years before 1 BCE or after 9999 CE, given an initial sign (+/-).
     Year,
     /// Gregorian year divided by 100 (century number; FW=PW=2). Implies the non-negative year.
     YearDiv100,
@@ -150,23 +152,10 @@ pub enum Numeric {
 }
 
 /// An opaque type representing numeric item types for internal uses only.
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct InternalNumeric {
     _dummy: Void,
 }
-
-impl Clone for InternalNumeric {
-    fn clone(&self) -> Self {
-        match self._dummy {}
-    }
-}
-
-impl PartialEq for InternalNumeric {
-    fn eq(&self, _other: &InternalNumeric) -> bool {
-        match self._dummy {}
-    }
-}
-
-impl Eq for InternalNumeric {}
 
 impl fmt::Debug for InternalNumeric {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -178,7 +167,7 @@ impl fmt::Debug for InternalNumeric {
 ///
 /// They have their own rules of formatting and parsing.
 /// Otherwise noted, they print in the specified cases but parse case-insensitively.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Hash)]
 pub enum Fixed {
     /// Abbreviated month names.
     ///
@@ -224,6 +213,18 @@ pub enum Fixed {
     /// The offset is limited from `-24:00` to `+24:00`,
     /// which is the same as [`FixedOffset`](../offset/struct.FixedOffset.html)'s range.
     TimezoneOffsetColon,
+    /// Offset from the local time to UTC with seconds (`+09:00:00` or `-04:00:00` or `+00:00:00`).
+    ///
+    /// In the parser, the colon can be omitted and/or surrounded with any amount of whitespace.
+    /// The offset is limited from `-24:00:00` to `+24:00:00`,
+    /// which is the same as [`FixedOffset`](../offset/struct.FixedOffset.html)'s range.
+    TimezoneOffsetDoubleColon,
+    /// Offset from the local time to UTC without minutes (`+09` or `-04` or `+00`).
+    ///
+    /// In the parser, the colon can be omitted and/or surrounded with any amount of whitespace.
+    /// The offset is limited from `-24` to `+24`,
+    /// which is the same as [`FixedOffset`](../offset/struct.FixedOffset.html)'s range.
+    TimezoneOffsetTripleColon,
     /// Offset from the local time to UTC (`+09:00` or `-04:00` or `Z`).
     ///
     /// In the parser, the colon can be omitted and/or surrounded with any amount of whitespace,
@@ -250,12 +251,12 @@ pub enum Fixed {
 }
 
 /// An opaque type representing fixed-format item types for internal uses only.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InternalFixed {
     val: InternalInternal,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum InternalInternal {
     /// Same as [`TimezoneOffsetColonZ`](#variant.TimezoneOffsetColonZ), but
     /// allows missing minutes (per [ISO 8601][iso8601]).
@@ -274,18 +275,29 @@ enum InternalInternal {
     Nanosecond9NoDot,
 }
 
+#[cfg(any(feature = "alloc", feature = "std", test))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum Colons {
+    None,
+    Single,
+    Double,
+    Triple,
+}
+
 /// A single formatting item. This is used for both formatting and parsing.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Hash)]
 pub enum Item<'a> {
     /// A literally printed and parsed text.
     Literal(&'a str),
     /// Same as `Literal` but with the string owned by the item.
     #[cfg(any(feature = "alloc", feature = "std", test))]
+    #[cfg_attr(docsrs, doc(cfg(any(feature = "alloc", feature = "std"))))]
     OwnedLiteral(Box<str>),
     /// Whitespace. Prints literally but reads zero or more whitespace.
     Space(&'a str),
     /// Same as `Space` but with the string owned by the item.
     #[cfg(any(feature = "alloc", feature = "std", test))]
+    #[cfg_attr(docsrs, doc(cfg(any(feature = "alloc", feature = "std"))))]
     OwnedSpace(Box<str>),
     /// Numeric item. Can be optionally padded to the maximal length (if any) when formatting;
     /// the parser simply ignores any padded whitespace and zeroes.
@@ -333,18 +345,19 @@ macro_rules! internal_fix {
 }
 
 /// An error from the `parse` function.
-#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, Hash)]
 pub struct ParseError(ParseErrorKind);
 
 impl ParseError {
     /// The category of parse error
-    pub fn kind(&self) -> ParseErrorKind {
+    pub const fn kind(&self) -> ParseErrorKind {
         self.0
     }
 }
 
 /// The category of parse error
-#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+#[allow(clippy::manual_non_exhaustive)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, Hash)]
 pub enum ParseErrorKind {
     /// Given field is out of permitted range.
     OutOfRange,
@@ -374,7 +387,7 @@ pub enum ParseErrorKind {
     /// There was an error on the formatting string, or there were non-supported formating items.
     BadFormat,
 
-    // TODO: Change this to `#[non_exhaustive]` (on the enum) when MSRV is increased
+    // TODO: Change this to `#[non_exhaustive]` (on the enum) with the next breaking release.
     #[doc(hidden)]
     __Nonexhaustive,
 }
@@ -398,6 +411,7 @@ impl fmt::Display for ParseError {
 }
 
 #[cfg(any(feature = "std", test))]
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 impl Error for ParseError {
     #[allow(deprecated)]
     fn description(&self) -> &str {
@@ -414,47 +428,35 @@ const TOO_SHORT: ParseError = ParseError(ParseErrorKind::TooShort);
 const TOO_LONG: ParseError = ParseError(ParseErrorKind::TooLong);
 const BAD_FORMAT: ParseError = ParseError(ParseErrorKind::BadFormat);
 
-/// Formats single formatting item
 #[cfg(any(feature = "alloc", feature = "std", test))]
-pub fn format_item<'a>(
-    w: &mut fmt::Formatter,
-    date: Option<&NaiveDate>,
-    time: Option<&NaiveTime>,
-    off: Option<&(String, FixedOffset)>,
-    item: &Item<'a>,
-) -> fmt::Result {
-    let mut result = String::new();
-    format_inner(&mut result, date, time, off, item, None)?;
-    w.pad(&result)
+struct Locales {
+    short_months: &'static [&'static str],
+    long_months: &'static [&'static str],
+    short_weekdays: &'static [&'static str],
+    long_weekdays: &'static [&'static str],
+    am_pm: &'static [&'static str],
 }
 
 #[cfg(any(feature = "alloc", feature = "std", test))]
-fn format_inner<'a>(
-    result: &mut String,
-    date: Option<&NaiveDate>,
-    time: Option<&NaiveTime>,
-    off: Option<&(String, FixedOffset)>,
-    item: &Item<'a>,
-    _locale: Option<Locale>,
-) -> fmt::Result {
-    #[cfg(feature = "unstable-locales")]
-    let (short_months, long_months, short_weekdays, long_weekdays, am_pm, am_pm_lowercase) = {
-        let locale = _locale.unwrap_or(Locale::POSIX);
-        let am_pm = locales::am_pm(locale);
-        (
-            locales::short_months(locale),
-            locales::long_months(locale),
-            locales::short_weekdays(locale),
-            locales::long_weekdays(locale),
-            am_pm,
-            &[am_pm[0].to_lowercase(), am_pm[1].to_lowercase()],
-        )
-    };
-    #[cfg(not(feature = "unstable-locales"))]
-    let (short_months, long_months, short_weekdays, long_weekdays, am_pm, am_pm_lowercase) = {
-        (
-            &["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
-            &[
+impl Locales {
+    fn new(_locale: Option<Locale>) -> Self {
+        #[cfg(feature = "unstable-locales")]
+        {
+            let locale = _locale.unwrap_or(Locale::POSIX);
+            Self {
+                short_months: locales::short_months(locale),
+                long_months: locales::long_months(locale),
+                short_weekdays: locales::short_weekdays(locale),
+                long_weekdays: locales::long_weekdays(locale),
+                am_pm: locales::am_pm(locale),
+            }
+        }
+        #[cfg(not(feature = "unstable-locales"))]
+        Self {
+            short_months: &[
+                "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+            ],
+            long_months: &[
                 "January",
                 "February",
                 "March",
@@ -468,15 +470,46 @@ fn format_inner<'a>(
                 "November",
                 "December",
             ],
-            &["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
-            &["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
-            &["AM", "PM"],
-            &["am", "pm"],
-        )
-    };
+            short_weekdays: &["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+            long_weekdays: &[
+                "Sunday",
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday",
+                "Saturday",
+            ],
+            am_pm: &["AM", "PM"],
+        }
+    }
+}
 
-    use core::fmt::Write;
-    use num_integer::{div_floor, mod_floor};
+/// Formats single formatting item
+#[cfg(any(feature = "alloc", feature = "std", test))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "alloc", feature = "std"))))]
+pub fn format_item(
+    w: &mut fmt::Formatter,
+    date: Option<&NaiveDate>,
+    time: Option<&NaiveTime>,
+    off: Option<&(String, FixedOffset)>,
+    item: &Item<'_>,
+) -> fmt::Result {
+    let mut result = String::new();
+    format_inner(&mut result, date, time, off, item, None)?;
+    w.pad(&result)
+}
+
+#[cfg(any(feature = "alloc", feature = "std", test))]
+fn format_inner(
+    result: &mut String,
+    date: Option<&NaiveDate>,
+    time: Option<&NaiveTime>,
+    off: Option<&(String, FixedOffset)>,
+    item: &Item<'_>,
+    locale: Option<Locale>,
+) -> fmt::Result {
+    let locale = Locales::new(locale);
 
     match *item {
         Item::Literal(s) | Item::Space(s) => result.push_str(s),
@@ -486,20 +519,16 @@ fn format_inner<'a>(
         Item::Numeric(ref spec, ref pad) => {
             use self::Numeric::*;
 
-            let week_from_sun = |d: &NaiveDate| {
-                (d.ordinal() as i32 - d.weekday().num_days_from_sunday() as i32 + 7) / 7
-            };
-            let week_from_mon = |d: &NaiveDate| {
-                (d.ordinal() as i32 - d.weekday().num_days_from_monday() as i32 + 7) / 7
-            };
+            let week_from_sun = |d: &NaiveDate| d.weeks_from(Weekday::Sun);
+            let week_from_mon = |d: &NaiveDate| d.weeks_from(Weekday::Mon);
 
             let (width, v) = match *spec {
                 Year => (4, date.map(|d| i64::from(d.year()))),
-                YearDiv100 => (2, date.map(|d| div_floor(i64::from(d.year()), 100))),
-                YearMod100 => (2, date.map(|d| mod_floor(i64::from(d.year()), 100))),
+                YearDiv100 => (2, date.map(|d| i64::from(d.year()).div_euclid(100))),
+                YearMod100 => (2, date.map(|d| i64::from(d.year()).rem_euclid(100))),
                 IsoYear => (4, date.map(|d| i64::from(d.iso_week().year()))),
-                IsoYearDiv100 => (2, date.map(|d| div_floor(i64::from(d.iso_week().year()), 100))),
-                IsoYearMod100 => (2, date.map(|d| mod_floor(i64::from(d.iso_week().year()), 100))),
+                IsoYearDiv100 => (2, date.map(|d| i64::from(d.iso_week().year()).div_euclid(100))),
+                IsoYearMod100 => (2, date.map(|d| i64::from(d.iso_week().year()).rem_euclid(100))),
                 Month => (2, date.map(|d| i64::from(d.month()))),
                 Day => (2, date.map(|d| i64::from(d.day()))),
                 WeekFromSun => (2, date.map(|d| i64::from(week_from_sun(d)))),
@@ -551,60 +580,41 @@ fn format_inner<'a>(
         Item::Fixed(ref spec) => {
             use self::Fixed::*;
 
-            /// Prints an offset from UTC in the format of `+HHMM` or `+HH:MM`.
-            /// `Z` instead of `+00[:]00` is allowed when `allow_zulu` is true.
-            fn write_local_minus_utc(
-                result: &mut String,
-                off: FixedOffset,
-                allow_zulu: bool,
-                use_colon: bool,
-            ) -> fmt::Result {
-                let off = off.local_minus_utc();
-                if !allow_zulu || off != 0 {
-                    let (sign, off) = if off < 0 { ('-', -off) } else { ('+', off) };
-                    if use_colon {
-                        write!(result, "{}{:02}:{:02}", sign, off / 3600, off / 60 % 60)
-                    } else {
-                        write!(result, "{}{:02}{:02}", sign, off / 3600, off / 60 % 60)
-                    }
-                } else {
-                    result.push('Z');
-                    Ok(())
-                }
-            }
-
             let ret =
                 match *spec {
                     ShortMonthName => date.map(|d| {
-                        result.push_str(short_months[d.month0() as usize]);
+                        result.push_str(locale.short_months[d.month0() as usize]);
                         Ok(())
                     }),
                     LongMonthName => date.map(|d| {
-                        result.push_str(long_months[d.month0() as usize]);
+                        result.push_str(locale.long_months[d.month0() as usize]);
                         Ok(())
                     }),
                     ShortWeekdayName => date.map(|d| {
-                        result
-                            .push_str(short_weekdays[d.weekday().num_days_from_sunday() as usize]);
+                        result.push_str(
+                            locale.short_weekdays[d.weekday().num_days_from_sunday() as usize],
+                        );
                         Ok(())
                     }),
                     LongWeekdayName => date.map(|d| {
-                        result.push_str(long_weekdays[d.weekday().num_days_from_sunday() as usize]);
+                        result.push_str(
+                            locale.long_weekdays[d.weekday().num_days_from_sunday() as usize],
+                        );
                         Ok(())
                     }),
                     LowerAmPm => time.map(|t| {
-                        #[cfg_attr(feature = "cargo-clippy", allow(clippy::useless_asref))]
-                        {
-                            result.push_str(if t.hour12().0 {
-                                am_pm_lowercase[1].as_ref()
-                            } else {
-                                am_pm_lowercase[0].as_ref()
-                            });
+                        let ampm = if t.hour12().0 { locale.am_pm[1] } else { locale.am_pm[0] };
+                        for char in ampm.chars() {
+                            result.extend(char.to_lowercase())
                         }
                         Ok(())
                     }),
                     UpperAmPm => time.map(|t| {
-                        result.push_str(if t.hour12().0 { am_pm[1] } else { am_pm[0] });
+                        result.push_str(if t.hour12().0 {
+                            locale.am_pm[1]
+                        } else {
+                            locale.am_pm[0]
+                        });
                         Ok(())
                     }),
                     Nanosecond => time.map(|t| {
@@ -646,21 +656,23 @@ fn format_inner<'a>(
                             let nano = t.nanosecond() % 1_000_000_000;
                             write!(result, "{:09}", nano)
                         }),
-                    TimezoneName => off.map(|&(ref name, _)| {
+                    TimezoneName => off.map(|(name, _)| {
                         result.push_str(name);
                         Ok(())
                     }),
-                    TimezoneOffsetColon => {
-                        off.map(|&(_, off)| write_local_minus_utc(result, off, false, true))
-                    }
-                    TimezoneOffsetColonZ => {
-                        off.map(|&(_, off)| write_local_minus_utc(result, off, true, true))
-                    }
+                    TimezoneOffsetColon => off
+                        .map(|&(_, off)| write_local_minus_utc(result, off, false, Colons::Single)),
+                    TimezoneOffsetDoubleColon => off
+                        .map(|&(_, off)| write_local_minus_utc(result, off, false, Colons::Double)),
+                    TimezoneOffsetTripleColon => off
+                        .map(|&(_, off)| write_local_minus_utc(result, off, false, Colons::Triple)),
+                    TimezoneOffsetColonZ => off
+                        .map(|&(_, off)| write_local_minus_utc(result, off, true, Colons::Single)),
                     TimezoneOffset => {
-                        off.map(|&(_, off)| write_local_minus_utc(result, off, false, false))
+                        off.map(|&(_, off)| write_local_minus_utc(result, off, false, Colons::None))
                     }
                     TimezoneOffsetZ => {
-                        off.map(|&(_, off)| write_local_minus_utc(result, off, true, false))
+                        off.map(|&(_, off)| write_local_minus_utc(result, off, true, Colons::None))
                     }
                     Internal(InternalFixed { val: InternalInternal::TimezoneOffsetPermissive }) => {
                         panic!("Do not try to write %#z it is undefined")
@@ -669,19 +681,7 @@ fn format_inner<'a>(
                     // same as `%a, %d %b %Y %H:%M:%S %z`
                     {
                         if let (Some(d), Some(t), Some(&(_, off))) = (date, time, off) {
-                            let sec = t.second() + t.nanosecond() / 1_000_000_000;
-                            write!(
-                                result,
-                                "{}, {:02} {} {:04} {:02}:{:02}:{:02} ",
-                                short_weekdays[d.weekday().num_days_from_sunday() as usize],
-                                d.day(),
-                                short_months[d.month0() as usize],
-                                d.year(),
-                                t.hour(),
-                                t.minute(),
-                                sec
-                            )?;
-                            Some(write_local_minus_utc(result, off, false, false))
+                            Some(write_rfc2822_inner(result, d, t, off, locale))
                         } else {
                             None
                         }
@@ -690,10 +690,7 @@ fn format_inner<'a>(
                     // same as `%Y-%m-%dT%H:%M:%S%.f%:z`
                     {
                         if let (Some(d), Some(t), Some(&(_, off))) = (date, time, off) {
-                            // reuse `Debug` impls which already print ISO 8601 format.
-                            // this is faster in this way.
-                            write!(result, "{:?}T{:?}", d, t)?;
-                            Some(write_local_minus_utc(result, off, false, true))
+                            Some(write_rfc3339(result, crate::NaiveDateTime::new(*d, *t), off))
                         } else {
                             None
                         }
@@ -711,9 +708,114 @@ fn format_inner<'a>(
     Ok(())
 }
 
+/// Prints an offset from UTC in the format of `+HHMM` or `+HH:MM`.
+/// `Z` instead of `+00[:]00` is allowed when `allow_zulu` is true.
+#[cfg(any(feature = "alloc", feature = "std", test))]
+fn write_local_minus_utc(
+    result: &mut String,
+    off: FixedOffset,
+    allow_zulu: bool,
+    colon_type: Colons,
+) -> fmt::Result {
+    let off = off.local_minus_utc();
+    if allow_zulu && off == 0 {
+        result.push('Z');
+        return Ok(());
+    }
+    let (sign, off) = if off < 0 { ('-', -off) } else { ('+', off) };
+    result.push(sign);
+
+    write_hundreds(result, (off / 3600) as u8)?;
+
+    match colon_type {
+        Colons::None => write_hundreds(result, (off / 60 % 60) as u8),
+        Colons::Single => {
+            result.push(':');
+            write_hundreds(result, (off / 60 % 60) as u8)
+        }
+        Colons::Double => {
+            result.push(':');
+            write_hundreds(result, (off / 60 % 60) as u8)?;
+            result.push(':');
+            write_hundreds(result, (off % 60) as u8)
+        }
+        Colons::Triple => Ok(()),
+    }
+}
+
+/// Writes the date, time and offset to the string. same as `%Y-%m-%dT%H:%M:%S%.f%:z`
+#[cfg(any(feature = "alloc", feature = "std", test))]
+pub(crate) fn write_rfc3339(
+    result: &mut String,
+    dt: crate::NaiveDateTime,
+    off: FixedOffset,
+) -> fmt::Result {
+    // reuse `Debug` impls which already print ISO 8601 format.
+    // this is faster in this way.
+    write!(result, "{:?}", dt)?;
+    write_local_minus_utc(result, off, false, Colons::Single)
+}
+
+#[cfg(any(feature = "alloc", feature = "std", test))]
+/// write datetimes like `Tue, 1 Jul 2003 10:52:37 +0200`, same as `%a, %d %b %Y %H:%M:%S %z`
+pub(crate) fn write_rfc2822(
+    result: &mut String,
+    dt: crate::NaiveDateTime,
+    off: FixedOffset,
+) -> fmt::Result {
+    write_rfc2822_inner(result, &dt.date(), &dt.time(), off, Locales::new(None))
+}
+
+#[cfg(any(feature = "alloc", feature = "std", test))]
+/// write datetimes like `Tue, 1 Jul 2003 10:52:37 +0200`, same as `%a, %d %b %Y %H:%M:%S %z`
+fn write_rfc2822_inner(
+    result: &mut String,
+    d: &NaiveDate,
+    t: &NaiveTime,
+    off: FixedOffset,
+    locale: Locales,
+) -> fmt::Result {
+    let year = d.year();
+    // RFC2822 is only defined on years 0 through 9999
+    if !(0..=9999).contains(&year) {
+        return Err(fmt::Error);
+    }
+
+    result.push_str(locale.short_weekdays[d.weekday().num_days_from_sunday() as usize]);
+    result.push_str(", ");
+    write_hundreds(result, d.day() as u8)?;
+    result.push(' ');
+    result.push_str(locale.short_months[d.month0() as usize]);
+    result.push(' ');
+    write_hundreds(result, (year / 100) as u8)?;
+    write_hundreds(result, (year % 100) as u8)?;
+    result.push(' ');
+    write_hundreds(result, t.hour() as u8)?;
+    result.push(':');
+    write_hundreds(result, t.minute() as u8)?;
+    result.push(':');
+    let sec = t.second() + t.nanosecond() / 1_000_000_000;
+    write_hundreds(result, sec as u8)?;
+    result.push(' ');
+    write_local_minus_utc(result, off, false, Colons::None)
+}
+
+/// Equivalent to `{:02}` formatting for n < 100.
+pub(crate) fn write_hundreds(w: &mut impl Write, n: u8) -> fmt::Result {
+    if n >= 100 {
+        return Err(fmt::Error);
+    }
+
+    let tens = b'0' + n / 10;
+    let ones = b'0' + n % 10;
+    w.write_char(tens as char)?;
+    w.write_char(ones as char)
+}
+
 /// Tries to format given arguments with given formatting items.
 /// Internally used by `DelayedFormat`.
 #[cfg(any(feature = "alloc", feature = "std", test))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "alloc", feature = "std"))))]
 pub fn format<'a, I, B>(
     w: &mut fmt::Formatter,
     date: Option<&NaiveDate>,
@@ -743,6 +845,7 @@ pub mod strftime;
 /// A *temporary* object which can be used as an argument to `format!` or others.
 /// This is normally constructed via `format` methods of each date and time type.
 #[cfg(any(feature = "alloc", feature = "std", test))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "alloc", feature = "std"))))]
 #[derive(Debug)]
 pub struct DelayedFormat<I> {
     /// The date view, if any.
@@ -763,6 +866,7 @@ pub struct DelayedFormat<I> {
 #[cfg(any(feature = "alloc", feature = "std", test))]
 impl<'a, I: Iterator<Item = B> + Clone, B: Borrow<Item<'a>>> DelayedFormat<I> {
     /// Makes a new `DelayedFormat` value out of local date and time.
+    #[must_use]
     pub fn new(date: Option<NaiveDate>, time: Option<NaiveTime>, items: I) -> DelayedFormat<I> {
         DelayedFormat {
             date,
@@ -775,6 +879,7 @@ impl<'a, I: Iterator<Item = B> + Clone, B: Borrow<Item<'a>>> DelayedFormat<I> {
     }
 
     /// Makes a new `DelayedFormat` value out of local date and time and UTC offset.
+    #[must_use]
     pub fn new_with_offset<Off>(
         date: Option<NaiveDate>,
         time: Option<NaiveTime>,
@@ -797,6 +902,8 @@ impl<'a, I: Iterator<Item = B> + Clone, B: Borrow<Item<'a>>> DelayedFormat<I> {
 
     /// Makes a new `DelayedFormat` value out of local date and time and locale.
     #[cfg(feature = "unstable-locales")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "unstable-locales")))]
+    #[must_use]
     pub fn new_with_locale(
         date: Option<NaiveDate>,
         time: Option<NaiveTime>,
@@ -808,6 +915,8 @@ impl<'a, I: Iterator<Item = B> + Clone, B: Borrow<Item<'a>>> DelayedFormat<I> {
 
     /// Makes a new `DelayedFormat` value out of local date and time, UTC offset and locale.
     #[cfg(feature = "unstable-locales")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "unstable-locales")))]
+    #[must_use]
     pub fn new_with_offset_and_locale<Off>(
         date: Option<NaiveDate>,
         time: Option<NaiveTime>,
@@ -884,6 +993,7 @@ impl FromStr for Weekday {
 
 /// Formats single formatting item
 #[cfg(feature = "unstable-locales")]
+#[cfg_attr(docsrs, doc(cfg(feature = "unstable-locales")))]
 pub fn format_item_localized<'a>(
     w: &mut fmt::Formatter,
     date: Option<&NaiveDate>,
@@ -900,6 +1010,7 @@ pub fn format_item_localized<'a>(
 /// Tries to format given arguments with given formatting items.
 /// Internally used by `DelayedFormat`.
 #[cfg(feature = "unstable-locales")]
+#[cfg_attr(docsrs, doc(cfg(feature = "unstable-locales")))]
 pub fn format_localized<'a, I, B>(
     w: &mut fmt::Formatter,
     date: Option<&NaiveDate>,

@@ -12,8 +12,8 @@ use crate::Weekday;
 
 /// Returns true when two slices are equal case-insensitively (in ASCII).
 /// Assumes that the `pattern` is already converted to lower case.
-fn equals(s: &str, pattern: &str) -> bool {
-    let mut xs = s.as_bytes().iter().map(|&c| match c {
+fn equals(s: &[u8], pattern: &str) -> bool {
+    let mut xs = s.iter().map(|&c| match c {
         b'A'..=b'Z' => c + 32,
         _ => c,
     });
@@ -48,7 +48,7 @@ pub(super) fn number(s: &str, min: usize, max: usize) -> ParseResult<(&str, i64)
     let mut n = 0i64;
     for (i, c) in bytes.iter().take(max).cloned().enumerate() {
         // cloned() = copied()
-        if !(b'0'..=b'9').contains(&c) {
+        if !c.is_ascii_digit() {
             if i < min {
                 return Err(INVALID);
             } else {
@@ -79,7 +79,7 @@ pub(super) fn nanosecond(s: &str) -> ParseResult<(&str, i64)> {
     let v = v.checked_mul(SCALE[consumed]).ok_or(OUT_OF_RANGE)?;
 
     // if there are more than 9 digits, skip next digits.
-    let s = s.trim_left_matches(|c: char| ('0'..='9').contains(&c));
+    let s = s.trim_left_matches(|c: char| c.is_ascii_digit());
 
     Ok((s, v))
 }
@@ -152,7 +152,7 @@ pub(super) fn short_or_long_month0(s: &str) -> ParseResult<(&str, u8)> {
 
     // tries to consume the suffix if possible
     let suffix = LONG_MONTH_SUFFIXES[month0 as usize];
-    if s.len() >= suffix.len() && equals(&s[..suffix.len()], suffix) {
+    if s.len() >= suffix.len() && equals(&s.as_bytes()[..suffix.len()], suffix) {
         s = &s[suffix.len()..];
     }
 
@@ -170,7 +170,7 @@ pub(super) fn short_or_long_weekday(s: &str) -> ParseResult<(&str, Weekday)> {
 
     // tries to consume the suffix if possible
     let suffix = LONG_WEEKDAY_SUFFIXES[weekday.num_days_from_monday() as usize];
-    if s.len() >= suffix.len() && equals(&s[..suffix.len()], suffix) {
+    if s.len() >= suffix.len() && equals(&s.as_bytes()[..suffix.len()], suffix) {
         s = &s[suffix.len()..];
     }
 
@@ -222,7 +222,7 @@ fn timezone_offset_internal<F>(
 where
     F: FnMut(&str) -> ParseResult<&str>,
 {
-    fn digits(s: &str) -> ParseResult<(u8, u8)> {
+    const fn digits(s: &str) -> ParseResult<(u8, u8)> {
         let b = s.as_bytes();
         if b.len() < 2 {
             Err(TOO_SHORT)
@@ -308,18 +308,14 @@ where
 
 /// Same as `timezone_offset` but also allows for RFC 2822 legacy timezones.
 /// May return `None` which indicates an insufficient offset data (i.e. `-0000`).
+/// See [RFC 2822 Section 4.3].
+///
+/// [RFC 2822 Section 4.3]: https://tools.ietf.org/html/rfc2822#section-4.3
 pub(super) fn timezone_offset_2822(s: &str) -> ParseResult<(&str, Option<i32>)> {
     // tries to parse legacy time zone names
-    let upto = s
-        .as_bytes()
-        .iter()
-        .position(|&c| match c {
-            b'a'..=b'z' | b'A'..=b'Z' => false,
-            _ => true,
-        })
-        .unwrap_or(s.len());
+    let upto = s.as_bytes().iter().position(|&c| !c.is_ascii_alphabetic()).unwrap_or(s.len());
     if upto > 0 {
-        let name = &s[..upto];
+        let name = &s.as_bytes()[..upto];
         let s = &s[upto..];
         let offset_hours = |o| Ok((s, Some(o * 3600)));
         if equals(name, "gmt") || equals(name, "ut") {
@@ -334,8 +330,14 @@ pub(super) fn timezone_offset_2822(s: &str) -> ParseResult<(&str, Option<i32>)> 
             offset_hours(-7)
         } else if equals(name, "pst") {
             offset_hours(-8)
+        } else if name.len() == 1 {
+            match name[0] {
+                // recommended by RFC 2822: consume but treat it as -0000
+                b'a'..=b'i' | b'k'..=b'z' | b'A'..=b'I' | b'K'..=b'Z' => offset_hours(0),
+                _ => Ok((s, None)),
+            }
         } else {
-            Ok((s, None)) // recommended by RFC 2822: consume but treat it as -0000
+            Ok((s, None))
         }
     } else {
         let (s_, offset) = timezone_offset(s, |s| Ok(s))?;
@@ -404,10 +406,10 @@ fn test_rfc2822_comments() {
         ("( x ( x ) x ( x ) x )", Ok("")),
     ];
 
-    for (test_in, expected) in testdata {
+    for (test_in, expected) in testdata.iter() {
         let actual = comment_2822(test_in).map(|(s, _)| s);
         assert_eq!(
-            expected, actual,
+            *expected, actual,
             "{:?} expected to produce {:?}, but produced {:?}.",
             test_in, expected, actual
         );

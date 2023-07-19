@@ -1,21 +1,16 @@
-#[cfg(target_arch = "x86_64")]
-pub use crate::packed::teddy::compile::Builder;
-#[cfg(not(target_arch = "x86_64"))]
-pub use crate::packed::teddy::fallback::Builder;
-#[cfg(not(target_arch = "x86_64"))]
-pub use crate::packed::teddy::fallback::Teddy;
-#[cfg(target_arch = "x86_64")]
-pub use crate::packed::teddy::runtime::Teddy;
+#[cfg(not(all(feature = "std", target_arch = "x86_64")))]
+pub use crate::packed::teddy::fallback::{Builder, Teddy};
+#[cfg(all(feature = "std", target_arch = "x86_64"))]
+pub use crate::packed::teddy::{compile::Builder, runtime::Teddy};
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(feature = "std", target_arch = "x86_64"))]
 mod compile;
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(feature = "std", target_arch = "x86_64"))]
 mod runtime;
 
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(not(all(feature = "std", target_arch = "x86_64")))]
 mod fallback {
-    use crate::packed::pattern::Patterns;
-    use crate::Match;
+    use crate::{packed::pattern::Patterns, Match};
 
     #[derive(Clone, Debug, Default)]
     pub struct Builder(());
@@ -55,7 +50,7 @@ mod fallback {
             0
         }
 
-        pub fn heap_bytes(&self) -> usize {
+        pub fn memory_usage(&self) -> usize {
             0
         }
     }

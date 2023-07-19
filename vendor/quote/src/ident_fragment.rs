@@ -1,6 +1,6 @@
+use alloc::borrow::Cow;
 use core::fmt;
 use proc_macro2::{Ident, Span};
-use std::borrow::Cow;
 
 /// Specialized formatting trait used by `format_ident!`.
 ///
@@ -8,6 +8,8 @@ use std::borrow::Cow;
 /// stripped, if present.
 ///
 /// See [`format_ident!`] for more information.
+///
+/// [`format_ident!`]: crate::format_ident
 pub trait IdentFragment {
     /// Format this value as an identifier fragment.
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result;
@@ -47,8 +49,8 @@ impl IdentFragment for Ident {
 
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let id = self.to_string();
-        if id.starts_with("r#") {
-            fmt::Display::fmt(&id[2..], f)
+        if let Some(id) = id.strip_prefix("r#") {
+            fmt::Display::fmt(id, f)
         } else {
             fmt::Display::fmt(&id[..], f)
         }

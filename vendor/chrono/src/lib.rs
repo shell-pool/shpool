@@ -1,6 +1,3 @@
-// This is a part of Chrono.
-// See README.md and LICENSE.txt for details.
-
 //! # Chrono: Date and Time for Rust
 //!
 //! It aims to be a feature-complete superset of
@@ -18,18 +15,6 @@
 //!    the wiki](https://github.com/rust-lang/rust-wiki-backup/blob/master/Lib-datetime.md)
 //! * Dietrich Epp's [datetime-rs](https://github.com/depp/datetime-rs)
 //! * Luis de Bethencourt's [rust-datetime](https://github.com/luisbg/rust-datetime)
-//!
-//! Any significant changes to Chrono are documented in
-//! the [`CHANGELOG.md`](https://github.com/chronotope/chrono/blob/main/CHANGELOG.md) file.
-//!
-//! ## Usage
-//!
-//! Put this in your `Cargo.toml`:
-//!
-//! ```toml
-//! [dependencies]
-//! chrono = "0.4"
-//! ```
 //!
 //! ### Features
 //!
@@ -125,7 +110,8 @@
 //! or in the local time zone
 //! ([`Local::now()`](./offset/struct.Local.html#method.now)).
 //!
-//! ```rust
+#![cfg_attr(not(feature = "clock"), doc = "```ignore")]
+#![cfg_attr(feature = "clock", doc = "```rust")]
 //! use chrono::prelude::*;
 //!
 //! let utc: DateTime<Utc> = Utc::now();       // e.g. `2014-11-28T12:45:59.324310806Z`
@@ -137,32 +123,40 @@
 //! This is a bit verbose due to Rust's lack of function and method overloading,
 //! but in turn we get a rich combination of initialization methods.
 //!
-//! ```rust
+#![cfg_attr(not(feature = "std"), doc = "```ignore")]
+#![cfg_attr(feature = "std", doc = "```rust")]
 //! use chrono::prelude::*;
 //! use chrono::offset::LocalResult;
 //!
-//! let dt = Utc.ymd(2014, 7, 8).and_hms(9, 10, 11); // `2014-07-08T09:10:11Z`
-//! // July 8 is 188th day of the year 2014 (`o` for "ordinal")
-//! assert_eq!(dt, Utc.yo(2014, 189).and_hms(9, 10, 11));
-//! // July 8 is Tuesday in ISO week 28 of the year 2014.
-//! assert_eq!(dt, Utc.isoywd(2014, 28, Weekday::Tue).and_hms(9, 10, 11));
+//! # fn doctest() -> Option<()> {
 //!
-//! let dt = Utc.ymd(2014, 7, 8).and_hms_milli(9, 10, 11, 12); // `2014-07-08T09:10:11.012Z`
-//! assert_eq!(dt, Utc.ymd(2014, 7, 8).and_hms_micro(9, 10, 11, 12_000));
-//! assert_eq!(dt, Utc.ymd(2014, 7, 8).and_hms_nano(9, 10, 11, 12_000_000));
+//! let dt = Utc.with_ymd_and_hms(2014, 7, 8, 9, 10, 11).unwrap(); // `2014-07-08T09:10:11Z`
+//! assert_eq!(dt, NaiveDate::from_ymd_opt(2014, 7, 8)?.and_hms_opt(9, 10, 11)?.and_local_timezone(Utc).unwrap());
+//!
+//! // July 8 is 188th day of the year 2014 (`o` for "ordinal")
+//! assert_eq!(dt, NaiveDate::from_yo_opt(2014, 189)?.and_hms_opt(9, 10, 11)?.and_utc());
+//! // July 8 is Tuesday in ISO week 28 of the year 2014.
+//! assert_eq!(dt, NaiveDate::from_isoywd_opt(2014, 28, Weekday::Tue)?.and_hms_opt(9, 10, 11)?.and_utc());
+//!
+//! let dt = NaiveDate::from_ymd_opt(2014, 7, 8)?.and_hms_milli_opt(9, 10, 11, 12)?.and_local_timezone(Utc).unwrap(); // `2014-07-08T09:10:11.012Z`
+//! assert_eq!(dt, NaiveDate::from_ymd_opt(2014, 7, 8)?.and_hms_micro_opt(9, 10, 11, 12_000)?.and_local_timezone(Utc).unwrap());
+//! assert_eq!(dt, NaiveDate::from_ymd_opt(2014, 7, 8)?.and_hms_nano_opt(9, 10, 11, 12_000_000)?.and_local_timezone(Utc).unwrap());
 //!
 //! // dynamic verification
-//! assert_eq!(Utc.ymd_opt(2014, 7, 8).and_hms_opt(21, 15, 33),
-//!            LocalResult::Single(Utc.ymd(2014, 7, 8).and_hms(21, 15, 33)));
-//! assert_eq!(Utc.ymd_opt(2014, 7, 8).and_hms_opt(80, 15, 33), LocalResult::None);
-//! assert_eq!(Utc.ymd_opt(2014, 7, 38).and_hms_opt(21, 15, 33), LocalResult::None);
+//! assert_eq!(Utc.with_ymd_and_hms(2014, 7, 8, 21, 15, 33),
+//!            LocalResult::Single(NaiveDate::from_ymd_opt(2014, 7, 8)?.and_hms_opt(21, 15, 33)?.and_utc()));
+//! assert_eq!(Utc.with_ymd_and_hms(2014, 7, 8, 80, 15, 33), LocalResult::None);
+//! assert_eq!(Utc.with_ymd_and_hms(2014, 7, 38, 21, 15, 33), LocalResult::None);
 //!
 //! // other time zone objects can be used to construct a local datetime.
 //! // obviously, `local_dt` is normally different from `dt`, but `fixed_dt` should be identical.
-//! let local_dt = Local.ymd(2014, 7, 8).and_hms_milli(9, 10, 11, 12);
-//! let fixed_dt = FixedOffset::east(9 * 3600).ymd(2014, 7, 8).and_hms_milli(18, 10, 11, 12);
+//! let local_dt = Local.from_local_datetime(&NaiveDate::from_ymd_opt(2014, 7, 8).unwrap().and_hms_milli_opt(9, 10, 11, 12).unwrap()).unwrap();
+//! let fixed_dt = FixedOffset::east_opt(9 * 3600).unwrap().from_local_datetime(&NaiveDate::from_ymd_opt(2014, 7, 8).unwrap().and_hms_milli_opt(18, 10, 11, 12).unwrap()).unwrap();
 //! assert_eq!(dt, fixed_dt);
 //! # let _ = local_dt;
+//! # Some(())
+//! # }
+//! # doctest().unwrap();
 //! ```
 //!
 //! Various properties are available to the date and time, and can be altered individually.
@@ -176,7 +170,7 @@
 //! use chrono::Duration;
 //!
 //! // assume this returned `2014-11-28T21:45:59.324310806+09:00`:
-//! let dt = FixedOffset::east(9*3600).ymd(2014, 11, 28).and_hms_nano(21, 45, 59, 324310806);
+//! let dt = FixedOffset::east_opt(9*3600).unwrap().from_local_datetime(&NaiveDate::from_ymd_opt(2014, 11, 28).unwrap().and_hms_nano_opt(21, 45, 59, 324310806).unwrap()).unwrap();
 //!
 //! // property accessors
 //! assert_eq!((dt.year(), dt.month(), dt.day()), (2014, 11, 28));
@@ -189,8 +183,8 @@
 //!
 //! // time zone accessor and manipulation
 //! assert_eq!(dt.offset().fix().local_minus_utc(), 9 * 3600);
-//! assert_eq!(dt.timezone(), FixedOffset::east(9 * 3600));
-//! assert_eq!(dt.with_timezone(&Utc), Utc.ymd(2014, 11, 28).and_hms_nano(12, 45, 59, 324310806));
+//! assert_eq!(dt.timezone(), FixedOffset::east_opt(9 * 3600).unwrap());
+//! assert_eq!(dt.with_timezone(&Utc), NaiveDate::from_ymd_opt(2014, 11, 28).unwrap().and_hms_nano_opt(12, 45, 59, 324310806).unwrap().and_local_timezone(Utc).unwrap());
 //!
 //! // a sample of property manipulations (validates dynamically)
 //! assert_eq!(dt.with_day(29).unwrap().weekday(), Weekday::Sat); // 2014-11-29 is Saturday
@@ -198,14 +192,14 @@
 //! assert_eq!(dt.with_year(-300).unwrap().num_days_from_ce(), -109606); // November 29, 301 BCE
 //!
 //! // arithmetic operations
-//! let dt1 = Utc.ymd(2014, 11, 14).and_hms(8, 9, 10);
-//! let dt2 = Utc.ymd(2014, 11, 14).and_hms(10, 9, 8);
+//! let dt1 = Utc.with_ymd_and_hms(2014, 11, 14, 8, 9, 10).unwrap();
+//! let dt2 = Utc.with_ymd_and_hms(2014, 11, 14, 10, 9, 8).unwrap();
 //! assert_eq!(dt1.signed_duration_since(dt2), Duration::seconds(-2 * 3600 + 2));
 //! assert_eq!(dt2.signed_duration_since(dt1), Duration::seconds(2 * 3600 - 2));
-//! assert_eq!(Utc.ymd(1970, 1, 1).and_hms(0, 0, 0) + Duration::seconds(1_000_000_000),
-//!            Utc.ymd(2001, 9, 9).and_hms(1, 46, 40));
-//! assert_eq!(Utc.ymd(1970, 1, 1).and_hms(0, 0, 0) - Duration::seconds(1_000_000_000),
-//!            Utc.ymd(1938, 4, 24).and_hms(22, 13, 20));
+//! assert_eq!(Utc.with_ymd_and_hms(1970, 1, 1, 0, 0, 0).unwrap() + Duration::seconds(1_000_000_000),
+//!            Utc.with_ymd_and_hms(2001, 9, 9, 1, 46, 40).unwrap());
+//! assert_eq!(Utc.with_ymd_and_hms(1970, 1, 1, 0, 0, 0).unwrap() - Duration::seconds(1_000_000_000),
+//!            Utc.with_ymd_and_hms(1938, 4, 24, 22, 13, 20).unwrap());
 //! ```
 //!
 //! ### Formatting and Parsing
@@ -232,11 +226,12 @@
 //! The `unstable-locales` feature requires and implies at least the `alloc` feature.
 //!
 //! ```rust
+//! # #[allow(unused_imports)]
 //! use chrono::prelude::*;
 //!
 //! # #[cfg(feature = "unstable-locales")]
 //! # fn test() {
-//! let dt = Utc.ymd(2014, 11, 28).and_hms(12, 0, 9);
+//! let dt = Utc.with_ymd_and_hms(2014, 11, 28, 12, 0, 9).unwrap();
 //! assert_eq!(dt.format("%Y-%m-%d %H:%M:%S").to_string(), "2014-11-28 12:00:09");
 //! assert_eq!(dt.format("%a %b %e %T %Y").to_string(), "Fri Nov 28 12:00:09 2014");
 //! assert_eq!(dt.format_localized("%A %e %B %Y, %T", Locale::fr_BE).to_string(), "vendredi 28 novembre 2014, 12:00:09");
@@ -248,7 +243,7 @@
 //! assert_eq!(format!("{:?}", dt), "2014-11-28T12:00:09Z");
 //!
 //! // Note that milli/nanoseconds are only printed if they are non-zero
-//! let dt_nano = Utc.ymd(2014, 11, 28).and_hms_nano(12, 0, 9, 1);
+//! let dt_nano = NaiveDate::from_ymd_opt(2014, 11, 28).unwrap().and_hms_nano_opt(12, 0, 9, 1).unwrap().and_local_timezone(Utc).unwrap();
 //! assert_eq!(format!("{:?}", dt_nano), "2014-11-28T12:00:09.000000001Z");
 //! # }
 //! # #[cfg(not(feature = "unstable-locales"))]
@@ -288,8 +283,8 @@
 //! ```rust
 //! use chrono::prelude::*;
 //!
-//! let dt = Utc.ymd(2014, 11, 28).and_hms(12, 0, 9);
-//! let fixed_dt = dt.with_timezone(&FixedOffset::east(9*3600));
+//! let dt = Utc.with_ymd_and_hms(2014, 11, 28, 12, 0, 9).unwrap();
+//! let fixed_dt = dt.with_timezone(&FixedOffset::east_opt(9*3600).unwrap());
 //!
 //! // method 1
 //! assert_eq!("2014-11-28T12:00:09Z".parse::<DateTime<Utc>>(), Ok(dt.clone()));
@@ -329,45 +324,19 @@
 //! [`DateTime.timestamp_subsec_nanos`](./struct.DateTime.html#method.timestamp_subsec_nanos)
 //! to get the number of additional number of nanoseconds.
 //!
-//! ```rust
+#![cfg_attr(not(feature = "std"), doc = "```ignore")]
+#![cfg_attr(feature = "std", doc = "```rust")]
 //! // We need the trait in scope to use Utc::timestamp().
 //! use chrono::{DateTime, TimeZone, Utc};
 //!
 //! // Construct a datetime from epoch:
-//! let dt = Utc.timestamp(1_500_000_000, 0);
+//! let dt = Utc.timestamp_opt(1_500_000_000, 0).unwrap();
 //! assert_eq!(dt.to_rfc2822(), "Fri, 14 Jul 2017 02:40:00 +0000");
 //!
 //! // Get epoch value from a datetime:
 //! let dt = DateTime::parse_from_rfc2822("Fri, 14 Jul 2017 02:40:00 +0000").unwrap();
 //! assert_eq!(dt.timestamp(), 1_500_000_000);
 //! ```
-//!
-//! ### Individual date
-//!
-//! Chrono also provides an individual date type ([**`Date`**](./struct.Date.html)).
-//! It also has time zones attached, and have to be constructed via time zones.
-//! Most operations available to `DateTime` are also available to `Date` whenever appropriate.
-//!
-//! ```rust
-//! use chrono::prelude::*;
-//! use chrono::offset::LocalResult;
-//!
-//! # // these *may* fail, but only very rarely. just rerun the test if you were that unfortunate ;)
-//! assert_eq!(Utc::today(), Utc::now().date());
-//! assert_eq!(Local::today(), Local::now().date());
-//!
-//! assert_eq!(Utc.ymd(2014, 11, 28).weekday(), Weekday::Fri);
-//! assert_eq!(Utc.ymd_opt(2014, 11, 31), LocalResult::None);
-//! assert_eq!(Utc.ymd(2014, 11, 28).and_hms_milli(7, 8, 9, 10).format("%H%M%S").to_string(),
-//!            "070809");
-//! ```
-//!
-//! There is no timezone-aware `Time` due to the lack of usefulness and also the complexity.
-//!
-//! `DateTime` has [`date`](./struct.DateTime.html#method.date) method
-//! which returns a `Date` which represents its date component.
-//! There is also a [`time`](./struct.DateTime.html#method.time) method,
-//! which simply returns a naive local time described below.
 //!
 //! ### Naive date and time
 //!
@@ -404,7 +373,7 @@
 //! Chrono inherently does not support an inaccurate or partial date and time representation.
 //! Any operation that can be ambiguous will return `None` in such cases.
 //! For example, "a month later" of 2014-01-30 is not well-defined
-//! and consequently `Utc.ymd(2014, 1, 30).with_month(2)` returns `None`.
+//! and consequently `Utc.ymd_opt(2014, 1, 30).unwrap().with_month(2)` returns `None`.
 //!
 //! Non ISO week handling is not yet supported.
 //! For now you can use the [chrono_ext](https://crates.io/crates/chrono_ext)
@@ -413,7 +382,7 @@
 //! Advanced time zone handling is not yet supported.
 //! For now you can try the [Chrono-tz](https://github.com/chronotope/chrono-tz/) crate instead.
 
-#![doc(html_root_url = "https://docs.rs/chrono/latest/")]
+#![doc(html_root_url = "https://docs.rs/chrono/latest/", test(attr(deny(warnings))))]
 #![cfg_attr(feature = "bench", feature(test))] // lib stability features as per RFC #507
 #![deny(missing_docs)]
 #![deny(missing_debug_implementations)]
@@ -423,13 +392,17 @@
 // can remove this if/when rustc-serialize support is removed
 // keeps clippy happy in the meantime
 #![cfg_attr(feature = "rustc-serialize", allow(deprecated))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 #[cfg(feature = "oldtime")]
+#[cfg_attr(docsrs, doc(cfg(feature = "oldtime")))]
 extern crate time as oldtime;
 #[cfg(not(feature = "oldtime"))]
 mod oldtime;
 // this reexport is to aid the transition and should not be in the prelude!
-pub use oldtime::Duration;
+pub use oldtime::{Duration, OutOfRangeError};
+
+use core::fmt;
 
 #[cfg(feature = "__doctest")]
 #[cfg_attr(feature = "__doctest", cfg(doctest))]
@@ -442,11 +415,14 @@ doctest!("../README.md");
 /// A convenience module appropriate for glob imports (`use chrono::prelude::*;`).
 pub mod prelude {
     #[doc(no_inline)]
+    #[allow(deprecated)]
     pub use crate::Date;
     #[cfg(feature = "clock")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "clock")))]
     #[doc(no_inline)]
     pub use crate::Local;
     #[cfg(feature = "unstable-locales")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "unstable-locales")))]
     #[doc(no_inline)]
     pub use crate::Locale;
     #[doc(no_inline)]
@@ -469,6 +445,7 @@ pub use date::{Date, MAX_DATE, MIN_DATE};
 
 mod datetime;
 #[cfg(feature = "rustc-serialize")]
+#[cfg_attr(docsrs, doc(cfg(feature = "rustc-serialize")))]
 pub use datetime::rustc_serialize::TsSeconds;
 #[allow(deprecated)]
 pub use datetime::{DateTime, SecondsFormat, MAX_DATETIME, MIN_DATETIME};
@@ -476,15 +453,17 @@ pub use datetime::{DateTime, SecondsFormat, MAX_DATETIME, MIN_DATETIME};
 pub mod format;
 /// L10n locales.
 #[cfg(feature = "unstable-locales")]
+#[cfg_attr(docsrs, doc(cfg(feature = "unstable-locales")))]
 pub use format::Locale;
 pub use format::{ParseError, ParseResult};
 
 pub mod naive;
 #[doc(no_inline)]
-pub use naive::{IsoWeek, NaiveDate, NaiveDateTime, NaiveTime, NaiveWeek};
+pub use naive::{Days, IsoWeek, NaiveDate, NaiveDateTime, NaiveTime, NaiveWeek};
 
 pub mod offset;
 #[cfg(feature = "clock")]
+#[cfg_attr(docsrs, doc(cfg(feature = "clock")))]
 #[doc(no_inline)]
 pub use offset::Local;
 #[doc(no_inline)]
@@ -506,27 +485,44 @@ pub use traits::{Datelike, Timelike};
 #[doc(hidden)]
 pub use naive::__BenchYearFlags;
 
-/// Serialization/Deserialization in alternate formats
+/// Serialization/Deserialization with serde.
 ///
-/// The various modules in here are intended to be used with serde's [`with`
-/// annotation][1] to serialize as something other than the default [RFC
-/// 3339][2] format.
+/// This module provides default implementations for `DateTime` using the [RFC 3339][1] format and various
+/// alternatives for use with serde's [`with` annotation][2].
 ///
-/// [1]: https://serde.rs/attributes.html#field-attributes
-/// [2]: https://tools.ietf.org/html/rfc3339
+/// *Available on crate feature 'serde' only.*
+///
+/// [1]: https://tools.ietf.org/html/rfc3339
+/// [2]: https://serde.rs/field-attrs.html#with
 #[cfg(feature = "serde")]
+#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 pub mod serde {
     pub use super::datetime::serde::*;
 }
 
-/// MSRV 1.42
-#[cfg(test)]
-#[macro_export]
-macro_rules! matches {
-    ($expression:expr, $(|)? $( $pattern:pat )|+ $( if $guard: expr )? $(,)?) => {
-        match $expression {
-            $( $pattern )|+ $( if $guard )? => true,
-            _ => false
-        }
+/// Out of range error type used in various converting APIs
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+pub struct OutOfRange {
+    _private: (),
+}
+
+impl OutOfRange {
+    const fn new() -> OutOfRange {
+        OutOfRange { _private: () }
     }
 }
+
+impl fmt::Display for OutOfRange {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "out of range")
+    }
+}
+
+impl fmt::Debug for OutOfRange {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "out of range")
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for OutOfRange {}

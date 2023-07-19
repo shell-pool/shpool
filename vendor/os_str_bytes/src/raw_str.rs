@@ -38,22 +38,15 @@ if_checked_conversions! {
 
 #[cfg(not(feature = "memchr"))]
 fn find(string: &[u8], pat: &[u8]) -> Option<usize> {
-    for i in 0..=string.len().checked_sub(pat.len())? {
-        if string[i..].starts_with(pat) {
-            return Some(i);
-        }
-    }
-    None
+    (0..=string.len().checked_sub(pat.len())?)
+        .find(|&x| string[x..].starts_with(pat))
 }
 
 #[cfg(not(feature = "memchr"))]
 fn rfind(string: &[u8], pat: &[u8]) -> Option<usize> {
-    for i in (pat.len()..=string.len()).rev() {
-        if string[..i].ends_with(pat) {
-            return Some(i - pat.len());
-        }
-    }
-    None
+    (pat.len()..=string.len())
+        .rfind(|&x| string[..x].ends_with(pat))
+        .map(|x| x - pat.len())
 }
 
 #[allow(clippy::missing_safety_doc)]
@@ -272,8 +265,9 @@ impl RawOsStr {
     #[must_use]
     #[track_caller]
     pub unsafe fn from_raw_bytes_unchecked(string: &[u8]) -> &Self {
-        #[cfg(debug_assertions)]
-        expect_encoded!(raw::validate_bytes(string));
+        if cfg!(debug_assertions) {
+            expect_encoded!(raw::validate_bytes(string));
+        }
 
         Self::from_inner(string)
     }
@@ -538,7 +532,7 @@ impl RawOsStr {
     /// use os_str_bytes::RawOsStr;
     ///
     /// let raw = RawOsStr::from_str("foobar");
-    /// assert_eq!(["f", "", "bar"], *raw.split("o").collect::<Vec<_>>());
+    /// assert!(raw.split("o").eq(["f", "", "bar"]));
     /// ```
     #[inline]
     #[must_use]
@@ -1138,8 +1132,9 @@ impl RawOsString {
     #[must_use]
     #[track_caller]
     pub unsafe fn from_raw_vec_unchecked(string: Vec<u8>) -> Self {
-        #[cfg(debug_assertions)]
-        expect_encoded!(raw::validate_bytes(&string));
+        if cfg!(debug_assertions) {
+            expect_encoded!(raw::validate_bytes(&string));
+        }
 
         Self(string)
     }

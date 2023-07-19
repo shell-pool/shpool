@@ -87,6 +87,36 @@ pub enum WrapAlgorithm {
     Custom(for<'a, 'b> fn(words: &'b [Word<'a>], line_widths: &'b [usize]) -> Vec<&'b [Word<'a>]>),
 }
 
+impl PartialEq for WrapAlgorithm {
+    /// Compare two wrap algorithms.
+    ///
+    /// ```
+    /// use textwrap::WrapAlgorithm;
+    ///
+    /// assert_eq!(WrapAlgorithm::FirstFit, WrapAlgorithm::FirstFit);
+    /// #[cfg(feature = "smawk")] {
+    ///     assert_eq!(WrapAlgorithm::new_optimal_fit(), WrapAlgorithm::new_optimal_fit());
+    /// }
+    /// ```
+    ///
+    /// Note that `WrapAlgorithm::Custom1` values never compare equal:
+    ///
+    /// ```
+    /// use textwrap::WrapAlgorithm;
+    ///
+    /// assert_ne!(WrapAlgorithm::Custom(|words, line_widths| vec![words]),
+    ///            WrapAlgorithm::Custom(|words, line_widths| vec![words]));
+    /// ```
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (WrapAlgorithm::FirstFit, WrapAlgorithm::FirstFit) => true,
+            #[cfg(feature = "smawk")]
+            (WrapAlgorithm::OptimalFit(a), WrapAlgorithm::OptimalFit(b)) => a == b,
+            (_, _) => false,
+        }
+    }
+}
+
 impl std::fmt::Debug for WrapAlgorithm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

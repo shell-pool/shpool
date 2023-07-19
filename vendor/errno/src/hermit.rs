@@ -16,17 +16,17 @@
 
 use Errno;
 
-pub fn with_description<F, T>(_err: Errno, callback: F) -> T where
-    F: FnOnce(Result<&str, Errno>) -> T
+pub fn with_description<F, T>(_err: Errno, callback: F) -> T
+where
+    F: FnOnce(Result<&str, Errno>) -> T,
 {
     callback(Ok("unknown error"))
 }
 
-pub const STRERROR_NAME: &'static str = "strerror_r";
+pub const STRERROR_NAME: &str = "strerror_r";
 
 pub fn errno() -> Errno {
     Errno(0)
 }
 
-pub fn set_errno(_: Errno) {
-}
+pub fn set_errno(_: Errno) {}

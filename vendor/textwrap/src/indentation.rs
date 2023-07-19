@@ -134,7 +134,7 @@ pub fn dedent(s: &str) -> String {
     // We now go over the lines a second time to build the result.
     let mut result = String::new();
     for line in s.lines() {
-        if line.starts_with(&prefix) && line.chars().any(|c| !c.is_whitespace()) {
+        if line.starts_with(prefix) && line.chars().any(|c| !c.is_whitespace()) {
             let (_, tail) = line.split_at(prefix.len());
             result.push_str(tail);
         }

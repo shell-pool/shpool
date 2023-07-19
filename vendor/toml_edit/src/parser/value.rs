@@ -1,7 +1,7 @@
-use winnow::branch::alt;
-use winnow::bytes::any;
-use winnow::combinator::fail;
-use winnow::combinator::peek;
+use nom8::branch::alt;
+use nom8::bytes::any;
+use nom8::combinator::fail;
+use nom8::combinator::peek;
 
 use crate::parser::array::array;
 use crate::parser::datetime::date_time;
@@ -85,7 +85,7 @@ pub(crate) fn value(
     }
         .with_span()
         .map_res(|(value, span)| apply_raw(value, span))
-        .parse_next(input)
+        .parse(input)
     }
 }
 
@@ -147,7 +147,7 @@ trimmed in raw strings.
         ];
         for input in inputs {
             dbg!(input);
-            let mut parsed = value(Default::default()).parse(new_input(input));
+            let mut parsed = value(Default::default()).parse(new_input(input)).finish();
             if let Ok(parsed) = &mut parsed {
                 parsed.despan(input);
             }

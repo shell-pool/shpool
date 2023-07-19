@@ -5,5 +5,10 @@ replace-with = "vendored-sources"
 git = "https://github.com/ethanpailes/pty-rs"
 replace-with = "vendored-sources"
 
+[source."git+https://github.com/ethanpailes/vt100-rust?branch=main"]
+git = "https://github.com/ethanpailes/vt100-rust"
+branch = "main"
+replace-with = "vendored-sources"
+
 [source.vendored-sources]
 directory = "vendor"

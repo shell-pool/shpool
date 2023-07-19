@@ -29,7 +29,7 @@
 /// ```
 #[macro_export(local_inner_macros)]
 macro_rules! log {
-    // log!(target: "my_target", Level::Info; key1 = 42, key2 = true; "a {} event", "log");
+    // log!(target: "my_target", Level::Info, key1 = 42, key2 = true; "a {} event", "log");
     (target: $target:expr, $lvl:expr, $($key:tt = $value:expr),+; $($arg:tt)+) => ({
         let lvl = $lvl;
         if lvl <= $crate::STATIC_MAX_LEVEL && lvl <= $crate::max_level() {
@@ -42,7 +42,7 @@ macro_rules! log {
         }
     });
 
-    // log!(target: "my_target", Level::Info; "a {} event", "log");
+    // log!(target: "my_target", Level::Info, "a {} event", "log");
     (target: $target:expr, $lvl:expr, $($arg:tt)+) => ({
         let lvl = $lvl;
         if lvl <= $crate::STATIC_MAX_LEVEL && lvl <= $crate::max_level() {
@@ -119,7 +119,7 @@ macro_rules! warn {
 /// let conn_info = Connection { port: 40, speed: 3.20 };
 ///
 /// info!("Connected to port {} at {} Mb/s", conn_info.port, conn_info.speed);
-/// info!(target: "connection_events", "Successfull connection, port: {}, speed: {}",
+/// info!(target: "connection_events", "Successful connection, port: {}, speed: {}",
 ///       conn_info.port, conn_info.speed);
 /// # }
 /// ```

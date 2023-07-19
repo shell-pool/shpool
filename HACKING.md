@@ -202,6 +202,41 @@ Download-Rate:               7.31 MB/s
 
 pretty good.
 
+## Debugging with `rr`
+
+The `rr` tool allows you to record and replay executions under a debugger,
+which allows you to do fun stuff like step backwards. Additionally, when
+`rr` records a trace, it records the trace for the whole process tree, so
+you can debug events that happen in subprocesses. `rr` only works on linux,
+and requires certain performance counters, so it does not work well in
+many virtualized environments.
+
+To record a test under `rr`, build the test binary with
+
+```
+$ cargo test --test <test-suite-name> --no-run
+```
+
+then run
+
+```
+$ SHPOOL_LEAVE_TEST_LOGS=true rr ./path/to/test/exe <test_name> --nocapture
+```
+
+to replay, inspecting a subprocess, first run
+
+```
+$ rr ps
+```
+
+to view all the various processes that got launched, then run
+
+```
+$ rr replay --debugger=rust-gdb --onprocess=<PID>
+```
+
+where `<PID>` is taken from the output of `rr ps`.
+
 ## Preserving Logs in Tests
 
 By default, tests will clean up log files emitted by the various

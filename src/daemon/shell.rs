@@ -103,6 +103,7 @@ impl SessionInner {
     /// Spawn the reader thread which continually reads from the pty
     /// and sends data both to the output spool and to the client,
     /// if one is attached.
+    #[instrument(skip_all, fields(s = self.name))]
     pub fn spawn_reader(
         &self,
         tty_size: tty::Size,
@@ -166,7 +167,8 @@ impl SessionInner {
 
                                 // Always instantly resize the spool, since we don't
                                 // need to inject a delay into that.
-                                output_spool.set_size(conn.size.rows, conn.size.cols);
+                                output_spool.screen_mut().set_size(
+                                    conn.size.rows, conn.size.cols);
                                 resize_cmd = Some(ResizeCmd {
                                     size: conn.size.clone(),
                                     when: time::Instant::now().add(REATTACH_RESIZE_DELAY),
@@ -196,7 +198,8 @@ impl SessionInner {
                     recv(tty_size_change) -> new_size => {
                         if let Ok(size) = new_size {
                             info!("resize size={:?}", size);
-                            output_spool.set_size(size.rows, size.cols);
+                            output_spool.screen_mut()
+                                .set_size(size.rows, size.cols);
                             resize_cmd = Some(ResizeCmd {
                                 size: size,
                                 // No delay needed for ordinary resizes, just
@@ -228,27 +231,24 @@ impl SessionInner {
 
                 if do_reattach {
                     use config::SessionRestoreMode::*;
-                    let (do_restore, reset_spool_size_to) = match session_restore_mode {
-                        Simple => (false, None),
-                        Screen => (true, None),
-                        Lines(nlines) => {
-                            let old_size = output_spool.screen().size();
-                            output_spool.set_size(nlines, old_size.1);
-                            (true, Some(old_size))
-                        }
+
+                    info!("executing reattach protocol (mode={:?})", session_restore_mode);
+                    let restore_buf = match session_restore_mode {
+                        Simple => vec![],
+                        Screen => output_spool.screen().contents_formatted(),
+                        Lines(nlines) => output_spool.screen()
+                            .last_n_rows_contents_formatted(nlines),
                     };
-                    if let (true, Some(conn)) = (do_restore, client_conn.as_ref()) {
-                        let screen = output_spool.screen().contents_formatted();
-                        let chunk =
-                            protocol::Chunk { kind: protocol::ChunkKind::Data, buf: &screen[..] };
+                    if let (true, Some(conn)) = (restore_buf.len() > 0, client_conn.as_ref()) {
+                        trace!("restore chunk='{}'", String::from_utf8_lossy(&restore_buf[..]));
+                        let chunk = protocol::Chunk {
+                            kind: protocol::ChunkKind::Data,
+                            buf: &restore_buf[..],
+                        };
 
                         let mut s = conn.sink.lock().unwrap();
                         if let Err(err) = chunk.write_to(&mut *s).and_then(|_| s.flush()) {
-                            warn!("write err session-restoring screen: {:?}", err);
-                        }
-
-                        if let Some((rows, cols)) = reset_spool_size_to {
-                            output_spool.set_size(rows, cols);
+                            warn!("write err session-restor buf: {:?}", err);
                         }
                     }
                 }

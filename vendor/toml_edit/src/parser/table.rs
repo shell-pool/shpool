@@ -2,10 +2,10 @@ use std::cell::RefCell;
 #[allow(unused_imports)]
 use std::ops::DerefMut;
 
-use winnow::bytes::take;
-use winnow::combinator::cut_err;
-use winnow::combinator::peek;
-use winnow::sequence::delimited;
+use nom8::bytes::take;
+use nom8::combinator::cut;
+use nom8::combinator::peek;
+use nom8::sequence::delimited;
 
 // https://github.com/rust-lang/rust/issues/41358
 use crate::parser::key::key;
@@ -32,18 +32,18 @@ pub(crate) fn std_table<'s, 'i>(
         (
             delimited(
                 STD_TABLE_OPEN,
-                cut_err(key),
-                cut_err(STD_TABLE_CLOSE)
+                cut(key),
+                cut(STD_TABLE_CLOSE)
                     .context(Context::Expected(ParserValue::CharLiteral('.')))
                     .context(Context::Expected(ParserValue::StringLiteral("]"))),
             )
             .with_span(),
-            cut_err(line_trailing)
+            cut(line_trailing)
                 .context(Context::Expected(ParserValue::CharLiteral('\n')))
                 .context(Context::Expected(ParserValue::CharLiteral('#'))),
         )
             .map_res(|((h, span), t)| state.borrow_mut().deref_mut().on_std_header(h, t, span))
-            .parse_next(i)
+            .parse(i)
     }
 }
 
@@ -57,18 +57,18 @@ pub(crate) fn array_table<'s, 'i>(
         (
             delimited(
                 ARRAY_TABLE_OPEN,
-                cut_err(key),
-                cut_err(ARRAY_TABLE_CLOSE)
+                cut(key),
+                cut(ARRAY_TABLE_CLOSE)
                     .context(Context::Expected(ParserValue::CharLiteral('.')))
                     .context(Context::Expected(ParserValue::StringLiteral("]]"))),
             )
             .with_span(),
-            cut_err(line_trailing)
+            cut(line_trailing)
                 .context(Context::Expected(ParserValue::CharLiteral('\n')))
                 .context(Context::Expected(ParserValue::CharLiteral('#'))),
         )
             .map_res(|((h, span), t)| state.borrow_mut().deref_mut().on_array_header(h, t, span))
-            .parse_next(i)
+            .parse(i)
     }
 }
 
@@ -84,6 +84,6 @@ pub(crate) fn table<'s, 'i>(
             _ => std_table(state),
         )
         .context(Context::Expression("table header"))
-        .parse_next(i)
+        .parse(i)
     }
 }

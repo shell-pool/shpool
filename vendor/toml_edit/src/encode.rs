@@ -48,37 +48,6 @@ impl Encode for Key {
     }
 }
 
-impl<'k> Encode for &'k [Key] {
-    fn encode(
-        &self,
-        buf: &mut dyn Write,
-        input: Option<&str>,
-        default_decor: (&str, &str),
-    ) -> Result {
-        for (i, key) in self.iter().enumerate() {
-            let first = i == 0;
-            let last = i + 1 == self.len();
-
-            let prefix = if first {
-                default_decor.0
-            } else {
-                DEFAULT_KEY_PATH_DECOR.0
-            };
-            let suffix = if last {
-                default_decor.1
-            } else {
-                DEFAULT_KEY_PATH_DECOR.1
-            };
-
-            if !first {
-                write!(buf, ".")?;
-            }
-            key.encode(buf, input, (prefix, suffix))?;
-        }
-        Ok(())
-    }
-}
-
 impl<'k> Encode for &'k [&'k Key] {
     fn encode(
         &self,
@@ -261,33 +230,25 @@ impl Display for Document {
 
 fn visit_nested_tables<'t, F>(
     table: &'t Table,
-    path: &mut Vec<Key>,
+    path: &mut Vec<&'t Key>,
     is_array_of_tables: bool,
     callback: &mut F,
 ) -> Result
 where
-    F: FnMut(&'t Table, &Vec<Key>, bool) -> Result,
+    F: FnMut(&'t Table, &Vec<&'t Key>, bool) -> Result,
 {
-    if !table.is_dotted() {
-        callback(table, path, is_array_of_tables)?;
-    }
+    callback(table, path, is_array_of_tables)?;
 
     for kv in table.items.values() {
         match kv.value {
-            Item::Table(ref t) => {
-                let mut key = kv.key.clone();
-                if t.is_dotted() {
-                    // May have newlines and generally isn't written for standard tables
-                    key.decor_mut().clear();
-                }
-                path.push(key);
+            Item::Table(ref t) if !t.is_dotted() => {
+                path.push(&kv.key);
                 visit_nested_tables(t, path, false, callback)?;
                 path.pop();
             }
             Item::ArrayOfTables(ref a) => {
                 for t in a.iter() {
-                    let key = kv.key.clone();
-                    path.push(key);
+                    path.push(&kv.key);
                     visit_nested_tables(t, path, true, callback)?;
                     path.pop();
                 }
@@ -302,7 +263,7 @@ fn visit_table(
     buf: &mut dyn Write,
     input: Option<&str>,
     table: &Table,
-    path: &[Key],
+    path: &[&Key],
     is_array_of_tables: bool,
     first_table: &mut bool,
 ) -> Result {

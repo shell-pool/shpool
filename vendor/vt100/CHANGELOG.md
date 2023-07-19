@@ -1,5 +1,29 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+* `Parser::process_cb`, which works the same as `Parser::process` except that
+  it calls callbacks during parsing when it finds a terminal escape which is
+  potentially useful but not something that affects the screen itself.
+* Support for xterm window resize request escape codes, via the new callback
+  mechanism.
+
+### Removed
+
+* `Screen::bells_diff`, `Screen::audible_bell_count`,
+  `Screen::visual_bell_count`, and `Screen::errors` have been removed in favor
+  of the new callback api described above.
+* `Cell` no longer implements `Default`.
+* `Screen` no longer implements `vte::Perform`.
+
+### Changed
+
+* `Parser::set_size` and `Parser::set_scrollback` have been moved to methods
+  on `Screen`, and `Parser::screen_mut` was added to get a mutable reference
+  to the screen.
+
 ## [0.15.2] - 2023-02-05
 
 ### Changed

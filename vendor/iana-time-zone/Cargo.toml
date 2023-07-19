@@ -12,8 +12,12 @@
 [package]
 edition = "2018"
 name = "iana-time-zone"
-version = "0.1.48"
-authors = ["Andrew Straw <strawman@astraw.com>"]
+version = "0.1.57"
+authors = [
+    "Andrew Straw <strawman@astraw.com>",
+    "René Kijewski <rene.kijewski@fu-berlin.de>",
+    "Ryan Lopopolo <rjl@hyperbo.la>",
+]
 description = "get the IANA time zone for the current system"
 readme = "README.md"
 keywords = [
@@ -35,7 +39,7 @@ fallback = []
 version = "0.8.3"
 
 [target."cfg(target_arch = \"wasm32\")".dependencies.js-sys]
-version = "0.3.46"
+version = "0.3.50"
 
 [target."cfg(target_arch = \"wasm32\")".dependencies.wasm-bindgen]
 version = "0.2.70"
@@ -46,16 +50,9 @@ version = "0.3"
 [target."cfg(target_os = \"android\")".dependencies.android_system_properties]
 version = "0.1.5"
 
-[target."cfg(target_os = \"android\")".dependencies.once_cell]
-version = "1.13.1"
+[target."cfg(target_os = \"haiku\")".dependencies.iana-time-zone-haiku]
+version = "0.1.1"
 
-[target."cfg(target_os = \"windows\")".dependencies.winapi]
-version = "0.3.9"
-features = [
-    "activation",
-    "combaseapi",
-    "objbase",
-    "roapi",
-    "winerror",
-    "winstring",
-]
+[target."cfg(target_os = \"windows\")".dependencies.windows]
+version = "0.48.0"
+features = ["Globalization"]

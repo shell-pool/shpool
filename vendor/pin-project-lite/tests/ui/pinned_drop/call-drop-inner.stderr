@@ -2,7 +2,10 @@ error[E0061]: this function takes 0 arguments but 1 argument was supplied
   --> tests/ui/pinned_drop/call-drop-inner.rs:10:13
    |
 10 |             __drop_inner(this);
-   |             ^^^^^^^^^^^^ ---- argument unexpected
+   |             ^^^^^^^^^^^^ ----
+   |                          |
+   |                          unexpected argument of type `Pin<&mut S>`
+   |                          help: remove the extra argument
    |
 note: function defined here
   --> tests/ui/pinned_drop/call-drop-inner.rs:3:1
@@ -15,8 +18,4 @@ note: function defined here
 12 | |     }
 13 | | }
    | |_^
-   = note: this error originates in the macro `$crate::__pin_project_make_drop_impl` (in Nightly builds, run with -Z macro-backtrace for more info)
-help: remove the extra argument
-   |
-10 |             __drop_inner();
-   |             ~~~~~~~~~~~~~~
+   = note: this error originates in the macro `$crate::__pin_project_make_drop_impl` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)

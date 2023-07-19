@@ -1,10 +1,10 @@
 //! Building blocks for deserializing basic values using the `IntoDeserializer`
 //! trait.
 //!
-//! ```edition2018
+//! ```edition2021
+//! use serde::de::{value, Deserialize, IntoDeserializer};
+//! use serde_derive::Deserialize;
 //! use std::str::FromStr;
-//! use serde::Deserialize;
-//! use serde::de::{value, IntoDeserializer};
 //!
 //! #[derive(Deserialize)]
 //! enum Setting {
@@ -251,7 +251,7 @@ macro_rules! primitive_deserializer {
             #[allow(missing_docs)]
             pub fn new(value: $ty) -> Self {
                 $name {
-                    value: value,
+                    value,
                     marker: PhantomData,
                 }
             }
@@ -330,7 +330,7 @@ impl<E> U32Deserializer<E> {
     #[allow(missing_docs)]
     pub fn new(value: u32) -> Self {
         U32Deserializer {
-            value: value,
+            value,
             marker: PhantomData,
         }
     }
@@ -419,7 +419,7 @@ impl<'a, E> StrDeserializer<'a, E> {
     #[allow(missing_docs)]
     pub fn new(value: &'a str) -> Self {
         StrDeserializer {
-            value: value,
+            value,
             marker: PhantomData,
         }
     }
@@ -498,7 +498,7 @@ impl<'de, E> BorrowedStrDeserializer<'de, E> {
     /// Create a new borrowed deserializer from the given string.
     pub fn new(value: &'de str) -> BorrowedStrDeserializer<'de, E> {
         BorrowedStrDeserializer {
-            value: value,
+            value,
             marker: PhantomData,
         }
     }
@@ -598,7 +598,7 @@ impl<E> StringDeserializer<E> {
     #[allow(missing_docs)]
     pub fn new(value: String) -> Self {
         StringDeserializer {
-            value: value,
+            value,
             marker: PhantomData,
         }
     }
@@ -701,7 +701,7 @@ impl<'a, E> CowStrDeserializer<'a, E> {
     #[allow(missing_docs)]
     pub fn new(value: Cow<'a, str>) -> Self {
         CowStrDeserializer {
-            value: value,
+            value,
             marker: PhantomData,
         }
     }
@@ -783,7 +783,7 @@ impl<'a, E> BytesDeserializer<'a, E> {
     /// Create a new deserializer from the given bytes.
     pub fn new(value: &'a [u8]) -> Self {
         BytesDeserializer {
-            value: value,
+            value,
             marker: PhantomData,
         }
     }
@@ -842,7 +842,7 @@ impl<'de, E> BorrowedBytesDeserializer<'de, E> {
     /// Create a new borrowed deserializer from the given borrowed bytes.
     pub fn new(value: &'de [u8]) -> Self {
         BorrowedBytesDeserializer {
-            value: value,
+            value,
             marker: PhantomData,
         }
     }
@@ -1053,7 +1053,7 @@ pub struct SeqAccessDeserializer<A> {
 impl<A> SeqAccessDeserializer<A> {
     /// Construct a new `SeqAccessDeserializer<A>`.
     pub fn new(seq: A) -> Self {
-        SeqAccessDeserializer { seq: seq }
+        SeqAccessDeserializer { seq }
     }
 }
 
@@ -1454,7 +1454,7 @@ pub struct MapAccessDeserializer<A> {
 impl<A> MapAccessDeserializer<A> {
     /// Construct a new `MapAccessDeserializer<A>`.
     pub fn new(map: A) -> Self {
-        MapAccessDeserializer { map: map }
+        MapAccessDeserializer { map }
     }
 }
 
@@ -1501,10 +1501,45 @@ where
     where
         T: de::DeserializeSeed<'de>,
     {
-        match self.map.next_key_seed(seed)? {
+        match try!(self.map.next_key_seed(seed)) {
             Some(key) => Ok((key, private::map_as_enum(self.map))),
             None => Err(de::Error::invalid_type(de::Unexpected::Map, &"enum")),
         }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+/// A deserializer holding an `EnumAccess`.
+#[derive(Clone, Debug)]
+pub struct EnumAccessDeserializer<A> {
+    access: A,
+}
+
+impl<A> EnumAccessDeserializer<A> {
+    /// Construct a new `EnumAccessDeserializer<A>`.
+    pub fn new(access: A) -> Self {
+        EnumAccessDeserializer { access }
+    }
+}
+
+impl<'de, A> de::Deserializer<'de> for EnumAccessDeserializer<A>
+where
+    A: de::EnumAccess<'de>,
+{
+    type Error = A::Error;
+
+    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        visitor.visit_enum(self.access)
+    }
+
+    forward_to_deserialize_any! {
+        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+        bytes byte_buf option unit unit_struct newtype_struct seq tuple
+        tuple_struct map struct enum identifier ignored_any
     }
 }
 
@@ -1578,7 +1613,7 @@ mod private {
     }
 
     pub fn map_as_enum<A>(map: A) -> MapAsEnum<A> {
-        MapAsEnum { map: map }
+        MapAsEnum { map }
     }
 
     impl<'de, A> VariantAccess<'de> for MapAsEnum<A>
@@ -1602,10 +1637,7 @@ mod private {
         where
             V: Visitor<'de>,
         {
-            self.map.next_value_seed(SeedTupleVariant {
-                len: len,
-                visitor: visitor,
-            })
+            self.map.next_value_seed(SeedTupleVariant { len, visitor })
         }
 
         fn struct_variant<V>(
@@ -1616,8 +1648,7 @@ mod private {
         where
             V: Visitor<'de>,
         {
-            self.map
-                .next_value_seed(SeedStructVariant { visitor: visitor })
+            self.map.next_value_seed(SeedStructVariant { visitor })
         }
     }
 

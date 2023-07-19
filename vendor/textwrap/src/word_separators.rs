@@ -122,6 +122,40 @@ pub enum WordSeparator {
     Custom(fn(line: &str) -> Box<dyn Iterator<Item = Word<'_>> + '_>),
 }
 
+impl PartialEq for WordSeparator {
+    /// Compare two word separators.
+    ///
+    /// ```
+    /// use textwrap::WordSeparator;
+    ///
+    /// assert_eq!(WordSeparator::AsciiSpace, WordSeparator::AsciiSpace);
+    /// #[cfg(feature = "unicode-linebreak")] {
+    ///     assert_eq!(WordSeparator::UnicodeBreakProperties,
+    ///                WordSeparator::UnicodeBreakProperties);
+    /// }
+    /// ```
+    ///
+    /// Note that `WordSeparator::Custom` values never compare equal:
+    ///
+    /// ```
+    /// use textwrap::WordSeparator;
+    /// use textwrap::core::Word;
+    /// fn word_separator(line: &str) -> Box<dyn Iterator<Item = Word<'_>> + '_> {
+    ///     Box::new(line.split_inclusive(' ').map(Word::from))
+    /// }
+    /// assert_ne!(WordSeparator::Custom(word_separator),
+    ///            WordSeparator::Custom(word_separator));
+    /// ```
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (WordSeparator::AsciiSpace, WordSeparator::AsciiSpace) => true,
+            #[cfg(feature = "unicode-linebreak")]
+            (WordSeparator::UnicodeBreakProperties, WordSeparator::UnicodeBreakProperties) => true,
+            (_, _) => false,
+        }
+    }
+}
+
 impl std::fmt::Debug for WordSeparator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

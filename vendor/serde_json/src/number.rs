@@ -279,6 +279,35 @@ impl Number {
         }
     }
 
+    pub(crate) fn as_f32(&self) -> Option<f32> {
+        #[cfg(not(feature = "arbitrary_precision"))]
+        match self.n {
+            N::PosInt(n) => Some(n as f32),
+            N::NegInt(n) => Some(n as f32),
+            N::Float(n) => Some(n as f32),
+        }
+        #[cfg(feature = "arbitrary_precision")]
+        self.n.parse::<f32>().ok().filter(|float| float.is_finite())
+    }
+
+    pub(crate) fn from_f32(f: f32) -> Option<Number> {
+        if f.is_finite() {
+            let n = {
+                #[cfg(not(feature = "arbitrary_precision"))]
+                {
+                    N::Float(f as f64)
+                }
+                #[cfg(feature = "arbitrary_precision")]
+                {
+                    ryu::Buffer::new().format_finite(f).to_owned()
+                }
+            };
+            Some(Number { n })
+        } else {
+            None
+        }
+    }
+
     #[cfg(feature = "arbitrary_precision")]
     /// Not public API. Only tests use this.
     #[doc(hidden)]
@@ -332,8 +361,8 @@ impl Serialize for Number {
     {
         use serde::ser::SerializeStruct;
 
-        let mut s = serializer.serialize_struct(TOKEN, 1)?;
-        s.serialize_field(TOKEN, &self.n)?;
+        let mut s = tri!(serializer.serialize_struct(TOKEN, 1));
+        tri!(s.serialize_field(TOKEN, &self.n));
         s.end()
     }
 }
@@ -377,11 +406,11 @@ impl<'de> Deserialize<'de> for Number {
             where
                 V: de::MapAccess<'de>,
             {
-                let value = visitor.next_key::<NumberKey>()?;
+                let value = tri!(visitor.next_key::<NumberKey>());
                 if value.is_none() {
                     return Err(de::Error::invalid_type(Unexpected::Map, &self));
                 }
-                let v: NumberFromString = visitor.next_value()?;
+                let v: NumberFromString = tri!(visitor.next_value());
                 Ok(v.value)
             }
         }
@@ -420,7 +449,7 @@ impl<'de> de::Deserialize<'de> for NumberKey {
             }
         }
 
-        deserializer.deserialize_identifier(FieldVisitor)?;
+        tri!(deserializer.deserialize_identifier(FieldVisitor));
         Ok(NumberKey)
     }
 }
@@ -523,7 +552,7 @@ macro_rules! deserialize_number {
         where
             V: de::Visitor<'de>,
         {
-            visitor.$visit(self.n.parse().map_err(|_| invalid_number())?)
+            visitor.$visit(tri!(self.n.parse().map_err(|_| invalid_number())))
         }
     };
 }

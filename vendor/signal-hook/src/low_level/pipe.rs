@@ -81,6 +81,11 @@ use libc::{self, c_int};
 
 use crate::SigId;
 
+#[cfg(target_os = "aix")]
+const MSG_NOWAIT: i32 = libc::MSG_NONBLOCK;
+#[cfg(not(target_os = "aix"))]
+const MSG_NOWAIT: i32 = libc::MSG_DONTWAIT;
+
 #[derive(Copy, Clone)]
 pub(crate) enum WakeMethod {
     Send,
@@ -141,7 +146,7 @@ pub(crate) fn wake(pipe: RawFd, method: WakeMethod) {
         let data = b"X" as *const _ as *const _;
         match method {
             WakeMethod::Write => libc::write(pipe, data, 1),
-            WakeMethod::Send => libc::send(pipe, data, 1, libc::MSG_DONTWAIT),
+            WakeMethod::Send => libc::send(pipe, data, 1, MSG_NOWAIT),
         };
     }
 }
@@ -170,7 +175,7 @@ pub(crate) fn wake(pipe: RawFd, method: WakeMethod) {
 /// * If it is not possible, the [`O_NONBLOCK`][libc::O_NONBLOCK] will be set on the file
 ///   descriptor and [`write`][libc::write] will be used instead.
 pub fn register_raw(signal: c_int, pipe: RawFd) -> Result<SigId, Error> {
-    let res = unsafe { libc::send(pipe, &[] as *const _, 0, libc::MSG_DONTWAIT) };
+    let res = unsafe { libc::send(pipe, &[] as *const _, 0, MSG_NOWAIT) };
     let fd = match (res, Error::last_os_error().kind()) {
         (0, _) | (-1, ErrorKind::WouldBlock) => WakeFd {
             fd: pipe,

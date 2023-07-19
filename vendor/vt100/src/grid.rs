@@ -76,7 +76,7 @@ impl Grid {
 
         self.size = size;
         for row in &mut self.rows {
-            row.resize(size.cols, crate::cell::Cell::default());
+            row.resize(size.cols, crate::Cell::new());
         }
         self.rows.resize(usize::from(size.rows), self.new_row());
 
@@ -114,6 +114,39 @@ impl Grid {
     pub fn restore_cursor(&mut self) {
         self.pos = self.saved_pos;
         self.origin_mode = self.saved_origin_mode;
+    }
+
+    /// Return the last n rows, unless there is insufficient scrollback
+    /// to do so, in which case, return as many rows as possible.
+    pub fn last_n_rows(&self, rows: u16) -> impl Iterator<Item = &crate::row::Row> {
+        let rows = rows as usize;
+        let (scrollback_rows, rows_rows) = if rows < self.rows.len() {
+            (0, rows)
+        } else {
+            (rows - self.rows.len(), self.rows.len())
+        };
+
+        // At this point, rows_rows is always <= self.rows.len() by construction,
+        // but that might not be the case for scrollback_rows. We can't skip
+        // a negative number of items, so we need to trim.
+        assert!(rows_rows <= self.rows.len());
+        let scrollback_skip = if scrollback_rows < self.scrollback.len() {
+            self.scrollback.len() - scrollback_rows
+        } else {
+            0
+        };
+
+        let rows_skip = if (self.pos.row as usize) < rows_rows {
+            0
+        } else {
+            self.pos.row as usize - rows_rows
+        };
+        assert!(rows_skip + rows_rows <= self.rows.len());
+
+        self.scrollback
+            .iter()
+            .skip(scrollback_skip)
+            .chain(self.rows.iter().skip(rows_skip).take(rows_rows))
     }
 
     pub fn visible_rows(&self) -> impl Iterator<Item = &crate::row::Row> {
@@ -156,18 +189,15 @@ impl Grid {
             .unwrap()
     }
 
-    pub fn visible_cell(&self, pos: Pos) -> Option<&crate::cell::Cell> {
+    pub fn visible_cell(&self, pos: Pos) -> Option<&crate::Cell> {
         self.visible_row(pos.row).and_then(|r| r.get(pos.col))
     }
 
-    pub fn drawing_cell(&self, pos: Pos) -> Option<&crate::cell::Cell> {
+    pub fn drawing_cell(&self, pos: Pos) -> Option<&crate::Cell> {
         self.drawing_row(pos.row).and_then(|r| r.get(pos.col))
     }
 
-    pub fn drawing_cell_mut(
-        &mut self,
-        pos: Pos,
-    ) -> Option<&mut crate::cell::Cell> {
+    pub fn drawing_cell_mut(&mut self, pos: Pos) -> Option<&mut crate::Cell> {
         self.drawing_row_mut(pos.row)
             .and_then(|r| r.get_mut(pos.col))
     }
@@ -199,17 +229,26 @@ impl Grid {
         }
     }
 
-    pub fn write_contents_formatted(
+    /// Write data to draw the contents contains in `rows`, including
+    /// sufficent control codes to redraw the terminal and establish correct
+    /// terminal state.
+    ///
+    /// To write contents describing the currently visible screen,
+    /// pass `self.visible_rows()` as the rows iterator.
+    pub fn write_contents_formatted_from_rows<'a, R>(
         &self,
+        rows: R,
         contents: &mut Vec<u8>,
-    ) -> crate::attrs::Attrs {
+    ) -> crate::attrs::Attrs
+        where R: Iterator<Item = &'a crate::row::Row>
+    {
         crate::term::ClearAttrs::default().write_buf(contents);
         crate::term::ClearScreen::default().write_buf(contents);
 
         let mut prev_attrs = crate::attrs::Attrs::default();
         let mut prev_pos = Pos::default();
         let mut wrapping = false;
-        for (i, row) in self.visible_rows().enumerate() {
+        for (i, row) in rows.enumerate() {
             // we limit the number of cols to a u16 (see Size), so
             // visible_rows() can never return more rows than will fit
             let i = i.try_into().unwrap();
@@ -499,7 +538,7 @@ impl Grid {
             if wide {
                 row.get_mut(pos.col).unwrap().set_wide_continuation(false);
             }
-            row.insert(pos.col, crate::cell::Cell::default());
+            row.insert(pos.col, crate::Cell::new());
             if wide {
                 row.get_mut(pos.col).unwrap().set_wide_continuation(true);
             }
@@ -514,7 +553,7 @@ impl Grid {
         for _ in 0..(count.min(size.cols - pos.col)) {
             row.remove(pos.col);
         }
-        row.resize(size.cols, crate::cell::Cell::default());
+        row.resize(size.cols, crate::Cell::new());
     }
 
     pub fn erase_cells(&mut self, count: u16, attrs: crate::attrs::Attrs) {

@@ -1,5 +1,6 @@
-use pin_project_lite::pin_project;
 use std::pin::Pin;
+
+use pin_project_lite::pin_project;
 
 pin_project! {
     #[project = EnumProj]

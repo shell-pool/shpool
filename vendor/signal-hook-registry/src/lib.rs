@@ -158,7 +158,10 @@ impl Slot {
     fn new(signal: libc::c_int) -> Result<Self, Error> {
         // C data structure, expected to be zeroed out.
         let mut new: libc::sigaction = unsafe { mem::zeroed() };
-        new.sa_sigaction = handler as usize;
+        #[cfg(not(target_os = "aix"))]
+        { new.sa_sigaction = handler as usize; }
+        #[cfg(target_os = "aix")]
+        { new.sa_union.__su_sigaction = handler; }
         // Android is broken and uses different int types than the rest (and different depending on
         // the pointer width). This converts the flags to the proper type no matter what it is on
         // the given platform.
@@ -232,7 +235,10 @@ impl Prev {
 
     #[cfg(not(windows))]
     unsafe fn execute(&self, sig: c_int, info: *mut siginfo_t, data: *mut c_void) {
+        #[cfg(not(target_os = "aix"))]
         let fptr = self.info.sa_sigaction;
+        #[cfg(target_os = "aix")]
+        let fptr = self.info.sa_union.__su_sigaction as usize;
         if fptr != 0 && fptr != libc::SIG_DFL && fptr != libc::SIG_IGN {
             // Android is broken and uses different int types than the rest (and different
             // depending on the pointer width). This converts the flags to the proper type no
@@ -344,7 +350,7 @@ extern "C" fn handler(sig: c_int, info: *mut siginfo_t, data: *mut c_void) {
     let fallback = globals.race_fallback.read();
     let sigdata = globals.data.read();
 
-    if let Some(ref slot) = sigdata.signals.get(&sig) {
+    if let Some(slot) = sigdata.signals.get(&sig) {
         unsafe { slot.prev.execute(sig, info, data) };
 
         let info = unsafe { info.as_ref() };
@@ -365,7 +371,7 @@ extern "C" fn handler(sig: c_int, info: *mut siginfo_t, data: *mut c_void) {
         for action in slot.actions.values() {
             action(info);
         }
-    } else if let Some(ref prev) = fallback.as_ref() {
+    } else if let Some(prev) = fallback.as_ref() {
         // In case we get called but don't have the slot for this signal set up yet, we are under
         // the race condition. We may have the old signal handler stored in the fallback
         // temporarily.
@@ -693,6 +699,7 @@ mod tests {
 
     /// Registering the forbidden signals is allowed in the _unchecked version.
     #[test]
+    #[allow(clippy::redundant_closure)] // Clippy, you're wrong. Because it changes the return value.
     fn forbidden_raw() {
         unsafe { register_signal_unchecked(SIGFPE, || std::process::abort()).unwrap() };
     }

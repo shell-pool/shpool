@@ -3,22 +3,33 @@
 This file lists the most important changes made in each release of
 `textwrap`.
 
-## Version 0.15.1 (2022-09-15)
+## Version 0.16.0 (2022-10-23)
 
-This release which fixes crashes in `unfill` and `refill`. It also
-adds a new option to make the line endings (`\n` or `\r\n`)
-configurable:
+This release marks `Options` as `non_exhaustive` and extends it to
+make line endings configurable, it adds new fast paths to `fill` and
+`wrap`, and it fixes crashes in `unfill` and `refill`.
 
-* [#448](https://github.com/mgeisler/textwrap/pull/448): Migrate to
-  the Rust 2021 edition.
+* [#480](https://github.com/mgeisler/textwrap/pull/480): Mark
+  `Options` as `non_exhaustive`. This will allow us to extend the
+  struct in the future without breaking backwards compatibility.
+* [#478](https://github.com/mgeisler/textwrap/pull/478): Add fast
+  paths to `fill` and `wrap`. This makes the functions 10-25 times
+  faster when the no wrapping is needed.
+* [#468](https://github.com/mgeisler/textwrap/pull/468): Fix `refill`
+  to add back correct line ending.
+* [#467](https://github.com/mgeisler/textwrap/pull/467): Fix crashes
+  in `unfill` and `refill`.
 * [#458](https://github.com/mgeisler/textwrap/pull/458): Test with
   Rust 1.56 (first compiler release with support for Rust 2021).
 * [#454](https://github.com/mgeisler/textwrap/pull/454): Make line
   endings configurable.
-* [#467](https://github.com/mgeisler/textwrap/pull/467): Fix `unfill`
-  and `refill` crashes.
-* [#468](https://github.com/mgeisler/textwrap/pull/468): Fix `refill`
-  to add back correct line ending.
+* [#448](https://github.com/mgeisler/textwrap/pull/448): Migrate to
+  the Rust 2021 edition.
+
+## Version 0.15.1 (2022-09-15)
+
+This release was yanked since it accidentally broke backwards
+compatibility with 0.15.0.
 
 ## Version 0.15.0 (2022-02-27)
 

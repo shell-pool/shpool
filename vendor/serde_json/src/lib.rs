@@ -104,7 +104,7 @@
 //! a JSON string to a Rust string with [`as_str()`] or avoiding the use of
 //! `Value` as described in the following section.
 //!
-//! [`as_str()`]: https://docs.serde.rs/serde_json/enum.Value.html#method.as_str
+//! [`as_str()`]: crate::Value::as_str
 //!
 //! The `Value` representation is sufficient for very basic tasks but can be
 //! tedious to work with for anything more significant. Error handling is
@@ -290,17 +290,17 @@
 //! For JSON support in Serde without a memory allocator, please see the
 //! [`serde-json-core`] crate.
 //!
-//! [value]: https://docs.serde.rs/serde_json/value/enum.Value.html
-//! [from_str]: https://docs.serde.rs/serde_json/de/fn.from_str.html
-//! [from_slice]: https://docs.serde.rs/serde_json/de/fn.from_slice.html
-//! [from_reader]: https://docs.serde.rs/serde_json/de/fn.from_reader.html
-//! [to_string]: https://docs.serde.rs/serde_json/ser/fn.to_string.html
-//! [to_vec]: https://docs.serde.rs/serde_json/ser/fn.to_vec.html
-//! [to_writer]: https://docs.serde.rs/serde_json/ser/fn.to_writer.html
-//! [macro]: https://docs.serde.rs/serde_json/macro.json.html
+//! [value]: crate::value::Value
+//! [from_str]: crate::de::from_str
+//! [from_slice]: crate::de::from_slice
+//! [from_reader]: crate::de::from_reader
+//! [to_string]: crate::ser::to_string
+//! [to_vec]: crate::ser::to_vec
+//! [to_writer]: crate::ser::to_writer
+//! [macro]: crate::json
 //! [`serde-json-core`]: https://github.com/rust-embedded-community/serde-json-core
 
-#![doc(html_root_url = "https://docs.rs/serde_json/1.0.89")]
+#![doc(html_root_url = "https://docs.rs/serde_json/1.0.104")]
 // Ignored clippy lints
 #![allow(
     clippy::collapsible_else_if,
@@ -315,18 +315,12 @@
     clippy::match_single_binding,
     clippy::needless_doctest_main,
     clippy::needless_late_init,
-    // clippy bug: https://github.com/rust-lang/rust-clippy/issues/8366
-    clippy::ptr_arg,
     clippy::return_self_not_must_use,
     clippy::transmute_ptr_to_ptr,
-    clippy::unnecessary_wraps,
-    // clippy bug: https://github.com/rust-lang/rust-clippy/issues/5704
-    clippy::unnested_or_patterns,
+    clippy::unnecessary_wraps
 )]
 // Ignored clippy_pedantic lints
 #![allow(
-    // buggy
-    clippy::iter_not_returning_iterator, // https://github.com/rust-lang/rust-clippy/issues/8285
     // Deserializer::from_str, into_iter
     clippy::should_implement_trait,
     // integer and float ser/de requires these sorts of casts
@@ -338,6 +332,7 @@
     clippy::enum_glob_use,
     clippy::if_not_else,
     clippy::integer_division,
+    clippy::let_underscore_untyped,
     clippy::map_err_ignore,
     clippy::match_same_arms,
     clippy::similar_names,
@@ -361,6 +356,8 @@
     clippy::missing_errors_doc,
     clippy::must_use_candidate,
 )]
+// Restrictions
+#![deny(clippy::question_mark_used)]
 #![allow(non_upper_case_globals)]
 #![deny(missing_docs)]
 #![cfg_attr(not(feature = "std"), no_std)]

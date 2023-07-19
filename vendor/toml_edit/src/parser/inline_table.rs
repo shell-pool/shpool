@@ -1,7 +1,7 @@
-use winnow::bytes::one_of;
-use winnow::combinator::cut_err;
-use winnow::multi::separated0;
-use winnow::sequence::delimited;
+use nom8::bytes::one_of;
+use nom8::combinator::cut;
+use nom8::multi::separated_list0;
+use nom8::sequence::delimited;
 
 use crate::key::Key;
 use crate::parser::errors::CustomError;
@@ -23,12 +23,12 @@ pub(crate) fn inline_table(
     move |input| {
         delimited(
             INLINE_TABLE_OPEN,
-            cut_err(inline_table_keyvals(check).map_res(|(kv, p)| table_from_pairs(kv, p))),
-            cut_err(INLINE_TABLE_CLOSE)
+            cut(inline_table_keyvals(check).map_res(|(kv, p)| table_from_pairs(kv, p))),
+            cut(INLINE_TABLE_CLOSE)
                 .context(Context::Expression("inline table"))
                 .context(Context::Expected(ParserValue::CharLiteral('}'))),
         )
-        .parse_next(input)
+        .parse(input)
     }
 }
 
@@ -104,10 +104,10 @@ fn inline_table_keyvals(
     move |input| {
         let check = check.recursing(input)?;
         (
-            separated0(keyval(check), INLINE_TABLE_SEP),
+            separated_list0(INLINE_TABLE_SEP, keyval(check)),
             ws.span().map(RawString::with_span),
         )
-            .parse_next(input)
+            .parse(input)
     }
 }
 
@@ -117,7 +117,7 @@ fn keyval(
     move |input| {
         (
             key,
-            cut_err((
+            cut((
                 one_of(KEYVAL_SEP)
                     .context(Context::Expected(ParserValue::CharLiteral('.')))
                     .context(Context::Expected(ParserValue::CharLiteral('='))),
@@ -140,7 +140,7 @@ fn keyval(
                     },
                 )
             })
-            .parse_next(input)
+            .parse(input)
     }
 }
 
@@ -159,7 +159,9 @@ mod test {
         ];
         for input in inputs {
             dbg!(input);
-            let mut parsed = inline_table(Default::default()).parse(new_input(input));
+            let mut parsed = inline_table(Default::default())
+                .parse(new_input(input))
+                .finish();
             if let Ok(parsed) = &mut parsed {
                 parsed.despan(input);
             }
@@ -172,7 +174,9 @@ mod test {
         let invalid_inputs = [r#"{a = 1e165"#, r#"{ hello = "world", a = 2, hello = 1}"#];
         for input in invalid_inputs {
             dbg!(input);
-            let mut parsed = inline_table(Default::default()).parse(new_input(input));
+            let mut parsed = inline_table(Default::default())
+                .parse(new_input(input))
+                .finish();
             if let Ok(parsed) = &mut parsed {
                 parsed.despan(input);
             }

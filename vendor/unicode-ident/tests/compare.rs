@@ -14,8 +14,6 @@ fn compare_all_implementations() {
         let thought_to_be_continue = unicode_ident::is_xid_continue(ch);
 
         // unicode-xid
-        // FIXME: unicode-xid does not support Unicode 15.0.0 yet.
-        /*
         assert_eq!(
             thought_to_be_start,
             unicode_xid::UnicodeXID::is_xid_start(ch),
@@ -26,7 +24,6 @@ fn compare_all_implementations() {
             unicode_xid::UnicodeXID::is_xid_continue(ch),
             "{ch:?}",
         );
-        */
 
         // ucd-trie
         assert_eq!(

@@ -309,11 +309,15 @@ where
             // should not be something like closed file descriptor. It could EAGAIN, but
             // that's OK in case we say MSG_DONTWAIT. If it's EINTR, then it's OK too,
             // it'll only create a spurious wakeup.
+            #[cfg(target_os = "aix")]
+            let nowait_flag = libc::MSG_NONBLOCK;
+            #[cfg(not(target_os = "aix"))]
+            let nowait_flag = libc::MSG_DONTWAIT;
             while libc::recv(
                 self.read.as_raw_fd(),
                 buff.as_mut_ptr() as *mut libc::c_void,
                 SIZE,
-                libc::MSG_DONTWAIT,
+                nowait_flag,
             ) > 0
             {}
         }
@@ -442,7 +446,7 @@ impl<SD, E: Exfiltrator> SignalIterator<SD, E> {
     /// [`PollResult::Pending`] and assume it will be called again at a later point in time.
     /// The callback may be called any number of times by this function.
     ///
-    /// If the iterator was closed by the [`close`][Handle::close] method of the associtated
+    /// If the iterator was closed by the [`close`][Handle::close] method of the associated
     /// [`Handle`] this method will return [`PollResult::Closed`].
     pub fn poll_signal<R, F>(&mut self, has_signals: &mut F) -> PollResult<E::Output>
     where

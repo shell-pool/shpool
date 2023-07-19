@@ -1,3 +1,5 @@
+#![cfg_attr(docsrs, doc(cfg(feature = "rustc-serialize")))]
+
 use super::DateTime;
 #[cfg(feature = "clock")]
 use crate::offset::Local;
@@ -35,7 +37,7 @@ impl Decodable for DateTime<FixedOffset> {
 impl Decodable for TsSeconds<FixedOffset> {
     #[allow(deprecated)]
     fn decode<D: Decoder>(d: &mut D) -> Result<TsSeconds<FixedOffset>, D::Error> {
-        from(FixedOffset::east(0).timestamp_opt(d.read_i64()?, 0), d).map(TsSeconds)
+        from(FixedOffset::east_opt(0).unwrap().timestamp_opt(d.read_i64()?, 0), d).map(TsSeconds)
     }
 }
 
@@ -56,7 +58,7 @@ pub struct TsSeconds<Tz: TimeZone>(DateTime<Tz>);
 
 #[allow(deprecated)]
 impl<Tz: TimeZone> From<TsSeconds<Tz>> for DateTime<Tz> {
-    /// Pull the inner DateTime<Tz> out
+    /// Pull the inner `DateTime<Tz>` out
     #[allow(deprecated)]
     fn from(obj: TsSeconds<Tz>) -> DateTime<Tz> {
         obj.0
@@ -80,6 +82,7 @@ impl Decodable for TsSeconds<Utc> {
 }
 
 #[cfg(feature = "clock")]
+#[cfg_attr(docsrs, doc(cfg(feature = "clock")))]
 impl Decodable for DateTime<Local> {
     fn decode<D: Decoder>(d: &mut D) -> Result<DateTime<Local>, D::Error> {
         match d.read_str()?.parse::<DateTime<FixedOffset>>() {
@@ -90,6 +93,7 @@ impl Decodable for DateTime<Local> {
 }
 
 #[cfg(feature = "clock")]
+#[cfg_attr(docsrs, doc(cfg(feature = "clock")))]
 #[allow(deprecated)]
 impl Decodable for TsSeconds<Local> {
     #[allow(deprecated)]

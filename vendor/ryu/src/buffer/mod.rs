@@ -83,6 +83,7 @@ impl Copy for Buffer {}
 
 impl Clone for Buffer {
     #[inline]
+    #[allow(clippy::incorrect_clone_impl_on_copy_type)] // false positive https://github.com/rust-lang/rust-clippy/issues/11072
     fn clone(&self) -> Self {
         Buffer::new()
     }

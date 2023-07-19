@@ -47,14 +47,17 @@
 #![allow(clippy::type_complexity)]
 
 mod attrs;
+mod callbacks;
 mod cell;
 mod grid;
 mod parser;
+mod perform;
 mod row;
 mod screen;
 mod term;
 
 pub use attrs::Color;
+pub use callbacks::Callbacks;
 pub use cell::Cell;
 pub use parser::Parser;
 pub use screen::{MouseProtocolEncoding, MouseProtocolMode, Screen};

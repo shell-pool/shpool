@@ -12,12 +12,12 @@
 [package]
 edition = "2021"
 name = "textwrap"
-version = "0.15.1"
+version = "0.16.0"
 authors = ["Martin Geisler <martin@geisler.net>"]
 exclude = [
     ".github/",
     ".gitignore",
-    "benches/",
+    "benchmarks/",
     "examples/",
     "fuzz/",
     "images/",
@@ -38,7 +38,6 @@ categories = [
 ]
 license = "MIT"
 repository = "https://github.com/mgeisler/textwrap"
-resolver = "2"
 
 [package.metadata.docs.rs]
 all-features = true
@@ -52,21 +51,6 @@ required-features = ["hyphenation"]
 name = "termwidth"
 path = "examples/termwidth.rs"
 required-features = ["terminal_size"]
-
-[[bench]]
-name = "linear"
-path = "benches/linear.rs"
-harness = false
-
-[[bench]]
-name = "indent"
-path = "benches/indent.rs"
-harness = false
-
-[[bench]]
-name = "unfill"
-path = "benches/unfill.rs"
-harness = false
 
 [dependencies.hyphenation]
 version = "0.8.4"
@@ -82,18 +66,12 @@ version = "0.2.1"
 optional = true
 
 [dependencies.unicode-linebreak]
-version = "0.1.2"
+version = "0.1.4"
 optional = true
 
 [dependencies.unicode-width]
-version = "0.1.9"
+version = "0.1.10"
 optional = true
-
-[dev-dependencies.criterion]
-version = "0.3.5"
-
-[dev-dependencies.lipsum]
-version = "0.8.0"
 
 [dev-dependencies.unic-emoji-char]
 version = "0.9.0"
@@ -109,4 +87,4 @@ default = [
 ]
 
 [target."cfg(unix)".dev-dependencies.termion]
-version = "1.5.6"
+version = "2.0.1"

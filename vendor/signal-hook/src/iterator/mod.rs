@@ -295,23 +295,26 @@ impl<'a, E: Exfiltrator> IntoIterator for &'a mut SignalsInfo<E> {
     }
 }
 
-/// An infinit iterator of arriving signals.
+/// An infinite iterator of arriving signals.
 pub struct Forever<'a, E: Exfiltrator>(RefSignalIterator<'a, UnixStream, E>);
 
 impl<'a, E: Exfiltrator> Iterator for Forever<'a, E> {
     type Item = E::Output;
 
     fn next(&mut self) -> Option<E::Output> {
-        match self.0.poll_signal(&mut SignalsInfo::<E>::has_signals) {
-            PollResult::Signal(result) => Some(result),
-            PollResult::Closed => None,
-            PollResult::Pending => unreachable!(
-                "Because of the blocking has_signals method the \
-                poll_signal method never returns Poll::Pending but blocks until a signal arrived"
-            ),
-            // Users can't manipulate the internal file descriptors and the way we use them
-            // shouldn't produce any errors. So it is OK to panic.
-            PollResult::Err(error) => panic!("Unexpected error: {}", error),
+        loop {
+            match self.0.poll_signal(&mut SignalsInfo::<E>::has_signals) {
+                PollResult::Signal(result) => break Some(result),
+                PollResult::Closed => break None,
+                // In theory, the poll_signal should not return PollResult::Pending. Nevertheless,
+                // there's a race condition - if the other side closes the pipe/socket after
+                // checking for it being closed, then the `read` there returns 0 as EOF. That
+                // appears as pending here. Next time we should get Closed.
+                PollResult::Pending => continue,
+                // Users can't manipulate the internal file descriptors and the way we use them
+                // shouldn't produce any errors. So it is OK to panic.
+                PollResult::Err(error) => panic!("Unexpected error: {}", error),
+            }
         }
     }
 }

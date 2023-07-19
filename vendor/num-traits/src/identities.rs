@@ -48,7 +48,6 @@ zero_impl!(u8, 0);
 zero_impl!(u16, 0);
 zero_impl!(u32, 0);
 zero_impl!(u64, 0);
-#[cfg(has_i128)]
 zero_impl!(u128, 0);
 
 zero_impl!(isize, 0);
@@ -56,7 +55,6 @@ zero_impl!(i8, 0);
 zero_impl!(i16, 0);
 zero_impl!(i32, 0);
 zero_impl!(i64, 0);
-#[cfg(has_i128)]
 zero_impl!(i128, 0);
 
 zero_impl!(f32, 0.0);
@@ -137,7 +135,6 @@ one_impl!(u8, 1);
 one_impl!(u16, 1);
 one_impl!(u32, 1);
 one_impl!(u64, 1);
-#[cfg(has_i128)]
 one_impl!(u128, 1);
 
 one_impl!(isize, 1);
@@ -145,7 +142,6 @@ one_impl!(i8, 1);
 one_impl!(i16, 1);
 one_impl!(i32, 1);
 one_impl!(i64, 1);
-#[cfg(has_i128)]
 one_impl!(i128, 1);
 
 one_impl!(f32, 1.0);

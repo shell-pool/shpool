@@ -10,15 +10,11 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2018"
+edition = "2021"
+rust-version = "1.56.0"
 name = "chrono"
-version = "0.4.22"
-exclude = [
-    "/ci/*",
-    "/.travis.yml",
-    "/appveyor.yml",
-    "/Makefile",
-]
+version = "0.4.26"
+exclude = ["/ci/*"]
 description = "Date and time library for Rust"
 homepage = "https://github.com/chronotope/chrono"
 documentation = "https://docs.rs/chrono/"
@@ -34,6 +30,10 @@ repository = "https://github.com/chronotope/chrono"
 
 [package.metadata.docs.rs]
 features = ["serde"]
+rustdoc-args = [
+    "--cfg",
+    "docsrs",
+]
 
 [package.metadata.playground]
 features = ["serde"]
@@ -54,18 +54,14 @@ required-features = [
     "serde",
 ]
 
+[dependencies.arbitrary]
+version = "1.0.0"
+features = ["derive"]
+optional = true
+
 [dependencies.criterion]
-version = "0.3"
+version = "0.4.0"
 optional = true
-
-[dependencies.iana-time-zone]
-version = "0.1.44"
-features = ["fallback"]
-optional = true
-
-[dependencies.num-integer]
-version = "0.1.36"
-default-features = false
 
 [dependencies.num-traits]
 version = "0.2"
@@ -97,10 +93,6 @@ version = "1.3.0"
 
 [dev-dependencies.doc-comment]
 version = "0.3"
-
-[dev-dependencies.num-iter]
-version = "0.1.35"
-default-features = false
 
 [dev-dependencies.serde_derive]
 version = "1"
@@ -147,6 +139,14 @@ optional = true
 [target."cfg(all(target_arch = \"wasm32\", not(any(target_os = \"emscripten\", target_os = \"wasi\"))))".dev-dependencies.wasm-bindgen-test]
 version = "0.3"
 
+[target."cfg(target_os = \"android\")".dependencies.android-tzdata]
+version = "0.1.1"
+
+[target."cfg(unix)".dependencies.iana-time-zone]
+version = "0.1.45"
+features = ["fallback"]
+optional = true
+
 [target."cfg(windows)".dependencies.winapi]
 version = "0.3.0"
 features = [
@@ -154,11 +154,6 @@ features = [
     "minwinbase",
     "minwindef",
     "timezoneapi",
+    "sysinfoapi",
 ]
 optional = true
-
-[badges.appveyor]
-repository = "chronotope/chrono"
-
-[badges.travis-ci]
-repository = "chronotope/chrono"

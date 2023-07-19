@@ -23,7 +23,9 @@ struct Const consts[] = {
     { SI_TKILL, -1, 3 },
 #endif
     { SI_QUEUE, -1, 4 },
+#ifdef SI_MESGQ
     { SI_MESGQ, -1, 5 },
+#endif
     { CLD_EXITED, SIGCHLD, 6 },
     { CLD_KILLED, SIGCHLD, 7 },
     { CLD_DUMPED, SIGCHLD, 8 },

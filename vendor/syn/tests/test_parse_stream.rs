@@ -1,3 +1,5 @@
+#![allow(clippy::let_underscore_untyped)]
+
 use syn::ext::IdentExt;
 use syn::parse::ParseStream;
 use syn::{Ident, Token};

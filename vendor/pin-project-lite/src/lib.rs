@@ -1,98 +1,115 @@
-//! A lightweight version of [pin-project] written with declarative macros.
-//!
-//! # Examples
-//!
-//! [`pin_project!`] macro creates a projection type covering all the fields of struct.
-//!
-//! ```rust
-//! use std::pin::Pin;
-//!
-//! use pin_project_lite::pin_project;
-//!
-//! pin_project! {
-//!     struct Struct<T, U> {
-//!         #[pin]
-//!         pinned: T,
-//!         unpinned: U,
-//!     }
-//! }
-//!
-//! impl<T, U> Struct<T, U> {
-//!     fn method(self: Pin<&mut Self>) {
-//!         let this = self.project();
-//!         let _: Pin<&mut T> = this.pinned; // Pinned reference to the field
-//!         let _: &mut U = this.unpinned; // Normal reference to the field
-//!     }
-//! }
-//! ```
-//!
-//! To use [`pin_project!`] on enums, you need to name the projection type
-//! returned from the method.
-//!
-//! ```rust
-//! use std::pin::Pin;
-//!
-//! use pin_project_lite::pin_project;
-//!
-//! pin_project! {
-//!     #[project = EnumProj]
-//!     enum Enum<T, U> {
-//!         Variant { #[pin] pinned: T, unpinned: U },
-//!     }
-//! }
-//!
-//! impl<T, U> Enum<T, U> {
-//!     fn method(self: Pin<&mut Self>) {
-//!         match self.project() {
-//!             EnumProj::Variant { pinned, unpinned } => {
-//!                 let _: Pin<&mut T> = pinned;
-//!                 let _: &mut U = unpinned;
-//!             }
-//!         }
-//!     }
-//! }
-//! ```
-//!
-//! # [pin-project] vs pin-project-lite
-//!
-//! Here are some similarities and differences compared to [pin-project].
-//!
-//! ## Similar: Safety
-//!
-//! pin-project-lite guarantees safety in much the same way as [pin-project].
-//! Both are completely safe unless you write other unsafe code.
-//!
-//! ## Different: Minimal design
-//!
-//! This library does not tackle as expansive of a range of use cases as
-//! [pin-project] does. If your use case is not already covered, please use
-//! [pin-project].
-//!
-//! ## Different: No proc-macro related dependencies
-//!
-//! This is the **only** reason to use this crate. However, **if you already
-//! have proc-macro related dependencies in your crate's dependency graph, there
-//! is no benefit from using this crate.** (Note: There is almost no difference
-//! in the amount of code generated between [pin-project] and pin-project-lite.)
-//!
-//! ## Different: No useful error messages
-//!
-//! This macro does not handle any invalid input. So error messages are not to
-//! be useful in most cases. If you do need useful error messages, then upon
-//! error you can pass the same input to [pin-project] to receive a helpful
-//! description of the compile error.
-//!
-//! ## Different: No support for custom Unpin implementation
-//!
-//! pin-project supports this by [`UnsafeUnpin`][unsafe-unpin] and [`!Unpin`][not-unpin].
-//!
-//! ## Different: No support for tuple structs and tuple variants
-//!
-//! pin-project supports this.
-//!
-//! [not-unpin]: https://docs.rs/pin-project/1/pin_project/attr.pin_project.html#unpin
-//! [pin-project]: https://github.com/taiki-e/pin-project
-//! [unsafe-unpin]: https://docs.rs/pin-project/1/pin_project/attr.pin_project.html#unsafeunpin
+/*!
+<!-- tidy:crate-doc:start -->
+A lightweight version of [pin-project] written with declarative macros.
+
+## Usage
+
+Add this to your `Cargo.toml`:
+
+```toml
+[dependencies]
+pin-project-lite = "0.2"
+```
+
+*Compiler support: requires rustc 1.37+*
+
+## Examples
+
+[`pin_project!`] macro creates a projection type covering all the fields of
+struct.
+
+```rust
+use std::pin::Pin;
+
+use pin_project_lite::pin_project;
+
+pin_project! {
+    struct Struct<T, U> {
+        #[pin]
+        pinned: T,
+        unpinned: U,
+    }
+}
+
+impl<T, U> Struct<T, U> {
+    fn method(self: Pin<&mut Self>) {
+        let this = self.project();
+        let _: Pin<&mut T> = this.pinned; // Pinned reference to the field
+        let _: &mut U = this.unpinned; // Normal reference to the field
+    }
+}
+```
+
+To use [`pin_project!`] on enums, you need to name the projection type
+returned from the method.
+
+```rust
+use std::pin::Pin;
+
+use pin_project_lite::pin_project;
+
+pin_project! {
+    #[project = EnumProj]
+    enum Enum<T, U> {
+        Variant { #[pin] pinned: T, unpinned: U },
+    }
+}
+
+impl<T, U> Enum<T, U> {
+    fn method(self: Pin<&mut Self>) {
+        match self.project() {
+            EnumProj::Variant { pinned, unpinned } => {
+                let _: Pin<&mut T> = pinned;
+                let _: &mut U = unpinned;
+            }
+        }
+    }
+}
+```
+
+## [pin-project] vs pin-project-lite
+
+Here are some similarities and differences compared to [pin-project].
+
+### Similar: Safety
+
+pin-project-lite guarantees safety in much the same way as [pin-project].
+Both are completely safe unless you write other unsafe code.
+
+### Different: Minimal design
+
+This library does not tackle as expansive of a range of use cases as
+[pin-project] does. If your use case is not already covered, please use
+[pin-project].
+
+### Different: No proc-macro related dependencies
+
+This is the **only** reason to use this crate. However, **if you already
+have proc-macro related dependencies in your crate's dependency graph, there
+is no benefit from using this crate.** (Note: There is almost no difference
+in the amount of code generated between [pin-project] and pin-project-lite.)
+
+### Different: No useful error messages
+
+This macro does not handle any invalid input. So error messages are not to
+be useful in most cases. If you do need useful error messages, then upon
+error you can pass the same input to [pin-project] to receive a helpful
+description of the compile error.
+
+### Different: No support for custom Unpin implementation
+
+pin-project supports this by [`UnsafeUnpin`][unsafe-unpin] and [`!Unpin`][not-unpin].
+
+### Different: No support for tuple structs and tuple variants
+
+pin-project supports this.
+
+[not-unpin]: https://docs.rs/pin-project/1/pin_project/attr.pin_project.html#unpin
+[pin-project]: https://github.com/taiki-e/pin-project
+[unsafe-unpin]: https://docs.rs/pin-project/1/pin_project/attr.pin_project.html#unsafeunpin
+
+<!-- tidy:crate-doc:end -->
+*/
 
 #![no_std]
 #![doc(test(
@@ -103,7 +120,21 @@
     )
 ))]
 #![warn(rust_2018_idioms, single_use_lifetimes, unreachable_pub)]
-#![warn(clippy::default_trait_access, clippy::wildcard_imports)]
+#![warn(
+    clippy::pedantic,
+    // lints for public library
+    clippy::alloc_instead_of_core,
+    clippy::exhaustive_enums,
+    clippy::exhaustive_structs,
+    clippy::std_instead_of_alloc,
+    clippy::std_instead_of_core,
+    // lints that help writing unsafe code
+    clippy::as_ptr_cast_mut,
+    clippy::default_union_representation,
+    clippy::trailing_empty_array,
+    clippy::transmute_undefined_repr,
+    clippy::undocumented_unsafe_blocks,
+)]
 
 /// A macro that creates a projection type covering all the fields of struct.
 ///
@@ -923,6 +954,7 @@ macro_rules! __pin_project_struct_make_proj_method {
             ),+
         }
     ) => {
+        #[inline]
         $proj_vis fn $method_ident<'__pin>(
             self: $crate::__private::Pin<&'__pin $($mut)? Self>,
         ) -> $proj_ty_ident <'__pin, $($ty_generics)*> {
@@ -956,6 +988,7 @@ macro_rules! __pin_project_struct_make_proj_replace_method {
             ),+
         }
     ) => {
+        #[inline]
         $proj_vis fn project_replace(
             self: $crate::__private::Pin<&mut Self>,
             replacement: Self,
@@ -1003,6 +1036,7 @@ macro_rules! __pin_project_enum_make_proj_method {
             ),+
         }
     ) => {
+        #[inline]
         $proj_vis fn $method_ident<'__pin>(
             self: $crate::__private::Pin<&'__pin $($mut)? Self>,
         ) -> $proj_ty_ident <'__pin, $($ty_generics)*> {
@@ -1046,6 +1080,7 @@ macro_rules! __pin_project_enum_make_proj_replace_method {
             ),+
         }
     ) => {
+        #[inline]
         $proj_vis fn project_replace(
             self: $crate::__private::Pin<&mut Self>,
             replacement: Self,
@@ -1528,6 +1563,8 @@ pub mod __private {
 
     impl<T: ?Sized> Drop for UnsafeDropInPlaceGuard<T> {
         fn drop(&mut self) {
+            // SAFETY: the caller of `UnsafeDropInPlaceGuard::new` must guarantee
+            // that `ptr` is valid for drop when this guard is destructed.
             unsafe {
                 ptr::drop_in_place(self.0);
             }
@@ -1551,6 +1588,8 @@ pub mod __private {
 
     impl<T> Drop for UnsafeOverwriteGuard<T> {
         fn drop(&mut self) {
+            // SAFETY: the caller of `UnsafeOverwriteGuard::new` must guarantee
+            // that `target` is valid for writes when this guard is destructed.
             unsafe {
                 ptr::write(self.target, ptr::read(&*self.value));
             }

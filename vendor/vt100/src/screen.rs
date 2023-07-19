@@ -75,11 +75,6 @@ pub struct Screen {
     modes: u8,
     mouse_protocol_mode: MouseProtocolMode,
     mouse_protocol_encoding: MouseProtocolEncoding,
-
-    audible_bell_count: usize,
-    visual_bell_count: usize,
-
-    errors: usize,
 }
 
 impl Screen {
@@ -102,15 +97,11 @@ impl Screen {
             modes: 0,
             mouse_protocol_mode: MouseProtocolMode::default(),
             mouse_protocol_encoding: MouseProtocolEncoding::default(),
-
-            audible_bell_count: 0,
-            visual_bell_count: 0,
-
-            errors: 0,
         }
     }
 
-    pub(crate) fn set_size(&mut self, rows: u16, cols: u16) {
+    /// Resizes the terminal.
+    pub fn set_size(&mut self, rows: u16, cols: u16) {
         self.grid.set_size(crate::grid::Size { rows, cols });
         self.alternate_grid
             .set_size(crate::grid::Size { rows, cols });
@@ -125,6 +116,20 @@ impl Screen {
         (size.rows, size.cols)
     }
 
+    /// Scrolls to the given position in the scrollback.
+    ///
+    /// This position indicates the offset from the top of the screen, and
+    /// should be `0` to put the normal screen in view.
+    ///
+    /// This affects the return values of methods called on the screen: for
+    /// instance, `screen.cell(0, 0)` will return the top left corner of the
+    /// screen after taking the scrollback offset into account.
+    ///
+    /// The value given will be clamped to the actual size of the scrollback.
+    pub fn set_scrollback(&mut self, rows: usize) {
+        self.grid_mut().set_scrollback(rows);
+    }
+
     /// Returns the current position in the scrollback.
     ///
     /// This position indicates the offset from the top of the screen, and is
@@ -132,10 +137,6 @@ impl Screen {
     #[must_use]
     pub fn scrollback(&self) -> usize {
         self.grid().scrollback()
-    }
-
-    pub(crate) fn set_scrollback(&mut self, rows: usize) {
-        self.grid_mut().set_scrollback(rows);
     }
 
     /// Returns the text contents of the terminal.
@@ -245,15 +246,13 @@ impl Screen {
 
     /// Return escape codes sufficient to turn the terminal state of the
     /// screen `prev` into the current terminal state. This is a convenience
-    /// wrapper around `contents_diff`, `input_mode_diff`, `title_diff`, and
-    /// `bells_diff`.
+    /// wrapper around `contents_diff`, `input_mode_diff`, and `title_diff`
     #[must_use]
     pub fn state_diff(&self, prev: &Self) -> Vec<u8> {
         let mut contents = vec![];
         self.write_contents_diff(&mut contents, prev);
         self.write_input_mode_diff(&mut contents, prev);
         self.write_title_diff(&mut contents, prev);
-        self.write_bells_diff(&mut contents, prev);
         contents
     }
 
@@ -269,9 +268,28 @@ impl Screen {
         contents
     }
 
+    /// Simillar to contents_formatted, except that rather than
+    /// returning bytes to redraw the currently visible screen, it
+    /// returns sufficient bytes to redraw the last `rows` rows of
+    /// output. You do not need to adjust the scrollback position
+    /// to use this to get at data in the scrollback buffer.
+    #[must_use]
+    pub fn last_n_rows_contents_formatted(&self, rows: u16) -> Vec<u8> {
+        let mut contents = vec![];
+        self.write_contents_formatted_from_rows(
+            self.grid().last_n_rows(rows), &mut contents);
+        contents
+    }
+
     fn write_contents_formatted(&self, contents: &mut Vec<u8>) {
+        self.write_contents_formatted_from_rows(self.grid().visible_rows(), contents)
+    }
+
+    fn write_contents_formatted_from_rows<'a, R>(&self, rows: R, contents: &mut Vec<u8>)
+        where R: Iterator<Item = &'a crate::row::Row>
+    {
         crate::term::HideCursor::new(self.hide_cursor()).write_buf(contents);
-        let prev_attrs = self.grid().write_contents_formatted(contents);
+        let prev_attrs = self.grid().write_contents_formatted_from_rows(rows, contents);
         self.attrs.write_escape_code_diff(contents, &prev_attrs);
     }
 
@@ -500,25 +518,6 @@ impl Screen {
         .write_buf(contents);
     }
 
-    /// Returns terminal escape sequences sufficient to cause audible and
-    /// visual bells to occur if they have been received since the terminal
-    /// described by `prev`.
-    #[must_use]
-    pub fn bells_diff(&self, prev: &Self) -> Vec<u8> {
-        let mut contents = vec![];
-        self.write_bells_diff(&mut contents, prev);
-        contents
-    }
-
-    fn write_bells_diff(&self, contents: &mut Vec<u8>, prev: &Self) {
-        if self.audible_bell_count != prev.audible_bell_count {
-            crate::term::AudibleBell::default().write_buf(contents);
-        }
-        if self.visual_bell_count != prev.visual_bell_count {
-            crate::term::VisualBell::default().write_buf(contents);
-        }
-    }
-
     /// Returns terminal escape sequences sufficient to set the current
     /// terminal's drawing attributes.
     ///
@@ -597,7 +596,7 @@ impl Screen {
     /// Returns the `Cell` object at the given location in the terminal, if it
     /// exists.
     #[must_use]
-    pub fn cell(&self, row: u16, col: u16) -> Option<&crate::cell::Cell> {
+    pub fn cell(&self, row: u16, col: u16) -> Option<&crate::Cell> {
         self.grid().visible_cell(crate::grid::Pos { row, col })
     }
 
@@ -619,42 +618,6 @@ impl Screen {
     #[must_use]
     pub fn icon_name(&self) -> &str {
         &self.icon_name
-    }
-
-    /// Returns a value which changes every time an audible bell is received.
-    ///
-    /// Typically you would store this number after each call to `process`,
-    /// and trigger an audible bell whenever it changes.
-    ///
-    /// You shouldn't rely on the exact value returned here, since the exact
-    /// value will not be maintained by `contents_formatted` or
-    /// `contents_diff`.
-    #[must_use]
-    pub fn audible_bell_count(&self) -> usize {
-        self.audible_bell_count
-    }
-
-    /// Returns a value which changes every time an visual bell is received.
-    ///
-    /// Typically you would store this number after each call to `process`,
-    /// and trigger an visual bell whenever it changes.
-    ///
-    /// You shouldn't rely on the exact value returned here, since the exact
-    /// value will not be maintained by `contents_formatted` or
-    /// `contents_diff`.
-    #[must_use]
-    pub fn visual_bell_count(&self) -> usize {
-        self.visual_bell_count
-    }
-
-    /// Returns the number of parsing errors seen so far.
-    ///
-    /// Currently this only tracks invalid UTF-8 and control characters other
-    /// than `0x07`-`0x0f`. This can give an idea of whether the input stream
-    /// being fed to the parser is reasonable or not.
-    #[must_use]
-    pub fn errors(&self) -> usize {
-        self.errors
     }
 
     /// Returns whether the alternate screen is currently in use.
@@ -701,13 +664,13 @@ impl Screen {
 
     /// Returns the currently active foreground color.
     #[must_use]
-    pub fn fgcolor(&self) -> crate::attrs::Color {
+    pub fn fgcolor(&self) -> crate::Color {
         self.attrs.fgcolor
     }
 
     /// Returns the currently active background color.
     #[must_use]
-    pub fn bgcolor(&self) -> crate::attrs::Color {
+    pub fn bgcolor(&self) -> crate::Color {
         self.attrs.bgcolor
     }
 
@@ -739,7 +702,7 @@ impl Screen {
         self.attrs.inverse()
     }
 
-    fn grid(&self) -> &crate::grid::Grid {
+    pub(crate) fn grid(&self) -> &crate::grid::Grid {
         if self.mode(MODE_ALTERNATE_SCREEN) {
             &self.alternate_grid
         } else {
@@ -809,7 +772,7 @@ impl Screen {
 }
 
 impl Screen {
-    fn text(&mut self, c: char) {
+    pub(crate) fn text(&mut self, c: char) {
         let pos = self.grid().pos();
         let size = self.grid().size();
         let attrs = self.attrs;
@@ -1050,117 +1013,114 @@ impl Screen {
 
     // control codes
 
-    fn bel(&mut self) {
-        self.audible_bell_count += 1;
-    }
-
-    fn bs(&mut self) {
+    pub(crate) fn bs(&mut self) {
         self.grid_mut().col_dec(1);
     }
 
-    fn tab(&mut self) {
+    pub(crate) fn tab(&mut self) {
         self.grid_mut().col_tab();
     }
 
-    fn lf(&mut self) {
+    pub(crate) fn lf(&mut self) {
         self.grid_mut().row_inc_scroll(1);
     }
 
-    fn vt(&mut self) {
+    pub(crate) fn vt(&mut self) {
         self.lf();
     }
 
-    fn ff(&mut self) {
+    pub(crate) fn ff(&mut self) {
         self.lf();
     }
 
-    fn cr(&mut self) {
+    pub(crate) fn cr(&mut self) {
         self.grid_mut().col_set(0);
     }
 
     // escape codes
 
     // ESC 7
-    fn decsc(&mut self) {
+    pub(crate) fn decsc(&mut self) {
         self.save_cursor();
     }
 
     // ESC 8
-    fn decrc(&mut self) {
+    pub(crate) fn decrc(&mut self) {
         self.restore_cursor();
     }
 
     // ESC =
-    fn deckpam(&mut self) {
+    pub(crate) fn deckpam(&mut self) {
         self.set_mode(MODE_APPLICATION_KEYPAD);
     }
 
     // ESC >
-    fn deckpnm(&mut self) {
+    pub(crate) fn deckpnm(&mut self) {
         self.clear_mode(MODE_APPLICATION_KEYPAD);
     }
 
     // ESC M
-    fn ri(&mut self) {
+    pub(crate) fn ri(&mut self) {
         self.grid_mut().row_dec_scroll(1);
     }
 
     // ESC c
-    fn ris(&mut self) {
+    pub(crate) fn ris(&mut self) {
         let title = self.title.clone();
         let icon_name = self.icon_name.clone();
-        let audible_bell_count = self.audible_bell_count;
-        let visual_bell_count = self.visual_bell_count;
-        let errors = self.errors;
 
         *self = Self::new(self.grid.size(), self.grid.scrollback_len());
 
         self.title = title;
         self.icon_name = icon_name;
-        self.audible_bell_count = audible_bell_count;
-        self.visual_bell_count = visual_bell_count;
-        self.errors = errors;
-    }
-
-    // ESC g
-    fn vb(&mut self) {
-        self.visual_bell_count += 1;
     }
 
     // csi codes
 
     // CSI @
-    fn ich(&mut self, count: u16) {
+    pub(crate) fn ich(&mut self, count: u16) {
         self.grid_mut().insert_cells(count);
     }
 
     // CSI A
-    fn cuu(&mut self, offset: u16) {
+    pub(crate) fn cuu(&mut self, offset: u16) {
         self.grid_mut().row_dec_clamp(offset);
     }
 
     // CSI B
-    fn cud(&mut self, offset: u16) {
+    pub(crate) fn cud(&mut self, offset: u16) {
         self.grid_mut().row_inc_clamp(offset);
     }
 
     // CSI C
-    fn cuf(&mut self, offset: u16) {
+    pub(crate) fn cuf(&mut self, offset: u16) {
         self.grid_mut().col_inc_clamp(offset);
     }
 
     // CSI D
-    fn cub(&mut self, offset: u16) {
+    pub(crate) fn cub(&mut self, offset: u16) {
         self.grid_mut().col_dec(offset);
     }
 
+    // CSI E
+    pub(crate) fn cnl(&mut self, offset: u16) {
+        self.grid_mut().col_set(0);
+        self.grid_mut().row_inc_clamp(offset);
+    }
+
+    // CSI F
+    pub(crate) fn cpl(&mut self, offset: u16) {
+        self.grid_mut().col_set(0);
+        self.grid_mut().row_dec_clamp(offset);
+    }
+
     // CSI G
-    fn cha(&mut self, col: u16) {
+    pub(crate) fn cha(&mut self, col: u16) {
         self.grid_mut().col_set(col - 1);
     }
 
     // CSI H
-    fn cup(&mut self, (row, col): (u16, u16)) {
+    pub(crate) fn cup(&mut self, (row, col): (u16, u16)) {
         self.grid_mut().set_pos(crate::grid::Pos {
             row: row - 1,
             col: col - 1,
@@ -1168,7 +1128,7 @@ impl Screen {
     }
 
     // CSI J
-    fn ed(&mut self, mode: u16) {
+    pub(crate) fn ed(&mut self, mode: u16) {
         let attrs = self.attrs;
         match mode {
             0 => self.grid_mut().erase_all_forward(attrs),
@@ -1181,12 +1141,12 @@ impl Screen {
     }
 
     // CSI ? J
-    fn decsed(&mut self, mode: u16) {
+    pub(crate) fn decsed(&mut self, mode: u16) {
         self.ed(mode);
     }
 
     // CSI K
-    fn el(&mut self, mode: u16) {
+    pub(crate) fn el(&mut self, mode: u16) {
         let attrs = self.attrs;
         match mode {
             0 => self.grid_mut().erase_row_forward(attrs),
@@ -1199,57 +1159,60 @@ impl Screen {
     }
 
     // CSI ? K
-    fn decsel(&mut self, mode: u16) {
+    pub(crate) fn decsel(&mut self, mode: u16) {
         self.el(mode);
     }
 
     // CSI L
-    fn il(&mut self, count: u16) {
+    pub(crate) fn il(&mut self, count: u16) {
         self.grid_mut().insert_lines(count);
     }
 
     // CSI M
-    fn dl(&mut self, count: u16) {
+    pub(crate) fn dl(&mut self, count: u16) {
         self.grid_mut().delete_lines(count);
     }
 
     // CSI P
-    fn dch(&mut self, count: u16) {
+    pub(crate) fn dch(&mut self, count: u16) {
         self.grid_mut().delete_cells(count);
     }
 
     // CSI S
-    fn su(&mut self, count: u16) {
+    pub(crate) fn su(&mut self, count: u16) {
         self.grid_mut().scroll_up(count);
     }
 
     // CSI T
-    fn sd(&mut self, count: u16) {
+    pub(crate) fn sd(&mut self, count: u16) {
         self.grid_mut().scroll_down(count);
     }
 
     // CSI X
-    fn ech(&mut self, count: u16) {
+    pub(crate) fn ech(&mut self, count: u16) {
         let attrs = self.attrs;
         self.grid_mut().erase_cells(count, attrs);
     }
 
     // CSI d
-    fn vpa(&mut self, row: u16) {
+    pub(crate) fn vpa(&mut self, row: u16) {
         self.grid_mut().row_set(row - 1);
     }
 
     // CSI h
     #[allow(clippy::unused_self)]
-    fn sm(&mut self, params: &vte::Params) {
+    pub(crate) fn sm(&mut self, params: &vte::Params) {
         // nothing, i think?
         if log::log_enabled!(log::Level::Debug) {
-            log::debug!("unhandled SM mode: {}", param_str(params));
+            log::debug!(
+                "unhandled SM mode: {}",
+                crate::perform::param_str(params)
+            );
         }
     }
 
     // CSI ? h
-    fn decset(&mut self, params: &vte::Params) {
+    pub(crate) fn decset(&mut self, params: &vte::Params) {
         for param in params {
             match param {
                 &[1] => self.set_mode(MODE_APPLICATION_CURSOR),
@@ -1297,15 +1260,18 @@ impl Screen {
 
     // CSI l
     #[allow(clippy::unused_self)]
-    fn rm(&mut self, params: &vte::Params) {
+    pub(crate) fn rm(&mut self, params: &vte::Params) {
         // nothing, i think?
         if log::log_enabled!(log::Level::Debug) {
-            log::debug!("unhandled RM mode: {}", param_str(params));
+            log::debug!(
+                "unhandled RM mode: {}",
+                crate::perform::param_str(params)
+            );
         }
     }
 
     // CSI ? l
-    fn decrst(&mut self, params: &vte::Params) {
+    pub(crate) fn decrst(&mut self, params: &vte::Params) {
         for param in params {
             match param {
                 &[1] => self.clear_mode(MODE_APPLICATION_CURSOR),
@@ -1355,7 +1321,7 @@ impl Screen {
     }
 
     // CSI m
-    fn sgr(&mut self, params: &vte::Params) {
+    pub(crate) fn sgr(&mut self, params: &vte::Params) {
         // XXX really i want to just be able to pass in a default Params
         // instance with a 0 in it, but vte doesn't allow creating new Params
         // instances
@@ -1407,30 +1373,25 @@ impl Screen {
                 &[24] => self.attrs.set_underline(false),
                 &[27] => self.attrs.set_inverse(false),
                 &[n] if (30..=37).contains(&n) => {
-                    self.attrs.fgcolor =
-                        crate::attrs::Color::Idx(to_u8!(n) - 30);
+                    self.attrs.fgcolor = crate::Color::Idx(to_u8!(n) - 30);
                 }
                 &[38, 2, r, g, b] => {
-                    self.attrs.fgcolor = crate::attrs::Color::Rgb(
-                        to_u8!(r),
-                        to_u8!(g),
-                        to_u8!(b),
-                    );
+                    self.attrs.fgcolor =
+                        crate::Color::Rgb(to_u8!(r), to_u8!(g), to_u8!(b));
                 }
                 &[38, 5, i] => {
-                    self.attrs.fgcolor = crate::attrs::Color::Idx(to_u8!(i));
+                    self.attrs.fgcolor = crate::Color::Idx(to_u8!(i));
                 }
                 &[38] => match next_param!() {
                     &[2] => {
                         let r = next_param_u8!();
                         let g = next_param_u8!();
                         let b = next_param_u8!();
-                        self.attrs.fgcolor =
-                            crate::attrs::Color::Rgb(r, g, b);
+                        self.attrs.fgcolor = crate::Color::Rgb(r, g, b);
                     }
                     &[5] => {
                         self.attrs.fgcolor =
-                            crate::attrs::Color::Idx(next_param_u8!());
+                            crate::Color::Idx(next_param_u8!());
                     }
                     ns => {
                         if log::log_enabled!(log::Level::Debug) {
@@ -1450,33 +1411,28 @@ impl Screen {
                     }
                 },
                 &[39] => {
-                    self.attrs.fgcolor = crate::attrs::Color::Default;
+                    self.attrs.fgcolor = crate::Color::Default;
                 }
                 &[n] if (40..=47).contains(&n) => {
-                    self.attrs.bgcolor =
-                        crate::attrs::Color::Idx(to_u8!(n) - 40);
+                    self.attrs.bgcolor = crate::Color::Idx(to_u8!(n) - 40);
                 }
                 &[48, 2, r, g, b] => {
-                    self.attrs.bgcolor = crate::attrs::Color::Rgb(
-                        to_u8!(r),
-                        to_u8!(g),
-                        to_u8!(b),
-                    );
+                    self.attrs.bgcolor =
+                        crate::Color::Rgb(to_u8!(r), to_u8!(g), to_u8!(b));
                 }
                 &[48, 5, i] => {
-                    self.attrs.bgcolor = crate::attrs::Color::Idx(to_u8!(i));
+                    self.attrs.bgcolor = crate::Color::Idx(to_u8!(i));
                 }
                 &[48] => match next_param!() {
                     &[2] => {
                         let r = next_param_u8!();
                         let g = next_param_u8!();
                         let b = next_param_u8!();
-                        self.attrs.bgcolor =
-                            crate::attrs::Color::Rgb(r, g, b);
+                        self.attrs.bgcolor = crate::Color::Rgb(r, g, b);
                     }
                     &[5] => {
                         self.attrs.bgcolor =
-                            crate::attrs::Color::Idx(next_param_u8!());
+                            crate::Color::Idx(next_param_u8!());
                     }
                     ns => {
                         if log::log_enabled!(log::Level::Debug) {
@@ -1496,15 +1452,13 @@ impl Screen {
                     }
                 },
                 &[49] => {
-                    self.attrs.bgcolor = crate::attrs::Color::Default;
+                    self.attrs.bgcolor = crate::Color::Default;
                 }
                 &[n] if (90..=97).contains(&n) => {
-                    self.attrs.fgcolor =
-                        crate::attrs::Color::Idx(to_u8!(n) - 82);
+                    self.attrs.fgcolor = crate::Color::Idx(to_u8!(n) - 82);
                 }
                 &[n] if (100..=107).contains(&n) => {
-                    self.attrs.bgcolor =
-                        crate::attrs::Color::Idx(to_u8!(n) - 92);
+                    self.attrs.bgcolor = crate::Color::Idx(to_u8!(n) - 92);
                 }
                 ns => {
                     if log::log_enabled!(log::Level::Debug) {
@@ -1526,228 +1480,44 @@ impl Screen {
     }
 
     // CSI r
-    fn decstbm(&mut self, (top, bottom): (u16, u16)) {
+    pub(crate) fn decstbm(&mut self, (top, bottom): (u16, u16)) {
         self.grid_mut().set_scroll_region(top - 1, bottom - 1);
+    }
+
+    // CSI t
+    #[allow(clippy::unused_self)]
+    pub(crate) fn xtwinops(&self, params: &vte::Params) {
+        let mut iter = params.iter();
+        let op = iter.next().and_then(|x| x.first().copied());
+        match op {
+            Some(8) => {}
+            _ => {
+                log::debug!(
+                    "unhandled XTWINOPS: {}",
+                    crate::perform::param_str(params)
+                );
+            }
+        }
     }
 
     // osc codes
 
-    fn osc0(&mut self, s: &[u8]) {
+    pub(crate) fn osc0(&mut self, s: &[u8]) {
         self.osc1(s);
         self.osc2(s);
     }
 
-    fn osc1(&mut self, s: &[u8]) {
+    pub(crate) fn osc1(&mut self, s: &[u8]) {
         if let Ok(s) = std::str::from_utf8(s) {
             self.icon_name = s.to_string();
         }
     }
 
-    fn osc2(&mut self, s: &[u8]) {
+    pub(crate) fn osc2(&mut self, s: &[u8]) {
         if let Ok(s) = std::str::from_utf8(s) {
             self.title = s.to_string();
         }
     }
-}
-
-impl vte::Perform for Screen {
-    fn print(&mut self, c: char) {
-        if c == '\u{fffd}' || ('\u{80}'..'\u{a0}').contains(&c) {
-            self.errors = self.errors.saturating_add(1);
-        }
-        self.text(c);
-    }
-
-    fn execute(&mut self, b: u8) {
-        match b {
-            7 => self.bel(),
-            8 => self.bs(),
-            9 => self.tab(),
-            10 => self.lf(),
-            11 => self.vt(),
-            12 => self.ff(),
-            13 => self.cr(),
-            // we don't implement shift in/out alternate character sets, but
-            // it shouldn't count as an "error"
-            14 | 15 => {}
-            _ => {
-                self.errors = self.errors.saturating_add(1);
-                log::debug!("unhandled control character: {b}");
-            }
-        }
-    }
-
-    fn esc_dispatch(&mut self, intermediates: &[u8], _ignore: bool, b: u8) {
-        intermediates.first().map_or_else(
-            || match b {
-                b'7' => self.decsc(),
-                b'8' => self.decrc(),
-                b'=' => self.deckpam(),
-                b'>' => self.deckpnm(),
-                b'M' => self.ri(),
-                b'c' => self.ris(),
-                b'g' => self.vb(),
-                _ => {
-                    log::debug!("unhandled escape code: ESC {b}");
-                }
-            },
-            |i| {
-                log::debug!("unhandled escape code: ESC {i} {b}");
-            },
-        );
-    }
-
-    fn csi_dispatch(
-        &mut self,
-        params: &vte::Params,
-        intermediates: &[u8],
-        _ignore: bool,
-        c: char,
-    ) {
-        match intermediates.first() {
-            None => match c {
-                '@' => self.ich(canonicalize_params_1(params, 1)),
-                'A' => self.cuu(canonicalize_params_1(params, 1)),
-                'B' => self.cud(canonicalize_params_1(params, 1)),
-                'C' => self.cuf(canonicalize_params_1(params, 1)),
-                'D' => self.cub(canonicalize_params_1(params, 1)),
-                'G' => self.cha(canonicalize_params_1(params, 1)),
-                'H' => self.cup(canonicalize_params_2(params, 1, 1)),
-                'J' => self.ed(canonicalize_params_1(params, 0)),
-                'K' => self.el(canonicalize_params_1(params, 0)),
-                'L' => self.il(canonicalize_params_1(params, 1)),
-                'M' => self.dl(canonicalize_params_1(params, 1)),
-                'P' => self.dch(canonicalize_params_1(params, 1)),
-                'S' => self.su(canonicalize_params_1(params, 1)),
-                'T' => self.sd(canonicalize_params_1(params, 1)),
-                'X' => self.ech(canonicalize_params_1(params, 1)),
-                'd' => self.vpa(canonicalize_params_1(params, 1)),
-                'h' => self.sm(params),
-                'l' => self.rm(params),
-                'm' => self.sgr(params),
-                'r' => self.decstbm(canonicalize_params_decstbm(
-                    params,
-                    self.grid().size(),
-                )),
-                _ => {
-                    if log::log_enabled!(log::Level::Debug) {
-                        log::debug!(
-                            "unhandled csi sequence: CSI {} {}",
-                            param_str(params),
-                            c
-                        );
-                    }
-                }
-            },
-            Some(b'?') => match c {
-                'J' => self.decsed(canonicalize_params_1(params, 0)),
-                'K' => self.decsel(canonicalize_params_1(params, 0)),
-                'h' => self.decset(params),
-                'l' => self.decrst(params),
-                _ => {
-                    if log::log_enabled!(log::Level::Debug) {
-                        log::debug!(
-                            "unhandled csi sequence: CSI ? {} {}",
-                            param_str(params),
-                            c
-                        );
-                    }
-                }
-            },
-            Some(i) => {
-                if log::log_enabled!(log::Level::Debug) {
-                    log::debug!(
-                        "unhandled csi sequence: CSI {} {} {}",
-                        i,
-                        param_str(params),
-                        c
-                    );
-                }
-            }
-        }
-    }
-
-    fn osc_dispatch(&mut self, params: &[&[u8]], _bel_terminated: bool) {
-        match (params.get(0), params.get(1)) {
-            (Some(&b"0"), Some(s)) => self.osc0(s),
-            (Some(&b"1"), Some(s)) => self.osc1(s),
-            (Some(&b"2"), Some(s)) => self.osc2(s),
-            _ => {
-                if log::log_enabled!(log::Level::Debug) {
-                    log::debug!(
-                        "unhandled osc sequence: OSC {}",
-                        osc_param_str(params),
-                    );
-                }
-            }
-        }
-    }
-
-    fn hook(
-        &mut self,
-        params: &vte::Params,
-        intermediates: &[u8],
-        _ignore: bool,
-        action: char,
-    ) {
-        if log::log_enabled!(log::Level::Debug) {
-            intermediates.first().map_or_else(
-                || {
-                    log::debug!(
-                        "unhandled dcs sequence: DCS {} {}",
-                        param_str(params),
-                        action,
-                    );
-                },
-                |i| {
-                    log::debug!(
-                        "unhandled dcs sequence: DCS {} {} {}",
-                        i,
-                        param_str(params),
-                        action,
-                    );
-                },
-            );
-        }
-    }
-}
-
-fn canonicalize_params_1(params: &vte::Params, default: u16) -> u16 {
-    let first = params.iter().next().map_or(0, |x| *x.first().unwrap_or(&0));
-    if first == 0 {
-        default
-    } else {
-        first
-    }
-}
-
-fn canonicalize_params_2(
-    params: &vte::Params,
-    default1: u16,
-    default2: u16,
-) -> (u16, u16) {
-    let mut iter = params.iter();
-    let first = iter.next().map_or(0, |x| *x.first().unwrap_or(&0));
-    let first = if first == 0 { default1 } else { first };
-
-    let second = iter.next().map_or(0, |x| *x.first().unwrap_or(&0));
-    let second = if second == 0 { default2 } else { second };
-
-    (first, second)
-}
-
-fn canonicalize_params_decstbm(
-    params: &vte::Params,
-    size: crate::grid::Size,
-) -> (u16, u16) {
-    let mut iter = params.iter();
-    let top = iter.next().map_or(0, |x| *x.first().unwrap_or(&0));
-    let top = if top == 0 { 1 } else { top };
-
-    let bottom = iter.next().map_or(0, |x| *x.first().unwrap_or(&0));
-    let bottom = if bottom == 0 { size.rows } else { bottom };
-
-    (top, bottom)
 }
 
 fn u16_to_u8(i: u16) -> Option<u8> {
@@ -1757,26 +1527,4 @@ fn u16_to_u8(i: u16) -> Option<u8> {
         // safe because we just ensured that the value fits in a u8
         Some(i.try_into().unwrap())
     }
-}
-
-fn param_str(params: &vte::Params) -> String {
-    let strs: Vec<_> = params
-        .iter()
-        .map(|subparams| {
-            let subparam_strs: Vec<_> = subparams
-                .iter()
-                .map(std::string::ToString::to_string)
-                .collect();
-            subparam_strs.join(" : ")
-        })
-        .collect();
-    strs.join(" ; ")
-}
-
-fn osc_param_str(params: &[&[u8]]) -> String {
-    let strs: Vec<_> = params
-        .iter()
-        .map(|b| format!("\"{}\"", std::string::String::from_utf8_lossy(b)))
-        .collect();
-    strs.join(" ; ")
 }

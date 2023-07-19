@@ -10,7 +10,7 @@
 //! `tracing-subscriber` is intended for use by both `Subscriber` authors and
 //! application authors using `tracing` to instrument their applications.
 //!
-//! *Compiler support: [requires `rustc` 1.50+][msrv]*
+//! *Compiler support: [requires `rustc` 1.56+][msrv]*
 //!
 //! [msrv]: #supported-rust-versions
 //!
@@ -46,7 +46,7 @@
 //!
 //! ## Feature Flags
 //!
-//! - `std`: Enables APIs that depend on the on the Rust standard library
+//! - `std`: Enables APIs that depend on the Rust standard library
 //!   (enabled by default).
 //! - `alloc`: Depend on [`liballoc`] (enabled by "std").
 //! - `env-filter`: Enables the [`EnvFilter`] type, which implements filtering
@@ -138,14 +138,14 @@
 //! ## Supported Rust Versions
 //!
 //! Tracing is built against the latest stable release. The minimum supported
-//! version is 1.50. The current Tracing version is not guaranteed to build on
+//! version is 1.56. The current Tracing version is not guaranteed to build on
 //! Rust versions earlier than the minimum supported version.
 //!
 //! Tracing follows the same compiler support policies as the rest of the Tokio
 //! project. The current stable Rust compiler and the three most recent minor
 //! versions before it will always be supported. For example, if the current
-//! stable compiler version is 1.45, the minimum supported version will not be
-//! increased past 1.42, three minor versions prior. Increasing the minimum
+//! stable compiler version is 1.69, the minimum supported version will not be
+//! increased past 1.66, three minor versions prior. Increasing the minimum
 //! supported compiler version is not considered a semver breaking change as
 //! long as doing so complies with this policy.
 //!
@@ -158,9 +158,8 @@
 //! [`env_logger` crate]: https://crates.io/crates/env_logger
 //! [`parking_lot`]: https://crates.io/crates/parking_lot
 //! [`time` crate]: https://crates.io/crates/time
-//! [`libstd`]: std
-//! [`liballoc`]: alloc
-#![doc(html_root_url = "https://docs.rs/tracing-subscriber/0.3.15")]
+//! [`liballoc`]: https://doc.rust-lang.org/alloc/index.html
+//! [`libstd`]: https://doc.rust-lang.org/std/index.html
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/master/assets/logo-type.png",
     issue_tracker_base_url = "https://github.com/tokio-rs/tracing/issues/"
@@ -180,7 +179,6 @@
     rust_2018_idioms,
     unreachable_pub,
     bad_style,
-    const_err,
     dead_code,
     improper_ctypes,
     non_shorthand_field_patterns,

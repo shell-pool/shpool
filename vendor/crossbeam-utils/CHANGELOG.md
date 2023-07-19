@@ -1,3 +1,23 @@
+# Version 0.8.16
+
+- Improve implementation of `CachePadded`. (#967)
+
+# Version 0.8.15
+
+- Add `#[clippy::has_significant_drop]` to `ShardedLock{Read,Write}Guard`. (#958)
+- Improve handling of very large timeout. (#953)
+- Soft-deprecate `thread::scope()` in favor of the more efficient `std::thread::scope` that stabilized on Rust 1.63. (#954)
+
+# Version 0.8.14
+
+- Fix build script bug introduced in 0.8.13. (#932)
+
+# Version 0.8.13
+
+**Note:** This release has been yanked due to regression fixed in 0.8.14.
+
+- Improve support for custom targets. (#922)
+
 # Version 0.8.12
 
 - Removes the dependency on the `once_cell` crate to restore the MSRV. (#913)

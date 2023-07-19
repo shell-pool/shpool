@@ -16,7 +16,7 @@ drawn on a [HTML5 canvas using WebAssembly][wasm-demo].
 To use the textwrap crate, add this to your `Cargo.toml` file:
 ```toml
 [dependencies]
-textwrap = "0.15"
+textwrap = "0.16"
 ```
 
 By default, this enables word wrapping with support for Unicode

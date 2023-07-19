@@ -33,6 +33,7 @@
 //! | Web Browser and Node.js | `wasm*‑*‑unknown` | [`Crypto.getRandomValues`] if available, then [`crypto.randomFillSync`] if on Node.js, see [WebAssembly support]
 //! | SOLID             | `*-kmc-solid_*`    | `SOLID_RNG_SampleRandomBytes`
 //! | Nintendo 3DS      | `armv6k-nintendo-3ds` | [`getrandom`][1]
+//! | PS Vita           | `armv7-sony-vita-newlibeabihf` | [`getentropy`][13]
 //! | QNX Neutrino      | `*‑nto-qnx*`          | [`/dev/urandom`][14] (identical to `/dev/random`)
 //! | AIX               | `*-ibm-aix`        | [`/dev/urandom`][15]
 //!
@@ -184,7 +185,7 @@
 #![doc(
     html_logo_url = "https://www.rust-lang.org/logos/rust-logo-128x128-blk.png",
     html_favicon_url = "https://www.rust-lang.org/favicon.ico",
-    html_root_url = "https://docs.rs/getrandom/0.2.9"
+    html_root_url = "https://docs.rs/getrandom/0.2.10"
 )]
 #![no_std]
 #![warn(rust_2018_idioms, unused_lifetimes, missing_docs)]
@@ -262,6 +263,9 @@ cfg_if! {
         // uses Horizon OS (it is aarch64).
         mod util_libc;
         #[path = "3ds.rs"] mod imp;
+    } else if #[cfg(target_os = "vita")] {
+        mod util_libc;
+        #[path = "vita.rs"] mod imp;
     } else if #[cfg(target_os = "emscripten")] {
         mod util_libc;
         #[path = "emscripten.rs"] mod imp;

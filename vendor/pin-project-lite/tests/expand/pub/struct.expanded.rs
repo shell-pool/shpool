@@ -38,6 +38,7 @@ const _: () = {
         pub unpinned: &'__pin (U),
     }
     impl<T, U> Struct<T, U> {
+        #[inline]
         pub(crate) fn project<'__pin>(
             self: ::pin_project_lite::__private::Pin<&'__pin mut Self>,
         ) -> Projection<'__pin, T, U> {
@@ -49,6 +50,7 @@ const _: () = {
                 }
             }
         }
+        #[inline]
         pub(crate) fn project_ref<'__pin>(
             self: ::pin_project_lite::__private::Pin<&'__pin Self>,
         ) -> ProjectionRef<'__pin, T, U> {
@@ -67,10 +69,10 @@ const _: () = {
         pinned: T,
         unpinned: ::pin_project_lite::__private::AlwaysUnpin<U>,
     }
-    impl<'__pin, T, U> ::pin_project_lite::__private::Unpin for Struct<T, U> where
-        __Origin<'__pin, T, U>: ::pin_project_lite::__private::Unpin
-    {
-    }
+    impl<'__pin, T, U> ::pin_project_lite::__private::Unpin for Struct<T, U>
+    where
+        __Origin<'__pin, T, U>: ::pin_project_lite::__private::Unpin,
+    {}
     trait MustNotImplDrop {}
     #[allow(clippy::drop_bounds, drop_bounds)]
     impl<T: ::pin_project_lite::__private::Drop> MustNotImplDrop for T {}

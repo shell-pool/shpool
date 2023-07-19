@@ -4,7 +4,7 @@ Parser for Rust source code
 [<img alt="github" src="https://img.shields.io/badge/github-dtolnay/syn-8da0cb?style=for-the-badge&labelColor=555555&logo=github" height="20">](https://github.com/dtolnay/syn)
 [<img alt="crates.io" src="https://img.shields.io/crates/v/syn.svg?style=for-the-badge&color=fc8d62&logo=rust" height="20">](https://crates.io/crates/syn)
 [<img alt="docs.rs" src="https://img.shields.io/badge/docs.rs-syn-66c2a5?style=for-the-badge&labelColor=555555&logo=docs.rs" height="20">](https://docs.rs/syn)
-[<img alt="build status" src="https://img.shields.io/github/workflow/status/dtolnay/syn/CI/master?style=for-the-badge" height="20">](https://github.com/dtolnay/syn/actions?query=branch%3Amaster)
+[<img alt="build status" src="https://img.shields.io/github/actions/workflow/status/dtolnay/syn/ci.yml?branch=master&style=for-the-badge" height="20">](https://github.com/dtolnay/syn/actions?query=branch%3Amaster)
 
 Syn is a parsing library for parsing a stream of Rust tokens into a syntax tree
 of Rust source code.
@@ -39,14 +39,14 @@ contains some APIs that may be useful more generally.
   procedural macros enable only what they need, and do not pay in compile time
   for all the rest.
 
-[`syn::File`]: https://docs.rs/syn/1.0/syn/struct.File.html
-[`syn::Item`]: https://docs.rs/syn/1.0/syn/enum.Item.html
-[`syn::Expr`]: https://docs.rs/syn/1.0/syn/enum.Expr.html
-[`syn::Type`]: https://docs.rs/syn/1.0/syn/enum.Type.html
-[`syn::DeriveInput`]: https://docs.rs/syn/1.0/syn/struct.DeriveInput.html
-[parser functions]: https://docs.rs/syn/1.0/syn/parse/index.html
+[`syn::File`]: https://docs.rs/syn/2.0/syn/struct.File.html
+[`syn::Item`]: https://docs.rs/syn/2.0/syn/enum.Item.html
+[`syn::Expr`]: https://docs.rs/syn/2.0/syn/enum.Expr.html
+[`syn::Type`]: https://docs.rs/syn/2.0/syn/enum.Type.html
+[`syn::DeriveInput`]: https://docs.rs/syn/2.0/syn/struct.DeriveInput.html
+[parser functions]: https://docs.rs/syn/2.0/syn/parse/index.html
 
-*Version requirement: Syn supports rustc 1.31 and up.*
+*Version requirement: Syn supports rustc 1.56 and up.*
 
 [*Release notes*](https://github.com/dtolnay/syn/releases)
 
@@ -76,7 +76,7 @@ tokens back to the compiler to compile into the user's crate.
 
 ```toml
 [dependencies]
-syn = "1.0"
+syn = "2.0"
 quote = "1.0"
 
 [lib]
@@ -104,9 +104,8 @@ pub fn my_macro(input: TokenStream) -> TokenStream {
 ```
 
 The [`heapsize`] example directory shows a complete working implementation of a
-derive macro. It works on any Rust compiler 1.31+. The example derives a
-`HeapSize` trait which computes an estimate of the amount of heap memory owned
-by a value.
+derive macro. The example derives a `HeapSize` trait which computes an estimate
+of the amount of heap memory owned by a value.
 
 [`heapsize`]: examples/heapsize
 

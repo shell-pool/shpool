@@ -19,8 +19,6 @@ const NO_ATOMIC_CAS: &[&str] = &[
 #[allow(dead_code)] // Only crossbeam-utils uses this.
 const NO_ATOMIC_64: &[&str] = &[
     "arm-linux-androideabi",
-    "armebv7r-none-eabi",
-    "armebv7r-none-eabihf",
     "armv4t-none-eabi",
     "armv4t-unknown-linux-gnueabi",
     "armv5te-none-eabi",
@@ -28,8 +26,6 @@ const NO_ATOMIC_64: &[&str] = &[
     "armv5te-unknown-linux-musleabi",
     "armv5te-unknown-linux-uclibceabi",
     "armv6k-nintendo-3ds",
-    "armv7r-none-eabi",
-    "armv7r-none-eabihf",
     "avr-unknown-gnu-atmega328",
     "hexagon-unknown-linux-musl",
     "m68k-unknown-linux-gnu",
@@ -37,6 +33,7 @@ const NO_ATOMIC_64: &[&str] = &[
     "mips-unknown-linux-musl",
     "mips-unknown-linux-uclibc",
     "mipsel-sony-psp",
+    "mipsel-sony-psx",
     "mipsel-unknown-linux-gnu",
     "mipsel-unknown-linux-musl",
     "mipsel-unknown-linux-uclibc",
@@ -73,6 +70,9 @@ const NO_ATOMIC_64: &[&str] = &[
 #[allow(dead_code)] // Only crossbeam-utils uses this.
 const NO_ATOMIC: &[&str] = &[
     "avr-unknown-gnu-atmega328",
+    "bpfeb-unknown-none",
+    "bpfel-unknown-none",
+    "mipsel-sony-psx",
     "msp430-none-elf",
     "riscv32i-unknown-none-elf",
     "riscv32im-unknown-none-elf",

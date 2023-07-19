@@ -1,9 +1,11 @@
-use std::u16;
-
-use crate::packed::pattern::Patterns;
-use crate::packed::rabinkarp::RabinKarp;
-use crate::packed::teddy::{self, Teddy};
-use crate::Match;
+use crate::{
+    packed::{
+        pattern::Patterns,
+        rabinkarp::RabinKarp,
+        teddy::{self, Teddy},
+    },
+    util::search::{Match, Span},
+};
 
 /// This is a limit placed on the total number of patterns we're willing to try
 /// and match at once. As more sophisticated algorithms are added, this number
@@ -13,12 +15,10 @@ const PATTERN_LIMIT: usize = 128;
 /// A knob for controlling the match semantics of a packed multiple string
 /// searcher.
 ///
-/// This differs from the
-/// [`MatchKind`](../enum.MatchKind.html)
-/// type in the top-level crate module in that it doesn't support
-/// "standard" match semantics, and instead only supports leftmost-first or
-/// leftmost-longest. Namely, "standard" semantics cannot be easily supported
-/// by packed searchers.
+/// This differs from the [`MatchKind`](crate::MatchKind) type in the top-level
+/// crate module in that it doesn't support "standard" match semantics,
+/// and instead only supports leftmost-first or leftmost-longest. Namely,
+/// "standard" semantics cannot be easily supported by packed searchers.
 ///
 /// For more information on the distinction between leftmost-first and
 /// leftmost-longest, see the docs on the top-level `MatchKind` type.
@@ -26,6 +26,7 @@ const PATTERN_LIMIT: usize = 128;
 /// Unlike the top-level `MatchKind` type, the default match semantics for this
 /// type are leftmost-first.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum MatchKind {
     /// Use leftmost-first match semantics, which reports leftmost matches.
     /// When there are multiple possible leftmost matches, the match
@@ -38,13 +39,6 @@ pub enum MatchKind {
     /// When there are multiple possible leftmost matches, the longest match
     /// is chosen.
     LeftmostLongest,
-    /// Hints that destructuring should not be exhaustive.
-    ///
-    /// This enum may grow additional variants, so this makes sure clients
-    /// don't count on exhaustive matching. (Otherwise, adding a new variant
-    /// could break existing code.)
-    #[doc(hidden)]
-    __Nonexhaustive,
 }
 
 impl Default for MatchKind {
@@ -59,9 +53,8 @@ impl Default for MatchKind {
 /// match semantics (leftmost-first or leftmost-longest) of a searcher. In the
 /// future, more knobs may be made available.
 ///
-/// A configuration produces a [`packed::Builder`](struct.Builder.html), which
-/// in turn can be used to construct a
-/// [`packed::Searcher`](struct.Searcher.html) for searching.
+/// A configuration produces a [`packed::Builder`](Builder), which in turn can
+/// be used to construct a [`packed::Searcher`](Searcher) for searching.
 ///
 /// # Example
 ///
@@ -69,7 +62,7 @@ impl Default for MatchKind {
 /// default (leftmost-first).
 ///
 /// ```
-/// use aho_corasick::packed::{Config, MatchKind};
+/// use aho_corasick::{packed::{Config, MatchKind}, PatternID};
 ///
 /// # fn example() -> Option<()> {
 /// let searcher = Config::new()
@@ -78,13 +71,13 @@ impl Default for MatchKind {
 ///     .add("foo")
 ///     .add("foobar")
 ///     .build()?;
-/// let matches: Vec<usize> = searcher
+/// let matches: Vec<PatternID> = searcher
 ///     .find_iter("foobar")
 ///     .map(|mat| mat.pattern())
 ///     .collect();
-/// assert_eq!(vec![1], matches);
+/// assert_eq!(vec![PatternID::must(1)], matches);
 /// # Some(()) }
-/// # if cfg!(target_arch = "x86_64") {
+/// # if cfg!(all(feature = "std", target_arch = "x86_64")) {
 /// #     example().unwrap()
 /// # } else {
 /// #     assert!(example().is_none());
@@ -128,9 +121,7 @@ impl Config {
     }
 
     /// Create a packed builder from this configuration. The builder can be
-    /// used to accumulate patterns and create a
-    /// [`Searcher`](struct.Searcher.html)
-    /// from them.
+    /// used to accumulate patterns and create a [`Searcher`] from them.
     pub fn builder(&self) -> Builder {
         Builder::from_config(self.clone())
     }
@@ -203,20 +194,20 @@ impl Config {
 /// default, leftmost-first match semantics are used.
 ///
 /// ```
-/// use aho_corasick::packed::{Builder, MatchKind};
+/// use aho_corasick::{packed::{Builder, MatchKind}, PatternID};
 ///
 /// # fn example() -> Option<()> {
 /// let searcher = Builder::new()
 ///     .add("foobar")
 ///     .add("foo")
 ///     .build()?;
-/// let matches: Vec<usize> = searcher
+/// let matches: Vec<PatternID> = searcher
 ///     .find_iter("foobar")
 ///     .map(|mat| mat.pattern())
 ///     .collect();
-/// assert_eq!(vec![0], matches);
+/// assert_eq!(vec![PatternID::ZERO], matches);
 /// # Some(()) }
-/// # if cfg!(target_arch = "x86_64") {
+/// # if cfg!(all(feature = "std", target_arch = "x86_64")) {
 /// #     example().unwrap()
 /// # } else {
 /// #     assert!(example().is_none());
@@ -258,6 +249,7 @@ impl Builder {
         // is to force it using undocumented APIs (for tests/benchmarks).
         let (search_kind, minimum_len) = match self.config.force {
             None | Some(ForceAlgorithm::Teddy) => {
+                debug!("trying to build Teddy packed matcher");
                 let teddy = match self.build_teddy(&patterns) {
                     None => return None,
                     Some(teddy) => teddy,
@@ -265,7 +257,10 @@ impl Builder {
                 let minimum_len = teddy.minimum_len();
                 (SearchKind::Teddy(teddy), minimum_len)
             }
-            Some(ForceAlgorithm::RabinKarp) => (SearchKind::RabinKarp, 0),
+            Some(ForceAlgorithm::RabinKarp) => {
+                debug!("using Rabin-Karp packed matcher");
+                (SearchKind::RabinKarp, 0)
+            }
         };
         Some(Searcher { patterns, rabinkarp, search_kind, minimum_len })
     }
@@ -297,7 +292,7 @@ impl Builder {
             return self;
         }
         // Just in case PATTERN_LIMIT increases beyond u16::MAX.
-        assert!(self.patterns.len() <= u16::MAX as usize);
+        assert!(self.patterns.len() <= core::u16::MAX as usize);
 
         let pattern = pattern.as_ref();
         if pattern.is_empty() {
@@ -344,8 +339,7 @@ impl Default for Builder {
 ///
 /// If callers need more flexible construction, or if one wants to change the
 /// match semantics (either leftmost-first or leftmost-longest), then one can
-/// use the [`Config`](struct.Config.html) and/or
-/// [`Builder`](struct.Builder.html) types for more fine grained control.
+/// use the [`Config`] and/or [`Builder`] types for more fine grained control.
 ///
 /// # Example
 ///
@@ -353,17 +347,17 @@ impl Default for Builder {
 /// By default, leftmost-first match semantics are used.
 ///
 /// ```
-/// use aho_corasick::packed::{MatchKind, Searcher};
+/// use aho_corasick::{packed::{MatchKind, Searcher}, PatternID};
 ///
 /// # fn example() -> Option<()> {
 /// let searcher = Searcher::new(["foobar", "foo"].iter().cloned())?;
-/// let matches: Vec<usize> = searcher
+/// let matches: Vec<PatternID> = searcher
 ///     .find_iter("foobar")
 ///     .map(|mat| mat.pattern())
 ///     .collect();
-/// assert_eq!(vec![0], matches);
+/// assert_eq!(vec![PatternID::ZERO], matches);
 /// # Some(()) }
-/// # if cfg!(target_arch = "x86_64") {
+/// # if cfg!(all(feature = "std", target_arch = "x86_64")) {
 /// #     example().unwrap()
 /// # } else {
 /// #     assert!(example().is_none());
@@ -396,17 +390,17 @@ impl Searcher {
     /// Basic usage:
     ///
     /// ```
-    /// use aho_corasick::packed::{MatchKind, Searcher};
+    /// use aho_corasick::{packed::{MatchKind, Searcher}, PatternID};
     ///
     /// # fn example() -> Option<()> {
     /// let searcher = Searcher::new(["foobar", "foo"].iter().cloned())?;
-    /// let matches: Vec<usize> = searcher
+    /// let matches: Vec<PatternID> = searcher
     ///     .find_iter("foobar")
     ///     .map(|mat| mat.pattern())
     ///     .collect();
-    /// assert_eq!(vec![0], matches);
+    /// assert_eq!(vec![PatternID::ZERO], matches);
     /// # Some(()) }
-    /// # if cfg!(target_arch = "x86_64") {
+    /// # if cfg!(all(feature = "std", target_arch = "x86_64")) {
     /// #     example().unwrap()
     /// # } else {
     /// #     assert!(example().is_none());
@@ -420,6 +414,20 @@ impl Searcher {
         Builder::new().extend(patterns).build()
     }
 
+    /// A convenience function for calling `Config::new()`.
+    ///
+    /// This is useful for avoiding an additional import.
+    pub fn config() -> Config {
+        Config::new()
+    }
+
+    /// A convenience function for calling `Builder::new()`.
+    ///
+    /// This is useful for avoiding an additional import.
+    pub fn builder() -> Builder {
+        Builder::new()
+    }
+
     /// Return the first occurrence of any of the patterns in this searcher,
     /// according to its match semantics, in the given haystack. The `Match`
     /// returned will include the identifier of the pattern that matched, which
@@ -431,23 +439,25 @@ impl Searcher {
     /// Basic usage:
     ///
     /// ```
-    /// use aho_corasick::packed::{MatchKind, Searcher};
+    /// use aho_corasick::{packed::{MatchKind, Searcher}, PatternID};
     ///
     /// # fn example() -> Option<()> {
     /// let searcher = Searcher::new(["foobar", "foo"].iter().cloned())?;
     /// let mat = searcher.find("foobar")?;
-    /// assert_eq!(0, mat.pattern());
+    /// assert_eq!(PatternID::ZERO, mat.pattern());
     /// assert_eq!(0, mat.start());
     /// assert_eq!(6, mat.end());
     /// # Some(()) }
-    /// # if cfg!(target_arch = "x86_64") {
+    /// # if cfg!(all(feature = "std", target_arch = "x86_64")) {
     /// #     example().unwrap()
     /// # } else {
     /// #     assert!(example().is_none());
     /// # }
     /// ```
+    #[inline]
     pub fn find<B: AsRef<[u8]>>(&self, haystack: B) -> Option<Match> {
-        self.find_at(haystack, 0)
+        let haystack = haystack.as_ref();
+        self.find_in(haystack, Span::from(0..haystack.len()))
     }
 
     /// Return the first occurrence of any of the patterns in this searcher,
@@ -464,37 +474,45 @@ impl Searcher {
     /// Basic usage:
     ///
     /// ```
-    /// use aho_corasick::packed::{MatchKind, Searcher};
+    /// use aho_corasick::{packed::{MatchKind, Searcher}, PatternID, Span};
     ///
     /// # fn example() -> Option<()> {
+    /// let haystack = "foofoobar";
     /// let searcher = Searcher::new(["foobar", "foo"].iter().cloned())?;
-    /// let mat = searcher.find_at("foofoobar", 3)?;
-    /// assert_eq!(0, mat.pattern());
+    /// let mat = searcher.find_in(haystack, Span::from(3..haystack.len()))?;
+    /// assert_eq!(PatternID::ZERO, mat.pattern());
     /// assert_eq!(3, mat.start());
     /// assert_eq!(9, mat.end());
     /// # Some(()) }
-    /// # if cfg!(target_arch = "x86_64") {
+    /// # if cfg!(all(feature = "std", target_arch = "x86_64")) {
     /// #     example().unwrap()
     /// # } else {
     /// #     assert!(example().is_none());
     /// # }
     /// ```
-    pub fn find_at<B: AsRef<[u8]>>(
+    #[inline]
+    pub fn find_in<B: AsRef<[u8]>>(
         &self,
         haystack: B,
-        at: usize,
+        span: Span,
     ) -> Option<Match> {
         let haystack = haystack.as_ref();
         match self.search_kind {
             SearchKind::Teddy(ref teddy) => {
-                if haystack[at..].len() < teddy.minimum_len() {
-                    return self.slow_at(haystack, at);
+                if haystack[span].len() < teddy.minimum_len() {
+                    return self.find_in_slow(haystack, span);
                 }
-                teddy.find_at(&self.patterns, haystack, at)
+                teddy.find_at(
+                    &self.patterns,
+                    &haystack[..span.end],
+                    span.start,
+                )
             }
-            SearchKind::RabinKarp => {
-                self.rabinkarp.find_at(&self.patterns, haystack, at)
-            }
+            SearchKind::RabinKarp => self.rabinkarp.find_at(
+                &self.patterns,
+                &haystack[..span.end],
+                span.start,
+            ),
         }
     }
 
@@ -506,17 +524,22 @@ impl Searcher {
     /// Basic usage:
     ///
     /// ```
-    /// use aho_corasick::packed::{MatchKind, Searcher};
+    /// use aho_corasick::{packed::{MatchKind, Searcher}, PatternID};
     ///
     /// # fn example() -> Option<()> {
     /// let searcher = Searcher::new(["foobar", "foo"].iter().cloned())?;
-    /// let matches: Vec<usize> = searcher
+    /// let matches: Vec<PatternID> = searcher
     ///     .find_iter("foobar fooba foofoo")
     ///     .map(|mat| mat.pattern())
     ///     .collect();
-    /// assert_eq!(vec![0, 1, 1, 1], matches);
+    /// assert_eq!(vec![
+    ///     PatternID::must(0),
+    ///     PatternID::must(1),
+    ///     PatternID::must(1),
+    ///     PatternID::must(1),
+    /// ], matches);
     /// # Some(()) }
-    /// # if cfg!(target_arch = "x86_64") {
+    /// # if cfg!(all(feature = "std", target_arch = "x86_64")) {
     /// #     example().unwrap()
     /// # } else {
     /// #     assert!(example().is_none());
@@ -526,7 +549,9 @@ impl Searcher {
         &'a self,
         haystack: &'b B,
     ) -> FindIter<'a, 'b> {
-        FindIter { searcher: self, haystack: haystack.as_ref(), at: 0 }
+        let haystack = haystack.as_ref();
+        let span = Span::from(0..haystack.len());
+        FindIter { searcher: self, haystack, span }
     }
 
     /// Returns the match kind used by this packed searcher.
@@ -543,7 +568,7 @@ impl Searcher {
     /// // leftmost-first is the default.
     /// assert_eq!(&MatchKind::LeftmostFirst, searcher.match_kind());
     /// # Some(()) }
-    /// # if cfg!(target_arch = "x86_64") {
+    /// # if cfg!(all(feature = "std", target_arch = "x86_64")) {
     /// #     example().unwrap()
     /// # } else {
     /// #     assert!(example().is_none());
@@ -569,10 +594,10 @@ impl Searcher {
 
     /// Returns the approximate total amount of heap used by this searcher, in
     /// units of bytes.
-    pub fn heap_bytes(&self) -> usize {
-        self.patterns.heap_bytes()
-            + self.rabinkarp.heap_bytes()
-            + self.search_kind.heap_bytes()
+    pub fn memory_usage(&self) -> usize {
+        self.patterns.memory_usage()
+            + self.rabinkarp.memory_usage()
+            + self.search_kind.memory_usage()
     }
 
     /// Use a slow (non-packed) searcher.
@@ -581,15 +606,19 @@ impl Searcher {
     /// not be used to search a specific haystack. For example, if Teddy was
     /// built but the haystack is smaller than ~34 bytes, then Teddy might not
     /// be able to run.
-    fn slow_at(&self, haystack: &[u8], at: usize) -> Option<Match> {
-        self.rabinkarp.find_at(&self.patterns, haystack, at)
+    fn find_in_slow(&self, haystack: &[u8], span: Span) -> Option<Match> {
+        self.rabinkarp.find_at(
+            &self.patterns,
+            &haystack[..span.end],
+            span.start,
+        )
     }
 }
 
 impl SearchKind {
-    fn heap_bytes(&self) -> usize {
+    fn memory_usage(&self) -> usize {
         match *self {
-            SearchKind::Teddy(ref ted) => ted.heap_bytes(),
+            SearchKind::Teddy(ref ted) => ted.memory_usage(),
             SearchKind::RabinKarp => 0,
         }
     }
@@ -597,28 +626,28 @@ impl SearchKind {
 
 /// An iterator over non-overlapping matches from a packed searcher.
 ///
-/// The lifetime `'s` refers to the lifetime of the underlying
-/// [`Searcher`](struct.Searcher.html), while the lifetime `'h` refers to the
-/// lifetime of the haystack being searched.
+/// The lifetime `'s` refers to the lifetime of the underlying [`Searcher`],
+/// while the lifetime `'h` refers to the lifetime of the haystack being
+/// searched.
 #[derive(Debug)]
 pub struct FindIter<'s, 'h> {
     searcher: &'s Searcher,
     haystack: &'h [u8],
-    at: usize,
+    span: Span,
 }
 
 impl<'s, 'h> Iterator for FindIter<'s, 'h> {
     type Item = Match;
 
     fn next(&mut self) -> Option<Match> {
-        if self.at > self.haystack.len() {
+        if self.span.start > self.span.end {
             return None;
         }
-        match self.searcher.find_at(&self.haystack, self.at) {
+        match self.searcher.find_in(&self.haystack, self.span) {
             None => None,
-            Some(c) => {
-                self.at = c.end;
-                Some(c)
+            Some(m) => {
+                self.span.start = m.end();
+                Some(m)
             }
         }
     }
