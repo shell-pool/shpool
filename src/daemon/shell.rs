@@ -135,7 +135,13 @@ impl SessionInner {
                 .context("sending initial client connection ack")?;
             info!("got initial client connection");
 
-            let mut resize_cmd: Option<ResizeCmd> = None;
+            let mut resize_cmd: Option<ResizeCmd> = client_conn.as_ref().and_then(|conn| {
+                Some(ResizeCmd {
+                    size: conn.size.clone(),
+                    when: time::Instant::now(),
+                })
+            });
+
             loop {
                 let mut do_reattach = false;
                 crossbeam_channel::select! {
