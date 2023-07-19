@@ -35,16 +35,19 @@ rapture repo. To do this, look for the most recent datestamped direct
 repository with
 
 ```
-rapture listrepos | grep shpool
+rapture listrepos shpool
 ```
 
-Choose the one with the most recent date and largest serial number,
-then add tags.
+The most recently created direct repo will be automatically pointed
+to by the `shpool-unstable` repo.
+
+Once you are ready to promote a repo to stable, you can run
 
 ```
-rapture settag <direct repo> cloudtop-connectivity-eng-team.unstable:true
 rapture settag <direct repo> cloudtop-connectivity-eng-team.stable:true
 ```
+
+to point the `shpool-stable` repo at it.
 
 If there is a change in the release that seems risky, you may want to
 announce the release on the mailing list telling people they can
