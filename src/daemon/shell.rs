@@ -99,6 +99,18 @@ struct ResizeCmd {
     when: time::Instant,
 }
 
+fn log_if_error<T, E>(ctx: &str, res: Result<T, E>) -> Result<T, E>
+    where E: std::fmt::Debug
+{
+    match res {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            error!("{}: {:?}", ctx, e);
+            Err(e)
+        }
+    }
+}
+
 impl SessionInner {
     /// Spawn the reader thread which continually reads from the pty
     /// and sends data both to the output spool and to the client,
@@ -118,7 +130,7 @@ impl SessionInner {
 
         let mut pty_master = self.pty_master.is_parent()?.clone();
         let name = self.name.clone();
-        Ok(thread::spawn(move || {
+        let mut closure = move || {
             let _s = span!(Level::INFO, "reader", s = name).entered();
 
             let mut output_spool =
@@ -289,7 +301,9 @@ impl SessionInner {
                     client_conn = None;
                 }
             }
-        }))
+        };
+
+        Ok(thread::spawn(move || { log_if_error("error in reader", closure()) }))
     }
 
     /// bidi_stream shuffles bytes between the subprocess and
