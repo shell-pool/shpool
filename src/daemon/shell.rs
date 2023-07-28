@@ -100,15 +100,13 @@ struct ResizeCmd {
 }
 
 fn log_if_error<T, E>(ctx: &str, res: Result<T, E>) -> Result<T, E>
-    where E: std::fmt::Debug
+where
+    E: std::fmt::Debug,
 {
-    match res {
-        Ok(v) => Ok(v),
-        Err(e) => {
-            error!("{}: {:?}", ctx, e);
-            Err(e)
-        }
-    }
+    res.map_err(|e| {
+        error!("{}: {:?}", ctx, e);
+        e
+    })
 }
 
 impl SessionInner {
@@ -149,10 +147,7 @@ impl SessionInner {
             info!("got initial client connection");
 
             let mut resize_cmd: Option<ResizeCmd> = client_conn.as_ref().and_then(|conn| {
-                Some(ResizeCmd {
-                    size: conn.size.clone(),
-                    when: time::Instant::now(),
-                })
+                Some(ResizeCmd { size: conn.size.clone(), when: time::Instant::now() })
             });
 
             loop {
@@ -248,8 +243,9 @@ impl SessionInner {
                     let restore_buf = match session_restore_mode {
                         Simple => vec![],
                         Screen => output_spool.screen().contents_formatted(),
-                        Lines(nlines) => output_spool.screen()
-                            .last_n_rows_contents_formatted(nlines),
+                        Lines(nlines) => {
+                            output_spool.screen().last_n_rows_contents_formatted(nlines)
+                        }
                     };
                     if let (true, Some(conn)) = (restore_buf.len() > 0, client_conn.as_ref()) {
                         trace!("restore chunk='{}'", String::from_utf8_lossy(&restore_buf[..]));
@@ -303,7 +299,7 @@ impl SessionInner {
             }
         };
 
-        Ok(thread::spawn(move || { log_if_error("error in reader", closure()) }))
+        Ok(thread::spawn(move || log_if_error("error in reader", closure())))
     }
 
     /// bidi_stream shuffles bytes between the subprocess and

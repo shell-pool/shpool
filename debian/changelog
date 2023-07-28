@@ -1,21 +1,26 @@
+shpool (0.2.2) unstable; urgency=low
+
+  * Fix bug in lines reattach mode
+
+ -- Ethan Pailes <pailes@google.com>  Fri, 28 Jul 2023 14:14:00 -0400
 shpool (0.2.1) unstable; urgency=low
 
   * Fix bug where initial tty size was not set correctly
 
- -- Ethan Pailes <pailes@google.com>  Wed, 19 August 2023 13:32:00 -0400
+ -- Ethan Pailes <pailes@google.com>  Wed, 19 Jul 2023 13:32:00 -0400
 shpool (0.2.0) unstable; urgency=low
 
   * Add support for session_restore_mode option
   * Loosen exe mismatch restriction
   * [BREAKING] Change config identifiers to be lower case
 
- -- Ethan Pailes <pailes@google.com>  Tue, 18 August 2023 16:02:00 -0400
+ -- Ethan Pailes <pailes@google.com>  Tue, 18 Jul 2023 16:02:00 -0400
 shpool (0.1.2) unstable; urgency=low
 
   * Fix bug in how PATH is set in new shells
   * Add initial_path config option
 
- -- Ethan Pailes <pailes@google.com>  Mon, 05 June 2023 14:59:25 -0400
+ -- Ethan Pailes <pailes@google.com>  Mon, 05 Jun 2023 14:59:25 -0400
 shpool (0.1.1) unstable; urgency=low
 
   * Fix systemd unit file.
