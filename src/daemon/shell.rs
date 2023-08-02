@@ -156,8 +156,10 @@ impl SessionInner {
                     recv(client_connection) -> new_connection => {
                         match new_connection {
                             Ok(Some(conn)) => {
+                                info!("got new connection");
                                 do_reattach = true;
-                                let ack = if client_conn.is_some() {
+                                let ack = if let Some(old_conn) = client_conn {
+                                    old_conn.stream.shutdown(net::Shutdown::Both)?;
                                     ClientConnectionStatus::Replaced
                                 } else {
                                     ClientConnectionStatus::New
@@ -186,6 +188,7 @@ impl SessionInner {
                                     .context("sending client connection ack")?;
                             }
                             Ok(None) => {
+                                info!("got hangup");
                                 let ack = if let Some(old_conn) = client_conn {
                                     old_conn.stream.shutdown(net::Shutdown::Both)?;
                                     ClientConnectionStatus::Detached
@@ -199,22 +202,31 @@ impl SessionInner {
                             }
 
                             // SessionInner getting dropped, so this thread should go away.
-                            Err(crossbeam_channel::RecvError) => return Ok(()),
+                            Err(crossbeam_channel::RecvError) => {
+                                info!("client conn: bailing due to RecvError");
+                                return Ok(())
+                            },
                         }
                     }
                     recv(tty_size_change) -> new_size => {
-                        if let Ok(size) = new_size {
-                            info!("resize size={:?}", size);
-                            output_spool.screen_mut()
-                                .set_size(size.rows, size.cols);
-                            resize_cmd = Some(ResizeCmd {
-                                size: size,
-                                // No delay needed for ordinary resizes, just
-                                // for reconnects.
-                                when: time::Instant::now(),
-                            });
-                            tty_size_change_ack.send(())
-                                .context("sending size change ack")?;
+                        match new_size {
+                            Ok(size) => {
+                                info!("resize size={:?}", size);
+                                output_spool.screen_mut()
+                                    .set_size(size.rows, size.cols);
+                                resize_cmd = Some(ResizeCmd {
+                                    size: size,
+                                    // No delay needed for ordinary resizes, just
+                                    // for reconnects.
+                                    when: time::Instant::now(),
+                                });
+                                tty_size_change_ack.send(())
+                                    .context("sending size change ack")?;
+                            }
+                            Err(err) => {
+                                info!("size change: bailing due to: {:?}", err);
+                                return Ok(());
+                            }
                         }
                     }
 
@@ -230,6 +242,7 @@ impl SessionInner {
                     {
                         resize_cmd.size.set_fd(pty_master.as_raw_fd())?;
                         executed_resize = true;
+                        info!("executed resize");
                     }
                 }
                 if executed_resize {
@@ -249,14 +262,21 @@ impl SessionInner {
                     };
                     if let (true, Some(conn)) = (restore_buf.len() > 0, client_conn.as_ref()) {
                         trace!("restore chunk='{}'", String::from_utf8_lossy(&restore_buf[..]));
-                        let chunk = protocol::Chunk {
-                            kind: protocol::ChunkKind::Data,
-                            buf: &restore_buf[..],
-                        };
-
+                        // send the restore buffer, broken up into chunks so that we don't make
+                        // the client allocate too much
                         let mut s = conn.sink.lock().unwrap();
-                        if let Err(err) = chunk.write_to(&mut *s).and_then(|_| s.flush()) {
-                            warn!("write err session-restor buf: {:?}", err);
+                        for block in restore_buf.as_slice().chunks(consts::BUF_SIZE) {
+                            let chunk = protocol::Chunk {
+                                kind: protocol::ChunkKind::Data,
+                                buf: block,
+                            };
+
+                            if let Err(err) = chunk.write_to(&mut *s) {
+                                warn!("err writing session-restore buf: {:?}", err);
+                            }
+                        }
+                        if let Err(err) = s.flush() {
+                            warn!("err flushing session-restore: {:?}", err);
                         }
                     }
                 }

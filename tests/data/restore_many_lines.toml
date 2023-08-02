@@ -1,0 +1,8 @@
+norc = true
+noecho = true
+shell = "/bin/bash"
+session_restore_mode = { lines = 5000 }
+
+[env]
+PS1 = "prompt> "
+TERM = ""

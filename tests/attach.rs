@@ -757,6 +757,56 @@ fn lines_restore() -> anyhow::Result<()> {
     })
 }
 
+// Test to make sure that when we do a restore, we don't send back too many
+// bytes in once chunk. The attach client has a fixed size buffer it reads into,
+// and it will crash if it gets sent a chunk with too large a length.
+#[test]
+#[timeout(30000)]
+fn lines_big_chunk_restore() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc = support::daemon::Proc::new("restore_many_lines.toml", true)
+            .context("starting daemon proc")?;
+        let bidi_done_w = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
+
+        // BUF_SIZE from src/consts.rs
+        let max_chunk_size = 1024 * 16;
+
+        {
+            let mut attach_proc =
+                daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+            let mut line_matcher = attach_proc.line_matcher()?;
+
+            // generate a bunch of data that will cause the restore buffer to be too large
+            // for a single chunk
+            let blob = format!("echo {}", (0..max_chunk_size).map(|_| "x").collect::<String>());
+            attach_proc.run_cmd(blob.as_str())?;
+            line_matcher.match_re("xx$")?;
+
+            attach_proc.run_cmd("echo food")?;
+            line_matcher.match_re("food$")?;
+        }
+
+        // wait until the daemon has noticed that the connection
+        // has dropped before we attempt to open the connection again
+        daemon_proc.events = Some(bidi_done_w.wait_final_event("daemon-bidi-stream-done")?);
+
+        {
+            let mut attach_proc =
+                daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+            let mut reader = std::io::BufReader::new(
+                attach_proc.proc.stdout.take().ok_or(anyhow!("missing stdout"))?,
+            );
+
+            let mut output = vec![];
+            reader.read_until(b'd', &mut output)?;
+            let chunk = String::from_utf8_lossy(&output[..]);
+            assert!(chunk.contains("foo"));
+        }
+
+        Ok(())
+    })
+}
+
 #[ignore] // TODO: re-enable, this test if flaky
 #[test]
 fn up_arrow_no_crash() -> anyhow::Result<()> {
