@@ -1,3 +1,8 @@
+shpool (0.2.3) unstable; urgency=low
+
+  * Fix long chunk bug in session restore
+
+ -- Ethan Pailes <pailes@google.com>  Wed, 02 Aug 2023 13:38:00 -0400
 shpool (0.2.2) unstable; urgency=low
 
   * Fix bug in lines reattach mode

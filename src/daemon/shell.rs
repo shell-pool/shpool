@@ -266,10 +266,8 @@ impl SessionInner {
                         // the client allocate too much
                         let mut s = conn.sink.lock().unwrap();
                         for block in restore_buf.as_slice().chunks(consts::BUF_SIZE) {
-                            let chunk = protocol::Chunk {
-                                kind: protocol::ChunkKind::Data,
-                                buf: block,
-                            };
+                            let chunk =
+                                protocol::Chunk { kind: protocol::ChunkKind::Data, buf: block };
 
                             if let Err(err) = chunk.write_to(&mut *s) {
                                 warn!("err writing session-restore buf: {:?}", err);
