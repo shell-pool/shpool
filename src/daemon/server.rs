@@ -153,6 +153,18 @@ impl Server {
                             info!("taking over existing session inner");
                             inner.client_stream = Some(stream.try_clone()?);
 
+                            if inner
+                                .reader_join_h
+                                .as_ref()
+                                .map(|h| h.is_finished())
+                                .unwrap_or(false)
+                            {
+                                warn!(
+                                    "child_exited chan unclosed, but reader thread has exited, clobbering with new subshell"
+                                );
+                                status = protocol::AttachStatus::Created { warnings };
+                            }
+
                             // status is already attached
                         }
                         Err(TryRecvError::Disconnected) => {
@@ -160,6 +172,16 @@ impl Server {
                             info!("stale inner={:?}, clobbering with new subshell", inner);
                             status = protocol::AttachStatus::Created { warnings };
                         }
+                    }
+
+                    if inner.reader_join_h.as_ref().map(|h| h.is_finished()).unwrap_or(false) {
+                        info!("reader thread finished, joining");
+                        if let Some(h) = inner.reader_join_h.take() {
+                            h.join()
+                                .map_err(|e| anyhow!("joining reader on reattach: {:?}", e))?
+                                .context("within reader thread on reattach")?;
+                        }
+                        assert!(matches!(status, protocol::AttachStatus::Created { .. }));
                     }
 
                     // fallthrough to bidi streaming
@@ -228,6 +250,18 @@ impl Server {
                 info!("'{}' exited, removing from session table", header.name);
                 let mut shells = self.shells.lock().unwrap();
                 shells.remove(&header.name);
+            }
+            if child_done {
+                // The child shell has exited, so the reader thread should
+                // attempt to read from its stdout and get an error, causing
+                // it to exit. That means we should be safe to join. We use
+                // a seperate if statement to avoid holding the shells lock
+                // while we join the old thread.
+                if let Some(h) = inner.reader_join_h.take() {
+                    h.join()
+                        .map_err(|e| anyhow!("joining reader after child exit: {:?}", e))?
+                        .context("within reader thread after child exit")?;
+                }
             }
 
             info!("finished attach streaming section");

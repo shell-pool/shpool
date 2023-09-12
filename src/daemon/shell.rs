@@ -282,7 +282,13 @@ impl SessionInner {
                 // Block until the shell has some data for us so we can be sure our reads
                 // always succeed. We don't want to end up blocked forever on a read while
                 // a client is trying to attach.
-                let nready = poll::poll(&mut poll_fds, READER_POLL_MS)?;
+                let nready = match poll::poll(&mut poll_fds, READER_POLL_MS) {
+                    Ok(n) => n,
+                    Err(e) => {
+                        error!("polling pty master: {:?}", e);
+                        return Err(e)?;
+                    }
+                };
                 if nready == 0 {
                     // if timeout
                     continue;
@@ -290,7 +296,14 @@ impl SessionInner {
                 if nready != 1 {
                     return Err(anyhow!("reader thread: expected exactly 1 ready fd"));
                 }
-                let len = pty_master.read(&mut buf).context("reading pty master chunk")?;
+                let len = match pty_master.read(&mut buf) {
+                    Ok(l) => l,
+                    Err(e) => {
+                        test_hooks::emit("daemon-reader-read-error");
+                        error!("reading chunk from pty master: {:?}", e);
+                        return Err(e).context("reading pty master chunk")?;
+                    }
+                };
                 trace!("read pty master len={} '{}'", len, String::from_utf8_lossy(&buf[..len]));
                 if len == 0 {
                     continue;
@@ -317,7 +330,9 @@ impl SessionInner {
             }
         };
 
-        Ok(thread::spawn(move || log_if_error("error in reader", closure())))
+        Ok(thread::Builder::new()
+            .name(format!("reader({})", self.name))
+            .spawn(move || log_if_error("error in reader", closure()))?)
     }
 
     /// bidi_stream shuffles bytes between the subprocess and
@@ -373,18 +388,18 @@ impl SessionInner {
         thread::scope(|s| -> anyhow::Result<()> {
             // Spawn the main data transport threads
             let client_to_shell_h = self.spawn_client_to_shell(
-                s, &stop, &pty_master, &mut client_to_shell_client_stream);
+                s, &stop, &pty_master, &mut client_to_shell_client_stream)?;
 
             // Send a steady stream of heartbeats to the client
             // so that if the connection unexpectedly goes
             // down, we detect it immediately.
             let heartbeat_h = self.spawn_heartbeat(
-                s, &stop, &client_stream_m);
+                s, &stop, &client_stream_m)?;
 
             // poll the pty master fd to see if the child
             // shell has exited.
             let supervisor_h = self.spawn_supervisor(
-                s, &stop, &child_done, &pty_master);
+                s, &stop, &child_done, &pty_master)?;
 
             loop {
                 let c_done = child_done.load(Ordering::Acquire);
@@ -452,7 +467,7 @@ impl SessionInner {
         stop: &'scope AtomicBool,
         pty_master: &'scope pty::fork::Master,
         reader_client_stream: &'scope mut UnixStream,
-    ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
+    ) -> anyhow::Result<thread::ScopedJoinHandle<anyhow::Result<()>>> {
         let empty_bindings = vec![config::Keybinding {
             binding: String::from("Ctrl-Space Ctrl-q"),
             action: keybindings::Action::Detach,
@@ -466,113 +481,121 @@ impl SessionInner {
                 .map(|binding| (binding.binding.as_str(), binding.action)),
         );
 
-        scope.spawn(|| -> anyhow::Result<()> {
-            let _s = span!(Level::INFO, "client->shell", s = self.name).entered();
-            let mut bindings = bindings.context("compiling keybindings engine")?;
+        thread::Builder::new()
+            .name(format!("client->shell({})", self.name))
+            .spawn_scoped(scope, || -> anyhow::Result<()> {
+                let _s = span!(Level::INFO, "client->shell", s = self.name).entered();
+                let mut bindings = bindings.context("compiling keybindings engine")?;
 
-            let mut master_writer = pty_master.clone();
+                let mut master_writer = pty_master.clone();
 
-            let mut snip_sections = vec![]; // (<len>, <end offset>)
-            let mut keep_sections = vec![]; // (<start offset>, <end offset>)
-            let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
-            let mut partial_keybinding = vec![];
+                let mut snip_sections = vec![]; // (<len>, <end offset>)
+                let mut keep_sections = vec![]; // (<start offset>, <end offset>)
+                let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
+                let mut partial_keybinding = vec![];
 
-            loop {
-                if stop.load(Ordering::Relaxed) {
-                    info!("recvd stop msg (1)");
-                    return Ok(());
-                }
+                loop {
+                    if stop.load(Ordering::Relaxed) {
+                        info!("recvd stop msg (1)");
+                        return Ok(());
+                    }
 
-                // N.B. we don't need to muck about with chunking or anything
-                // in this direction, because there is only one input stream
-                // to the shell subprocess, vs the two output streams we need
-                // to handle coming back the other way.
-                //
-                // Also, note that we don't access through the mutex because reads
-                // don't need to be excluded from trampling on writes.
-                let mut len =
-                    reader_client_stream.read(&mut buf).context("reading client chunk")?;
-                if len == 0 {
-                    continue;
-                }
-                test_hooks::emit("daemon-read-c2s-chunk");
-                trace!("read client len={}: '{}'", len, String::from_utf8_lossy(&buf[..len]),);
+                    // N.B. we don't need to muck about with chunking or anything
+                    // in this direction, because there is only one input stream
+                    // to the shell subprocess, vs the two output streams we need
+                    // to handle coming back the other way.
+                    //
+                    // Also, note that we don't access through the mutex because reads
+                    // don't need to be excluded from trampling on writes.
+                    let mut len =
+                        reader_client_stream.read(&mut buf).context("reading client chunk")?;
+                    if len == 0 {
+                        continue;
+                    }
+                    test_hooks::emit("daemon-read-c2s-chunk");
+                    trace!("read client len={}: '{}'", len, String::from_utf8_lossy(&buf[..len]),);
 
-                // We might be able to gain some perf by doing this scanning in
-                // a background thread (though maybe not given the need to copy
-                // the data), but just doing it inline doesn't seem have have
-                // a major perf impact, and this way is simpler.
-                snip_sections.clear();
-                for (i, byte) in buf[0..len].into_iter().enumerate() {
-                    use keybindings::BindingResult::*;
-                    match bindings.transition(*byte) {
-                        NoMatch if partial_keybinding.len() > 0 && i < partial_keybinding.len() => {
-                            // it turned out the partial keybinding match was not
-                            // a real match, so flush it to the output stream
-                            debug!(
-                                "flushing partial keybinding_len={} i={}",
-                                partial_keybinding.len(),
-                                i
-                            );
-                            master_writer
-                                .write_all(&partial_keybinding)
-                                .context("writing partial keybinding")?;
-                            if i > 0 {
-                                // snip the leading part of the input chunk that
-                                // was part of this keybinding
-                                snip_sections.push((i, i - 1));
+                    // We might be able to gain some perf by doing this scanning in
+                    // a background thread (though maybe not given the need to copy
+                    // the data), but just doing it inline doesn't seem have have
+                    // a major perf impact, and this way is simpler.
+                    snip_sections.clear();
+                    for (i, byte) in buf[0..len].into_iter().enumerate() {
+                        use keybindings::BindingResult::*;
+                        match bindings.transition(*byte) {
+                            NoMatch
+                                if partial_keybinding.len() > 0 && i < partial_keybinding.len() =>
+                            {
+                                // it turned out the partial keybinding match was not
+                                // a real match, so flush it to the output stream
+                                debug!(
+                                    "flushing partial keybinding_len={} i={}",
+                                    partial_keybinding.len(),
+                                    i
+                                );
+                                master_writer
+                                    .write_all(&partial_keybinding)
+                                    .context("writing partial keybinding")?;
+                                if i > 0 {
+                                    // snip the leading part of the input chunk that
+                                    // was part of this keybinding
+                                    snip_sections.push((i, i - 1));
+                                }
+                                partial_keybinding.clear()
                             }
-                            partial_keybinding.clear()
-                        }
-                        NoMatch => {
-                            partial_keybinding.clear();
-                        }
-                        Partial => partial_keybinding.push(*byte),
-                        Match(action) => {
-                            info!("{:?} keybinding action fired", action);
-                            let keybinding_len = partial_keybinding.len() + 1;
-                            if keybinding_len < i {
-                                // this keybinding is wholly contained in buf
-                                debug!("snipping keybinding_len={} i={}", keybinding_len, i);
-                                snip_sections.push((keybinding_len, i));
-                            } else {
-                                // this keybinding was split across multiple
-                                // input buffers, just snip the last bit
-                                debug!("snipping split keybinding i={}", i);
-                                snip_sections.push((i + 1, i));
+                            NoMatch => {
+                                partial_keybinding.clear();
                             }
-                            partial_keybinding.clear();
+                            Partial => partial_keybinding.push(*byte),
+                            Match(action) => {
+                                info!("{:?} keybinding action fired", action);
+                                let keybinding_len = partial_keybinding.len() + 1;
+                                if keybinding_len < i {
+                                    // this keybinding is wholly contained in buf
+                                    debug!("snipping keybinding_len={} i={}", keybinding_len, i);
+                                    snip_sections.push((keybinding_len, i));
+                                } else {
+                                    // this keybinding was split across multiple
+                                    // input buffers, just snip the last bit
+                                    debug!("snipping split keybinding i={}", i);
+                                    snip_sections.push((i + 1, i));
+                                }
+                                partial_keybinding.clear();
 
-                            use keybindings::Action::*;
-                            match action {
-                                Detach => self.action_detach()?,
-                                NoOp => {}
+                                use keybindings::Action::*;
+                                match action {
+                                    Detach => self.action_detach()?,
+                                    NoOp => {}
+                                }
                             }
                         }
                     }
+                    if partial_keybinding.len() > 0 {
+                        // we have a partial keybinding pending, so don't write
+                        // it to the output stream immediately
+                        let snip_chunk_len = if partial_keybinding.len() > len {
+                            len
+                        } else {
+                            partial_keybinding.len()
+                        };
+                        debug!(
+                            "end of buf w/ partial keybinding_len={} snip_chunk_len={} buf_len={}",
+                            partial_keybinding.len(),
+                            snip_chunk_len,
+                            len
+                        );
+                        snip_sections.push((snip_chunk_len, len - 1));
+                    }
+                    len = snip_buf(&mut buf[..], len, &snip_sections[..], &mut keep_sections);
+
+                    master_writer.write_all(&buf[0..len]).context("writing client chunk")?;
+
+                    master_writer.flush().context("flushing input from client to shell")?;
+
+                    debug!("flushed chunk of len {}", len);
                 }
-                if partial_keybinding.len() > 0 {
-                    // we have a partial keybinding pending, so don't write
-                    // it to the output stream immediately
-                    let snip_chunk_len =
-                        if partial_keybinding.len() > len { len } else { partial_keybinding.len() };
-                    debug!(
-                        "end of buf w/ partial keybinding_len={} snip_chunk_len={} buf_len={}",
-                        partial_keybinding.len(),
-                        snip_chunk_len,
-                        len
-                    );
-                    snip_sections.push((snip_chunk_len, len - 1));
-                }
-                len = snip_buf(&mut buf[..], len, &snip_sections[..], &mut keep_sections);
-
-                master_writer.write_all(&buf[0..len]).context("writing client chunk")?;
-
-                master_writer.flush().context("flushing input from client to shell")?;
-
-                debug!("flushed chunk of len {}", len);
-            }
-        })
+            })
+            .map_err(|e| anyhow!("{:?}", e))
     }
 
     #[instrument(skip_all)]
@@ -581,36 +604,39 @@ impl SessionInner {
         scope: &'scope thread::Scope<'scope, '_>,
         stop: &'scope AtomicBool,
         client_stream_m: &'scope Arc<Mutex<io::BufWriter<UnixStream>>>,
-    ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
-        scope.spawn(move || -> anyhow::Result<()> {
-            let _s1 = span!(Level::INFO, "heartbeat", s = self.name).entered();
+    ) -> anyhow::Result<thread::ScopedJoinHandle<anyhow::Result<()>>> {
+        thread::Builder::new()
+            .name(format!("heartbeat({})", self.name))
+            .spawn_scoped(scope, move || -> anyhow::Result<()> {
+                let _s1 = span!(Level::INFO, "heartbeat", s = self.name).entered();
 
-            loop {
-                trace!("checking stop_rx");
-                if stop.load(Ordering::Relaxed) {
-                    info!("recvd stop msg");
-                    return Ok(());
-                }
+                loop {
+                    trace!("checking stop_rx");
+                    if stop.load(Ordering::Relaxed) {
+                        info!("recvd stop msg");
+                        return Ok(());
+                    }
 
-                thread::sleep(consts::HEARTBEAT_DURATION);
-                let chunk = protocol::Chunk { kind: protocol::ChunkKind::Heartbeat, buf: &[] };
-                {
-                    let mut s = client_stream_m.lock().unwrap();
-                    match chunk.write_to(&mut *s).and_then(|_| s.flush()) {
-                        Ok(_) => {
-                            trace!("wrote heartbeat");
-                        }
-                        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {
-                            trace!("client hangup");
-                            return Ok(());
-                        }
-                        Err(e) => {
-                            return Err(e).context("writing heartbeat")?;
+                    thread::sleep(consts::HEARTBEAT_DURATION);
+                    let chunk = protocol::Chunk { kind: protocol::ChunkKind::Heartbeat, buf: &[] };
+                    {
+                        let mut s = client_stream_m.lock().unwrap();
+                        match chunk.write_to(&mut *s).and_then(|_| s.flush()) {
+                            Ok(_) => {
+                                trace!("wrote heartbeat");
+                            }
+                            Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {
+                                trace!("client hangup");
+                                return Ok(());
+                            }
+                            Err(e) => {
+                                return Err(e).context("writing heartbeat")?;
+                            }
                         }
                     }
                 }
-            }
-        })
+            })
+            .map_err(|e| anyhow!("{:?}", e))
     }
 
     #[instrument(skip_all)]
@@ -620,33 +646,36 @@ impl SessionInner {
         stop: &'scope AtomicBool,
         child_done: &'scope AtomicBool,
         pty_master: &'scope pty::fork::Master,
-    ) -> thread::ScopedJoinHandle<anyhow::Result<()>> {
-        scope.spawn(|| -> anyhow::Result<()> {
-            let _s1 = span!(Level::INFO, "supervisor", s = self.name).entered();
+    ) -> anyhow::Result<thread::ScopedJoinHandle<anyhow::Result<()>>> {
+        thread::Builder::new()
+            .name(format!("supervisor({})", self.name))
+            .spawn_scoped(scope, || -> anyhow::Result<()> {
+                let _s1 = span!(Level::INFO, "supervisor", s = self.name).entered();
 
-            loop {
-                trace!("checking stop_rx (pty_master={})", pty_master.as_raw_fd());
-                if stop.load(Ordering::Relaxed) {
-                    info!("recvd stop msg");
-                    return Ok(());
-                }
-
-                match self.child_exited.recv_timeout(SUPERVISOR_POLL_DUR) {
-                    Ok(_) => {
-                        error!("internal error: unexpected send on child_exited chan");
-                    }
-                    Err(RecvTimeoutError::Timeout) => {
-                        // shell is still running, do nothing
-                        trace!("poll timeout");
-                    }
-                    Err(RecvTimeoutError::Disconnected) => {
-                        info!("child shell exited");
-                        child_done.store(true, Ordering::Release);
+                loop {
+                    trace!("checking stop_rx (pty_master={})", pty_master.as_raw_fd());
+                    if stop.load(Ordering::Relaxed) {
+                        info!("recvd stop msg");
                         return Ok(());
                     }
+
+                    match self.child_exited.recv_timeout(SUPERVISOR_POLL_DUR) {
+                        Ok(_) => {
+                            error!("internal error: unexpected send on child_exited chan");
+                        }
+                        Err(RecvTimeoutError::Timeout) => {
+                            // shell is still running, do nothing
+                            trace!("poll timeout");
+                        }
+                        Err(RecvTimeoutError::Disconnected) => {
+                            info!("child shell exited");
+                            child_done.store(true, Ordering::Release);
+                            return Ok(());
+                        }
+                    }
                 }
-            }
-        })
+            })
+            .map_err(|e| anyhow!("{:?}", e))
     }
 
     //
