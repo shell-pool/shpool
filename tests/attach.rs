@@ -724,6 +724,41 @@ fn screen_restore() -> anyhow::Result<()> {
 
 #[test]
 #[timeout(30000)]
+fn screen_wide_restore() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc = support::daemon::Proc::new("restore_screen.toml", true)
+            .context("starting daemon proc")?;
+        let bidi_done_w = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
+
+        {
+            let mut attach_proc =
+                daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+            let mut line_matcher = attach_proc.line_matcher()?;
+
+            attach_proc.run_cmd("echo ooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooy")?;
+            line_matcher.match_re("ooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooy$")?;
+        }
+
+        // wait until the daemon has noticed that the connection
+        // has dropped before we attempt to open the connection again
+        daemon_proc.events = Some(bidi_done_w.wait_final_event("daemon-bidi-stream-done")?);
+
+        {
+            let mut attach_proc =
+                daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+            let mut line_matcher = attach_proc.line_matcher()?;
+
+            // the re-attach should redraw the screen for us, so we should
+            // get a line with "foo" as part of the re-drawn screen.
+            line_matcher.match_re("ooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooy$")?;
+        }
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
 fn lines_restore() -> anyhow::Result<()> {
     support::dump_err(|| {
         let mut daemon_proc = support::daemon::Proc::new("restore_lines.toml", true)

@@ -132,7 +132,7 @@ impl SessionInner {
             let _s = span!(Level::INFO, "reader", s = name).entered();
 
             let mut output_spool =
-                vt100::Parser::new(tty_size.rows, tty_size.cols, scrollback_lines);
+                vt100::Parser::new(tty_size.rows, std::u16::MAX, scrollback_lines);
             let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
             let mut poll_fds = [poll::PollFd::new(pty_master.as_raw_fd(), poll::PollFlags::POLLIN)];
 
@@ -156,7 +156,7 @@ impl SessionInner {
                     recv(client_connection) -> new_connection => {
                         match new_connection {
                             Ok(Some(conn)) => {
-                                info!("got new connection");
+                                info!("got new connection (rows={}, cols={})", conn.size.rows, conn.size.cols);
                                 do_reattach = true;
                                 let ack = if let Some(old_conn) = client_conn {
                                     old_conn.stream.shutdown(net::Shutdown::Both)?;
@@ -177,7 +177,7 @@ impl SessionInner {
                                 // Always instantly resize the spool, since we don't
                                 // need to inject a delay into that.
                                 output_spool.screen_mut().set_size(
-                                    conn.size.rows, conn.size.cols);
+                                    conn.size.rows, std::u16::MAX);
                                 resize_cmd = Some(ResizeCmd {
                                     size: conn.size.clone(),
                                     when: time::Instant::now().add(REATTACH_RESIZE_DELAY),
@@ -213,7 +213,7 @@ impl SessionInner {
                             Ok(size) => {
                                 info!("resize size={:?}", size);
                                 output_spool.screen_mut()
-                                    .set_size(size.rows, size.cols);
+                                    .set_size(size.rows, std::u16::MAX);
                                 resize_cmd = Some(ResizeCmd {
                                     size: size,
                                     // No delay needed for ordinary resizes, just
@@ -242,7 +242,10 @@ impl SessionInner {
                     {
                         resize_cmd.size.set_fd(pty_master.as_raw_fd())?;
                         executed_resize = true;
-                        info!("executed resize");
+                        info!(
+                            "resized fd (rows={}, cols={})",
+                            resize_cmd.size.rows, resize_cmd.size.cols
+                        );
                     }
                 }
                 if executed_resize {
@@ -255,8 +258,20 @@ impl SessionInner {
                     info!("executing reattach protocol (mode={:?})", session_restore_mode);
                     let restore_buf = match session_restore_mode {
                         Simple => vec![],
-                        Screen => output_spool.screen().contents_formatted(),
+                        Screen => {
+                            let (rows, cols) = output_spool.screen().size();
+                            info!(
+                                "computing screen restore buf with (rows={}, cols={})",
+                                rows, cols
+                            );
+                            output_spool.screen().contents_formatted()
+                        }
                         Lines(nlines) => {
+                            let (rows, cols) = output_spool.screen().size();
+                            info!(
+                                "computing lines({}) restore buf with (rows={}, cols={})",
+                                nlines, rows, cols
+                            );
                             output_spool.screen().last_n_rows_contents_formatted(nlines)
                         }
                     };
