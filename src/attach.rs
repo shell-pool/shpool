@@ -124,7 +124,10 @@ fn do_attach(name: &str, socket: &PathBuf) -> anyhow::Result<()> {
         }
     }
 
-    client.pipe_bytes()
+    match client.pipe_bytes() {
+        Ok(exit_status) => std::process::exit(exit_status),
+        Err(e) => Err(e),
+    }
 }
 
 fn dial_client(socket: &PathBuf) -> anyhow::Result<protocol::Client> {

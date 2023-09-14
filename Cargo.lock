@@ -476,8 +476,8 @@ dependencies = [
 
 [[package]]
 name = "pty"
-version = "0.2.5"
-source = "git+https://github.com/ethanpailes/pty-rs#85e1ffc577fc92de0fc6ce491b43e2e780f7d7f7"
+version = "0.2.6"
+source = "git+https://github.com/ethanpailes/pty-rs#737c605731bbd08f5cc0e8073216cc2023dbd722"
 dependencies = [
  "errno 0.2.8",
  "libc",

@@ -4,6 +4,7 @@ use anyhow::Context;
 use tracing::{info, instrument};
 
 mod config;
+mod exit_notify;
 mod keybindings;
 mod server;
 mod shell;

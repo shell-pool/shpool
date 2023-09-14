@@ -14,14 +14,14 @@ use std::{
 };
 
 use anyhow::{anyhow, Context};
-use crossbeam_channel::{RecvTimeoutError, TryRecvError};
 use nix::{sys::signal, unistd::Pid};
-use tracing::{error, info, instrument, trace, warn};
+use tracing::{error, info, instrument, span, trace, warn, Level};
 
 use super::{
     super::{consts, protocol, test_hooks, tty},
     config, shell, user,
 };
+use crate::daemon::exit_notify::ExitNotifier;
 
 const SHELL_KILL_TIMEOUT: time::Duration = time::Duration::from_millis(500);
 const STDERR_FD: i32 = 2;
@@ -140,15 +140,8 @@ impl Server {
                     // not ever cause problems, and there is no real way to avoid some
                     // sort of race without just always creating a new session when
                     // a shell exits, which would break `exit` typed at the shell prompt.
-                    //
-                    // TODO(ethan): plumb shell hangups back to the client
-                    //              somehow and have the client print out
-                    //              "Session terminated because the shell exited".
-                    match inner.child_exited.try_recv() {
-                        Ok(_) => {
-                            return Err(anyhow!("unexpected send on child_exited chan"));
-                        }
-                        Err(TryRecvError::Empty) => {
+                    match inner.child_exit_notifier.wait(Some(time::Duration::from_millis(0))) {
+                        None => {
                             // the channel is still open so the subshell is still running
                             info!("taking over existing session inner");
                             inner.client_stream = Some(stream.try_clone()?);
@@ -167,9 +160,12 @@ impl Server {
 
                             // status is already attached
                         }
-                        Err(TryRecvError::Disconnected) => {
+                        Some(exit_status) => {
                             // the channel is closed so we know the subshell exited
-                            info!("stale inner={:?}, clobbering with new subshell", inner);
+                            info!(
+                                "stale inner={:?}, (child exited with status {}) clobbering with new subshell",
+                                inner, exit_status
+                            );
                             status = protocol::AttachStatus::Created { warnings };
                         }
                     }
@@ -393,15 +389,12 @@ impl Server {
                     //              shutdown usecase to consider, where systemd will
                     //              send SIGTERM -> SIGHUP -> SIGKILL for us.
                     signal::kill(Pid::from_raw(pid), Some(signal::Signal::SIGHUP))
-                        .context("sending SIGKILL to child proc")?;
+                        .context("sending SIGHUP to child proc")?;
 
-                    match inner.child_exited.recv_timeout(SHELL_KILL_TIMEOUT) {
-                        Ok(_) => error!("internal error: unexpected send on child_exited chan"),
-                        Err(RecvTimeoutError::Timeout) => {
-                            signal::kill(Pid::from_raw(pid), Some(signal::Signal::SIGKILL))
-                                .context("sending SIGKILL to child proc")?;
-                        }
-                        Err(_) => {}
+                    if inner.child_exit_notifier.wait(Some(SHELL_KILL_TIMEOUT)).is_none() {
+                        info!("child failed to exit within kill timeout, no longer being polite");
+                        signal::kill(Pid::from_raw(pid), Some(signal::Signal::SIGKILL))
+                            .context("sending SIGKILL to child proc")?;
                     }
 
                     // we don't need to wait since the dedicated reaping thread is active
@@ -615,19 +608,29 @@ impl Server {
 
         // spawn a background thread to reap the shell when it exits
         // and notify about the exit by closing a channel.
-        let (child_exited_tx, child_exited_rx) = crossbeam_channel::bounded(0);
+        // let (child_exited_tx, child_exited_rx) = crossbeam_channel::bounded(0);
+        let child_exit_notifier = Arc::new(ExitNotifier::new());
         let waitable_child = fork.clone();
         let session_name = header.name.clone();
+        let notifiable_child_exit_notifier = Arc::clone(&child_exit_notifier);
         thread::spawn(move || {
-            // Take ownership of the sender so it gets dropped when
-            // this thread exits, closing the channel.
-            let _tx = child_exited_tx;
+            let _s = span!(Level::INFO, "child_watcher", s = session_name);
 
-            if let Err(e) = waitable_child.wait() {
-                error!("waiting to reap child shell: {:?}", e);
+            match waitable_child.wait_for_exit() {
+                Ok((_, Some(exit_status))) => {
+                    info!("child exited with status {}", exit_status);
+                    notifiable_child_exit_notifier.notify_exit(exit_status);
+                }
+                Ok((_, None)) => {
+                    info!("child exited without status, using 1");
+                    notifiable_child_exit_notifier.notify_exit(1);
+                }
+                Err(e) => {
+                    info!("error waiting on child, using exit status 1: {:?}", e);
+                    notifiable_child_exit_notifier.notify_exit(1);
+                }
             }
-
-            info!("s({}): reaped child shell: {:?}", session_name, waitable_child);
+            info!("reaped child shell: {:?}", waitable_child);
         });
 
         let (client_connection_tx, client_connection_rx) = crossbeam_channel::bounded(0);
@@ -644,7 +647,7 @@ impl Server {
         let mut session_inner = shell::SessionInner {
             name: header.name.clone(),
             reader_ctl: Arc::clone(&reader_ctl),
-            child_exited: child_exited_rx,
+            child_exit_notifier,
             pty_master: fork,
             client_stream: Some(client_stream),
             config: self.config.clone(),

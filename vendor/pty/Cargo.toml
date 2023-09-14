@@ -1,6 +1,6 @@
 [package]
 name = "pty"
-version = "0.2.5"
+version = "0.2.6"
 authors = ["Hika Hibariya <hibariya@gmail.com>", "Ethan Pailes <ethan@pailes.org>"]
 repository = "https://github.com/hibariya/pty-rs"
 homepage = "https://github.com/hibariya/pty-rs"

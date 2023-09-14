@@ -12,12 +12,12 @@ use std::{
 };
 
 use anyhow::{anyhow, Context};
-use crossbeam_channel::RecvTimeoutError;
+use byteorder::{LittleEndian, WriteBytesExt};
 use tracing::{debug, error, info, instrument, span, trace, warn, Level};
 
 use crate::{
     consts,
-    daemon::{config, keybindings},
+    daemon::{config, exit_notify::ExitNotifier, keybindings},
     protocol, test_hooks, tty,
 };
 
@@ -51,7 +51,7 @@ pub struct Session {
 pub struct SessionInner {
     pub name: String, // to improve logging
     pub reader_ctl: Arc<Mutex<ReaderCtl>>,
-    pub child_exited: crossbeam_channel::Receiver<()>,
+    pub child_exit_notifier: Arc<ExitNotifier>,
     pub pty_master: pty::fork::Fork,
     pub client_stream: Option<UnixStream>,
     pub config: config::Config,
@@ -414,7 +414,7 @@ impl SessionInner {
             // poll the pty master fd to see if the child
             // shell has exited.
             let supervisor_h = self.spawn_supervisor(
-                s, &stop, &child_done, &pty_master)?;
+                s, &stop, &client_stream_m, &child_done, &pty_master)?;
 
             loop {
                 let c_done = child_done.load(Ordering::Acquire);
@@ -641,7 +641,7 @@ impl SessionInner {
                                 trace!("wrote heartbeat");
                             }
                             Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {
-                                trace!("client hangup");
+                                trace!("client hangup: {:?}", e);
                                 return Ok(());
                             }
                             Err(e) => {
@@ -659,6 +659,7 @@ impl SessionInner {
         &'scope self,
         scope: &'scope thread::Scope<'scope, '_>,
         stop: &'scope AtomicBool,
+        client_stream_m: &'scope Arc<Mutex<io::BufWriter<UnixStream>>>,
         child_done: &'scope AtomicBool,
         pty_master: &'scope pty::fork::Master,
     ) -> anyhow::Result<thread::ScopedJoinHandle<anyhow::Result<()>>> {
@@ -674,18 +675,44 @@ impl SessionInner {
                         return Ok(());
                     }
 
-                    match self.child_exited.recv_timeout(SUPERVISOR_POLL_DUR) {
-                        Ok(_) => {
-                            error!("internal error: unexpected send on child_exited chan");
+                    match self.child_exit_notifier.wait(Some(SUPERVISOR_POLL_DUR)) {
+                        Some(exit_status) => {
+                            info!("child shell exited with status {}", exit_status);
+                            // mark child as exited so the attach routine will
+                            // cleanup correctly.
+                            child_done.store(true, Ordering::Release);
+
+                            // write an exit status frame so the attach process
+                            // can exit with the same exit code as the child shell
+                            let mut status_buf = Vec::with_capacity(4);
+                            status_buf
+                                .write_i32::<LittleEndian>(exit_status)
+                                .context("writing exit status to chunk")?;
+                            let chunk = protocol::Chunk {
+                                kind: protocol::ChunkKind::ExitStatus,
+                                buf: status_buf.as_slice(),
+                            };
+                            {
+                                let mut s = client_stream_m.lock().unwrap();
+                                match chunk.write_to(&mut *s).and_then(|_| s.flush()) {
+                                    Ok(_) => {
+                                        trace!("wrote exit status chunk");
+                                    }
+                                    Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {
+                                        trace!("client hangup: {:?}", e);
+                                        return Ok(());
+                                    }
+                                    Err(e) => {
+                                        return Err(e).context("writing exit status chunk")?;
+                                    }
+                                }
+                            }
+
+                            return Ok(());
                         }
-                        Err(RecvTimeoutError::Timeout) => {
+                        None => {
                             // shell is still running, do nothing
                             trace!("poll timeout");
-                        }
-                        Err(RecvTimeoutError::Disconnected) => {
-                            info!("child shell exited");
-                            child_done.store(true, Ordering::Release);
-                            return Ok(());
                         }
                     }
                 }

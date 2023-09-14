@@ -1,9 +1,9 @@
 use std::{
     convert::TryFrom,
-    io,
-    io::{Read, Write},
+    io::{self, Read, Write},
     os::unix::net::UnixStream,
     path::Path,
+    sync::atomic::{AtomicI32, Ordering},
     thread, time,
 };
 
@@ -201,10 +201,18 @@ pub enum AttachStatus {
 
 /// ChunkKind is a tag that indicates what type of frame is being transmitted
 /// through the socket.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ChunkKind {
+    /// After the kind tag, the chunk will have a 4 byte little endian length
+    /// prefix followed by the actual data.
     Data = 0,
+    /// An empty chunk sent so that the daemon can check to make sure the attach
+    /// process is still listening.
     Heartbeat = 1,
+    /// The child shell has exited. After the kind tag, the chunk will
+    /// have exactly 4 bytes of data, which will contain a little endian
+    /// code indicating the child's exit status.
+    ExitStatus = 2,
 }
 
 impl TryFrom<u8> for ChunkKind {
@@ -214,6 +222,7 @@ impl TryFrom<u8> for ChunkKind {
         match v {
             0 => Ok(ChunkKind::Data),
             1 => Ok(ChunkKind::Heartbeat),
+            2 => Ok(ChunkKind::ExitStatus),
             _ => Err(anyhow!("unknown ChunkKind {}", v)),
         }
     }
@@ -228,7 +237,7 @@ impl TryFrom<u8> for ChunkKind {
 /// little endian 4 byte word: length prefix
 /// N bytes: data
 /// ```
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Chunk<'data> {
     pub kind: ChunkKind,
     pub buf: &'data [u8],
@@ -240,7 +249,13 @@ impl<'data> Chunk<'data> {
         W: std::io::Write,
     {
         w.write_u8(self.kind as u8)?;
-        w.write_u32::<LittleEndian>(self.buf.len() as u32)?;
+        if let ChunkKind::ExitStatus = self.kind {
+            assert!(self.buf.len() == 4);
+            // the caller should have already little-endian encoded
+            // the exit status and stuffed it into buf
+        } else {
+            w.write_u32::<LittleEndian>(self.buf.len() as u32)?;
+        }
         w.write_all(&self.buf[..])?;
 
         Ok(())
@@ -251,13 +266,26 @@ impl<'data> Chunk<'data> {
         R: std::io::Read,
     {
         let kind = r.read_u8()?;
-        let len = r.read_u32::<LittleEndian>()? as usize;
-        if len as usize > buf.len() {
-            return Err(anyhow!("chunk of size {} exceeds size limit of {} bytes", len, buf.len()));
-        }
-        r.read_exact(&mut buf[..len])?;
+        let kind = ChunkKind::try_from(kind)?;
+        if let ChunkKind::ExitStatus = kind {
+            if 4 > buf.len() {
+                return Err(anyhow!("chunk of size 4 exceeds size limit of {} bytes", buf.len()));
+            }
 
-        Ok(Chunk { kind: ChunkKind::try_from(kind)?, buf: &buf[..len] })
+            r.read_exact(&mut buf[..4])?;
+            Ok(Chunk { kind, buf: &buf[..4] })
+        } else {
+            let len = r.read_u32::<LittleEndian>()? as usize;
+            if len as usize > buf.len() {
+                return Err(anyhow!(
+                    "chunk of size {} exceeds size limit of {} bytes",
+                    len,
+                    buf.len()
+                ));
+            }
+            r.read_exact(&mut buf[..len])?;
+            Ok(Chunk { kind, buf: &buf[..len] })
+        }
     }
 }
 
@@ -289,13 +317,17 @@ impl Client {
     /// pipe_bytes suffles bytes from std{in,out} to the unix
     /// socket and back again. It is the main loop of
     /// `shpool attach`.
+    ///
+    /// Return value: the exit status that `shpool attach` should
+    /// exit with.
     #[instrument(skip_all)]
-    pub fn pipe_bytes(self) -> anyhow::Result<()> {
+    pub fn pipe_bytes(self) -> anyhow::Result<i32> {
         let tty_guard = tty::set_attach_flags()?;
 
         let mut read_client_stream = self.stream.try_clone().context("cloning read stream")?;
         let mut write_client_stream = self.stream.try_clone().context("cloning read stream")?;
 
+        let exit_status = AtomicI32::new(1);
         thread::scope(|s| {
             // stdin -> sock
             let stdin_to_sock_h = s.spawn(|| -> anyhow::Result<()> {
@@ -345,7 +377,7 @@ impl Client {
                             trace!("got heartbeat chunk");
                         }
                         ChunkKind::Data => {
-                            stdout.write_all(&chunk.buf[..]).context("writing chunk to stdout")?;
+                            stdout.write_all(chunk.buf).context("writing chunk to stdout")?;
 
                             if let Err(e) = stdout.flush() {
                                 if e.kind() == std::io::ErrorKind::WouldBlock {
@@ -358,6 +390,15 @@ impl Client {
                                 }
                             }
                             debug!("flushed stdout");
+                        }
+                        ChunkKind::ExitStatus => {
+                            let mut status_reader = io::Cursor::new(chunk.buf);
+                            exit_status.store(
+                                status_reader
+                                    .read_i32::<LittleEndian>()
+                                    .context("reading exit status from exit status chunk")?,
+                                Ordering::Release,
+                            );
                         }
                     }
                 }
@@ -398,7 +439,7 @@ impl Client {
                             // tty before exiting the process.
                             drop(tty_guard);
 
-                            std::process::exit(1);
+                            std::process::exit(exit_status.load(Ordering::Acquire));
                         }
                     }
                     break;
@@ -415,7 +456,33 @@ impl Client {
                 Err(panic_err) => std::panic::resume_unwind(panic_err),
             }
 
-            Ok(())
+            Ok(exit_status.load(Ordering::Acquire))
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::io;
+
+    #[test]
+    fn chunk_round_trip() {
+        let data: Vec<u8> = vec![0, 0, 0, 1, 5, 6];
+        let cases = vec![
+            Chunk { kind: ChunkKind::Data, buf: data.as_slice() },
+            Chunk { kind: ChunkKind::Heartbeat, buf: &data[..0] },
+            Chunk { kind: ChunkKind::ExitStatus, buf: &data[..4] },
+        ];
+
+        let mut buf = vec![0; 256];
+        for c in cases {
+            let mut file_obj = io::Cursor::new(vec![0; 256]);
+            c.write_to(&mut file_obj).expect("write to suceed");
+            file_obj.set_position(0);
+            let round_tripped =
+                Chunk::read_into(&mut file_obj, &mut buf).expect("parse to succeed");
+            assert_eq!(c, round_tripped);
+        }
     }
 }

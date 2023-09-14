@@ -76,15 +76,27 @@ impl Fork {
 
     /// Waits until it's terminated.
     pub fn wait(&self) -> Result<libc::pid_t> {
+        self.wait_for_exit().map(|(p, _)| p)
+    }
+
+    /// Waits until it's terminated, returning the exit status if there is one
+    pub fn wait_for_exit(&self) -> Result<(libc::pid_t, Option<i32>)> {
         match *self {
             Fork::Child(_) => Err(ForkError::IsChild),
             Fork::Parent(pid, _) => {
                 loop {
                     unsafe {
-                        match libc::waitpid(pid, &mut 0, 0) {
+                        let mut status = 0;
+                        match libc::waitpid(pid, &mut status, 0) {
                             0 => continue,
                             -1 => return Err(ForkError::WaitpidFail),
-                            _ => return Ok(pid),
+                            _ => {
+                                if libc::WIFEXITED(status) {
+                                    return Ok((pid, Some(libc::WEXITSTATUS(status))));
+                                } else {
+                                    return Ok((pid, None));
+                                }
+                            }
                         }
                     }
                 }
