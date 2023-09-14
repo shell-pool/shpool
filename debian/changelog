@@ -1,3 +1,9 @@
+shpool (0.2.4) unstable; urgency=low
+
+  * Fix stuck session bug
+  * Fix session restore resize trim bug
+
+ -- Ethan Pailes <pailes@google.com>  Thu, 14 Sep 2023 14:49:00 -0400
 shpool (0.2.3) unstable; urgency=low
 
   * Fix long chunk bug in session restore
