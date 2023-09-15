@@ -109,8 +109,11 @@ fn reattach_after_kill() -> anyhow::Result<()> {
         let mut daemon_proc =
             support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
 
-        let waiter =
-            daemon_proc.events.take().unwrap().waiter(["daemon-handle-kill-removed-shells"]);
+        let mut waiter = daemon_proc
+            .events
+            .take()
+            .unwrap()
+            .waiter(["daemon-handle-kill-removed-shells", "daemon-bidi-stream-done"]);
 
         let mut sess1 =
             daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
@@ -128,7 +131,8 @@ fn reattach_after_kill() -> anyhow::Result<()> {
         let stderr = String::from_utf8_lossy(&out.stderr[..]);
         assert!(stderr.len() == 0);
 
-        daemon_proc.events = Some(waiter.wait_final_event("daemon-handle-kill-removed-shells")?);
+        waiter.wait_event("daemon-handle-kill-removed-shells")?;
+        waiter.wait_event("daemon-bidi-stream-done")?;
 
         let mut sess2 =
             daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;

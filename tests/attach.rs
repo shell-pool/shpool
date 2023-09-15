@@ -225,7 +225,6 @@ fn two_at_once() -> anyhow::Result<()> {
 
 // test the attach process getting killed, then re-attaching to the
 // same shell session.
-#[ignore] // this test is flaky in ci. TODO: re-enable
 #[test]
 #[timeout(30000)]
 fn explicit_exit() -> anyhow::Result<()> {
@@ -863,6 +862,59 @@ fn exits_with_same_status_as_shell() -> anyhow::Result<()> {
                 .ok_or(anyhow!("no exit code"))?,
             19
         );
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
+fn ttl_hangup() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc =
+            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut attach_proc = daemon_proc
+            .attach(
+                "sh1",
+                AttachArgs { ttl: Some(time::Duration::from_secs(1)), ..Default::default() },
+            )
+            .context("starting attach proc")?;
+
+        // ensure the shell is up and running
+        let mut line_matcher = attach_proc.line_matcher()?;
+        attach_proc.run_cmd("echo hi")?;
+        line_matcher.match_re("hi$")?;
+
+        // sleep long enough for the reaper to clobber the thread
+        thread::sleep(time::Duration::from_millis(1200));
+
+        let listout = daemon_proc.list()?;
+        assert!(!String::from_utf8_lossy(listout.stdout.as_slice()).contains("sh1"));
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
+fn ttl_no_hangup_yet() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc =
+            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut attach_proc = daemon_proc
+            .attach(
+                "sh1",
+                AttachArgs { ttl: Some(time::Duration::from_secs(1000)), ..Default::default() },
+            )
+            .context("starting attach proc")?;
+
+        // ensure the shell is up and running
+        let mut line_matcher = attach_proc.line_matcher()?;
+        attach_proc.run_cmd("echo hi")?;
+        line_matcher.match_re("hi$")?;
+
+        let listout = daemon_proc.list()?;
+        assert!(String::from_utf8_lossy(listout.stdout.as_slice()).contains("sh1"));
 
         Ok(())
     })

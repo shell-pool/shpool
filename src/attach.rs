@@ -1,24 +1,34 @@
 use std::{env, fmt, io, path::PathBuf, thread, time};
 
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, bail, Context};
 use tracing::{error, info, warn};
 
 use super::{
-    protocol,
+    duration, protocol,
     protocol::{AttachHeader, ConnectHeader},
     test_hooks, tty,
 };
 
 const MAX_FORCE_RETRIES: usize = 20;
 
-pub fn run(name: String, force: bool, socket: PathBuf) -> anyhow::Result<()> {
+pub fn run(name: String, force: bool, ttl: Option<String>, socket: PathBuf) -> anyhow::Result<()> {
     info!("\n\n======================== STARTING ATTACH ============================\n\n");
     test_hooks::emit("attach-startup");
     SignalHandler::new(name.clone(), socket.clone()).spawn()?;
 
+    let ttl = match &ttl {
+        Some(src) => match duration::parse(src.as_str()) {
+            Ok(d) => Some(d),
+            Err(e) => {
+                bail!("could not parse ttl: {:?}", e);
+            }
+        },
+        None => None,
+    };
+
     let mut detached = false;
     let mut tries = 0;
-    while let Err(err) = do_attach(name.as_str(), &socket) {
+    while let Err(err) = do_attach(name.as_str(), &ttl, &socket) {
         match err.downcast() {
             Ok(BusyError) if !force => {
                 eprintln!("session '{}' already has a terminal attached", name);
@@ -67,7 +77,7 @@ impl fmt::Display for BusyError {
 }
 impl std::error::Error for BusyError {}
 
-fn do_attach(name: &str, socket: &PathBuf) -> anyhow::Result<()> {
+fn do_attach(name: &str, ttl: &Option<time::Duration>, socket: &PathBuf) -> anyhow::Result<()> {
     let mut client = dial_client(&socket)?;
 
     let tty_size = match tty::Size::from_fd(0) {
@@ -89,6 +99,7 @@ fn do_attach(name: &str, socket: &PathBuf) -> anyhow::Result<()> {
                     Some((String::from(var), val))
                 })
                 .collect::<Vec<_>>(),
+            ttl_secs: ttl.map(|d| d.as_secs()),
         }))
         .context("writing attach header")?;
 

@@ -135,8 +135,8 @@ pub enum ResizeReply {
 }
 
 /// AttachHeader is the blob of metadata that a client transmits when it
-/// first dials into the shpool indicating which shell it wants to attach
-/// to.
+/// first dials into the shpool daemon indicating which shell it wants
+/// to attach to.
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct AttachHeader {
     /// The name of the session to create or attach to.
@@ -150,6 +150,11 @@ pub struct AttachHeader {
     /// shpool forks off a process. For now the list is just `SSH_AUTH_SOCK`
     /// and `TERM`.
     pub local_env: Vec<(String, String)>,
+    /// If specified, sets a time limit on how long the shell will be open
+    /// when the shell is first created (does nothing in the case of a
+    /// reattach). The daemon is responsible for automatically killing the
+    /// session once the ttl is over.
+    pub ttl_secs: Option<u64>,
 }
 
 impl AttachHeader {
@@ -337,6 +342,9 @@ impl Client {
 
                 loop {
                     let nread = stdin.read(&mut buf).context("reading stdin from user")?;
+                    if nread == 0 {
+                        continue;
+                    }
                     debug!("read {} bytes", nread);
 
                     let to_write = &buf[..nread];

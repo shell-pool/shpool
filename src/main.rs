@@ -17,6 +17,7 @@ mod common;
 mod consts;
 mod daemon;
 mod detach;
+mod duration;
 mod kill;
 mod list;
 mod protocol;
@@ -75,6 +76,20 @@ enum Commands {
     Attach {
         #[clap(short, long, help = "If a tty is already attached to the session, detach it first")]
         force: bool,
+        #[clap(
+            long,
+            long_help = "Automatically kill the session after the given time
+
+This option only applies when first creating a session, it is ignored on
+reattach.
+
+The duration can be specified either in a colon seperated format
+of the form dd:hh:mm:ss where any prefix may be left off (i.e. '01:00:30:00'
+for 1 day and 30 minutes or '10:45:00' for 10 hours and 45 minutes), or
+using a number with a trailing letter to indicate time unit
+(i.e. '3d', '19h', or '5s')."
+        )]
+        ttl: Option<String>,
         #[clap(help = "The name of the shell session to create or attach to")]
         name: String,
     },
@@ -171,7 +186,7 @@ fn main() -> anyhow::Result<()> {
 
     let res: anyhow::Result<()> = match args.command {
         Commands::Daemon { config_file } => daemon::run(config_file, runtime_dir, socket),
-        Commands::Attach { force, name } => attach::run(name, force, socket),
+        Commands::Attach { force, ttl, name } => attach::run(name, force, ttl, socket),
         Commands::Detach { sessions } => detach::run(sessions, socket),
         Commands::Kill { sessions } => kill::run(sessions, socket),
         Commands::List => list::run(socket),

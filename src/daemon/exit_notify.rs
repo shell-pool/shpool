@@ -1,4 +1,7 @@
-use std::{sync::{Mutex, Condvar}, time::Duration};
+use std::{
+    sync::{Condvar, Mutex},
+    time::Duration,
+};
 
 #[derive(Debug)]
 pub struct ExitNotifier {

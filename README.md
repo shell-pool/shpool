@@ -160,7 +160,8 @@ file.
 The `attach` subcommand connects to the `shpool daemon` instance, passing in a
 name. If the name is new, a new shell is created, and if it already exists it
 just attaches to the existing session so long as no other terminal is currently
-connected to that session.
+connected to that session. The `--ttl` flag can be used to limit how long the
+session will last.
 
 #### `shpool list`
 

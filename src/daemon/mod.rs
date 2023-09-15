@@ -10,6 +10,7 @@ mod server;
 mod shell;
 mod signals;
 mod systemd;
+mod ttl_reaper;
 mod user;
 
 #[instrument(skip_all)]

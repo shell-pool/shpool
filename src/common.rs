@@ -12,7 +12,7 @@ pub fn resolve_sessions(sessions: &mut Vec<String>, action: &str) -> anyhow::Res
     }
 
     if sessions.len() == 0 {
-        eprintln!("no session to kill");
+        eprintln!("no session to {}", action);
         return Err(anyhow!("no session to {}", action));
     }
 

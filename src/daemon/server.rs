@@ -1,6 +1,8 @@
 use std::{
     collections::HashMap,
-    env, fs, net, os,
+    env, fs, net,
+    ops::Add,
+    os,
     os::unix::{
         fs::PermissionsExt,
         io::AsRawFd,
@@ -11,19 +13,19 @@ use std::{
     process,
     sync::{Arc, Mutex},
     thread, time,
+    time::{Duration, Instant},
 };
 
 use anyhow::{anyhow, Context};
-use nix::{sys::signal, unistd::Pid};
+use nix::unistd::Pid;
 use tracing::{error, info, instrument, span, trace, warn, Level};
 
 use super::{
     super::{consts, protocol, test_hooks, tty},
-    config, shell, user,
+    config, shell, ttl_reaper, user,
 };
 use crate::daemon::exit_notify::ExitNotifier;
 
-const SHELL_KILL_TIMEOUT: time::Duration = time::Duration::from_millis(500);
 const STDERR_FD: i32 = 2;
 const DEFAULT_INITIAL_SHELL_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
 const DEFAULT_OUTPUT_SPOOL_LINES: usize = 10_000;
@@ -39,24 +41,39 @@ pub struct Server {
     /// the main thread to become available to accept new connections.
     shells: Arc<Mutex<HashMap<String, Box<shell::Session>>>>,
     runtime_dir: PathBuf,
+    register_new_reapable_session: crossbeam_channel::Sender<(String, Instant)>,
 }
 
 impl Server {
     #[instrument(skip_all)]
     pub fn new(config: config::Config, runtime_dir: PathBuf) -> Arc<Self> {
-        Arc::new(Server { config, shells: Arc::new(Mutex::new(HashMap::new())), runtime_dir })
+        let shells = Arc::new(Mutex::new(HashMap::new()));
+        // buffered so that we are unlikely to block when setting up a
+        // new session
+        let (new_sess_tx, new_sess_rx) = crossbeam_channel::bounded(10);
+        let shells_tab = Arc::clone(&shells);
+        thread::spawn(move || {
+            if let Err(e) = ttl_reaper::run(new_sess_rx, shells_tab) {
+                warn!("ttl reaper exited with error: {:?}", e);
+            }
+        });
+
+        Arc::new(Server { config, shells, runtime_dir, register_new_reapable_session: new_sess_tx })
     }
 
     #[instrument(skip_all)]
     pub fn serve(server: Arc<Self>, listener: UnixListener) -> anyhow::Result<()> {
         test_hooks::emit("daemon-about-to-listen");
+        let mut conn_counter = 0;
         for stream in listener.incoming() {
             info!("socket got a new connection");
             match stream {
                 Ok(stream) => {
+                    conn_counter += 1;
+                    let conn_id = conn_counter;
                     let server = Arc::clone(&server);
                     thread::spawn(move || {
-                        if let Err(err) = server.handle_conn(stream) {
+                        if let Err(err) = server.handle_conn(stream, conn_id) {
                             error!("handling new connection: {:?}", err)
                         }
                     });
@@ -70,8 +87,8 @@ impl Server {
         Ok(())
     }
 
-    #[instrument(skip_all)]
-    fn handle_conn(&self, mut stream: UnixStream) -> anyhow::Result<()> {
+    #[instrument(skip_all, fields(cid = conn_id))]
+    fn handle_conn(&self, mut stream: UnixStream, conn_id: usize) -> anyhow::Result<()> {
         // We want to avoid timing out while blocking the main thread.
         stream
             .set_read_timeout(Some(consts::SOCK_STREAM_TIMEOUT))
@@ -103,7 +120,7 @@ impl Server {
         stream.set_read_timeout(None).context("unsetting read timout on inbound session")?;
 
         match header {
-            protocol::ConnectHeader::Attach(h) => self.handle_attach(stream, h, warnings),
+            protocol::ConnectHeader::Attach(h) => self.handle_attach(stream, conn_id, h, warnings),
             protocol::ConnectHeader::Detach(r) => self.handle_detach(stream, r),
             protocol::ConnectHeader::Kill(r) => self.handle_kill(stream, r),
             protocol::ConnectHeader::List => self.handle_list(stream),
@@ -117,10 +134,11 @@ impl Server {
     fn handle_attach(
         &self,
         mut stream: UnixStream,
+        conn_id: usize,
         header: protocol::AttachHeader,
         warnings: Vec<String>,
     ) -> anyhow::Result<()> {
-        let (inner_to_stream, status) = {
+        let (child_exit_notifier, inner_to_stream, status) = {
             // we unwrap to propagate the poison as an unwind
             let mut shells = self.shells.lock().unwrap();
             info!("locked shells table");
@@ -140,7 +158,7 @@ impl Server {
                     // not ever cause problems, and there is no real way to avoid some
                     // sort of race without just always creating a new session when
                     // a shell exits, which would break `exit` typed at the shell prompt.
-                    match inner.child_exit_notifier.wait(Some(time::Duration::from_millis(0))) {
+                    match session.child_exit_notifier.wait(Some(time::Duration::from_millis(0))) {
                         None => {
                             // the channel is still open so the subshell is still running
                             info!("taking over existing session inner");
@@ -192,12 +210,13 @@ impl Server {
                     return Ok(());
                 }
             } else {
+                info!("no existing '{}' session, creating new one", &header.name);
                 status = protocol::AttachStatus::Created { warnings };
             }
 
             if matches!(status, protocol::AttachStatus::Created { .. }) {
                 info!("creating new subshell");
-                let session = self.spawn_subshell(stream, &header)?;
+                let session = self.spawn_subshell(conn_id, stream, &header)?;
 
                 shells.insert(header.name.clone(), Box::new(session));
                 // fallthrough to bidi streaming
@@ -207,16 +226,20 @@ impl Server {
             // we can work with it without the global session
             // table lock held
             if let Some(session) = shells.get(&header.name) {
-                (Some(Arc::clone(&session.inner)), status)
+                (
+                    Some(Arc::clone(&session.child_exit_notifier)),
+                    Some(Arc::clone(&session.inner)),
+                    status,
+                )
             } else {
-                (None, status)
+                (None, None, status)
             }
         };
         info!("released lock on shells table");
 
         self.link_ssh_auth_sock(&header).context("linking SSH_AUTH_SOCK")?;
 
-        if let Some(inner) = inner_to_stream {
+        if let (Some(child_exit_notifier), Some(inner)) = (child_exit_notifier, inner_to_stream) {
             let mut child_done = false;
             let mut inner = inner.lock().unwrap();
             let client_stream = match inner.client_stream.as_mut() {
@@ -232,7 +255,7 @@ impl Server {
             }
 
             info!("starting bidi stream loop");
-            match inner.bidi_stream(header.local_tty_size.clone()) {
+            match inner.bidi_stream(conn_id, header.local_tty_size.clone(), child_exit_notifier) {
                 Ok(done) => {
                     child_done = done;
                 }
@@ -320,7 +343,7 @@ impl Server {
                     let reader_ctl = s.reader_ctl.lock().unwrap();
                     reader_ctl
                         .client_connection
-                        .send(None)
+                        .send(shell::ClientConnectionMsg::Disconnect)
                         .context("sending client detach to reader")?;
                     let status = reader_ctl
                         .client_connection_ack
@@ -358,44 +381,7 @@ impl Server {
             let mut to_remove = Vec::with_capacity(request.sessions.len());
             for session in request.sessions.into_iter() {
                 if let Some(s) = shells.get(&session) {
-                    {
-                        let reader_ctl = s.reader_ctl.lock().unwrap();
-                        reader_ctl
-                            .client_connection
-                            .send(None)
-                            .context("sending client detach to reader")?;
-                        let status = reader_ctl
-                            .client_connection_ack
-                            .recv()
-                            .context("getting client conn ack")?;
-                        info!("detached session({}) before kill, status = {:?}", session, status);
-                    }
-
-                    let inner = s.inner.lock().unwrap();
-                    let pid = inner.pty_master.child_pid().ok_or(anyhow!("no child pid"))?;
-
-                    // SIGHUP is a signal to indicate that the terminal has disconnected
-                    // from a process. We can't use the normal SIGTERM graceful-shutdown
-                    // signal since shells just forward those to their child process,
-                    // but for shells SIGHUP serves as the graceful shutdown signal.
-                    //
-                    // TODO(ethan): this hangup sequence could use some work. I should
-                    //              make the wait time configurable, then make the
-                    //              signal sequence SIGHUP -> SIGTERM -> SIGKILL.
-                    //              SIGTERM -> SIGKILL to be polite, and SIGHUP first
-                    //              because SIGTERM doesn't really work on shells
-                    //              and SIGHUP means "tty disconnected" which is exactly
-                    //              what is going on here. There is also the systemd
-                    //              shutdown usecase to consider, where systemd will
-                    //              send SIGTERM -> SIGHUP -> SIGKILL for us.
-                    signal::kill(Pid::from_raw(pid), Some(signal::Signal::SIGHUP))
-                        .context("sending SIGHUP to child proc")?;
-
-                    if inner.child_exit_notifier.wait(Some(SHELL_KILL_TIMEOUT)).is_none() {
-                        info!("child failed to exit within kill timeout, no longer being polite");
-                        signal::kill(Pid::from_raw(pid), Some(signal::Signal::SIGKILL))
-                            .context("sending SIGKILL to child proc")?;
-                    }
+                    s.kill().context("killing shell proc")?;
 
                     // we don't need to wait since the dedicated reaping thread is active
                     // even when a tty is not attached
@@ -465,7 +451,7 @@ impl Server {
                         let reader_ctl = session.reader_ctl.lock().unwrap();
                         reader_ctl
                             .client_connection
-                            .send(None)
+                            .send(shell::ClientConnectionMsg::Disconnect)
                             .context("sending client detach to reader")?;
                         let status = reader_ctl
                             .client_connection_ack
@@ -493,6 +479,7 @@ impl Server {
     #[instrument(skip_all)]
     fn spawn_subshell(
         &self,
+        conn_id: usize,
         client_stream: UnixStream,
         header: &protocol::AttachHeader,
     ) -> anyhow::Result<shell::Session> {
@@ -608,13 +595,12 @@ impl Server {
 
         // spawn a background thread to reap the shell when it exits
         // and notify about the exit by closing a channel.
-        // let (child_exited_tx, child_exited_rx) = crossbeam_channel::bounded(0);
         let child_exit_notifier = Arc::new(ExitNotifier::new());
         let waitable_child = fork.clone();
         let session_name = header.name.clone();
         let notifiable_child_exit_notifier = Arc::clone(&child_exit_notifier);
         thread::spawn(move || {
-            let _s = span!(Level::INFO, "child_watcher", s = session_name);
+            let _s = span!(Level::INFO, "child_watcher", s = session_name, cid = conn_id).entered();
 
             match waitable_child.wait_for_exit() {
                 Ok((_, Some(exit_status))) => {
@@ -647,14 +633,15 @@ impl Server {
         let mut session_inner = shell::SessionInner {
             name: header.name.clone(),
             reader_ctl: Arc::clone(&reader_ctl),
-            child_exit_notifier,
             pty_master: fork,
             client_stream: Some(client_stream),
             config: self.config.clone(),
             reader_join_h: None,
         };
+        let child_pid = session_inner.pty_master.child_pid().ok_or(anyhow!("no child pid"))?;
         session_inner.reader_join_h = Some(
             session_inner.spawn_reader(
+                conn_id,
                 header.local_tty_size.clone(),
                 self.config.output_spool_lines.unwrap_or(DEFAULT_OUTPUT_SPOOL_LINES),
                 self.config
@@ -668,8 +655,17 @@ impl Server {
             )?,
         );
 
+        if let Some(ttl_secs) = header.ttl_secs {
+            info!("registering session with ttl with the reaper");
+            self.register_new_reapable_session
+                .send((header.name.clone(), Instant::now().add(Duration::from_secs(ttl_secs))))
+                .context("sending reapable session registration msg")?;
+        }
+
         Ok(shell::Session {
             reader_ctl,
+            child_pid,
+            child_exit_notifier,
             started_at: time::SystemTime::now(),
             inner: Arc::new(Mutex::new(session_inner)),
         })
