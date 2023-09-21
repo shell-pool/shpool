@@ -27,7 +27,7 @@
 use crate::fd::{AsFd, BorrowedFd, OwnedFd, RawFd};
 use crate::{backend, io};
 use core::ffi::c_void;
-use core::mem::{zeroed, MaybeUninit};
+use core::mem::MaybeUninit;
 use core::ptr::{null_mut, write_bytes};
 use linux_raw_sys::net;
 
@@ -120,6 +120,12 @@ bitflags::bitflags! {
 
         /// `IORING_ENTER_EXT_ARG`
         const EXT_ARG = sys::IORING_ENTER_EXT_ARG;
+
+        /// `IORING_ENTER_REGISTERED_RING`
+        const REGISTERED_RING = sys::IORING_ENTER_REGISTERED_RING;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -455,6 +461,9 @@ bitflags::bitflags! {
 
         /// `IORING_SETUP_DEFER_TASKRUN`
         const DEFER_TASKRUN = sys::IORING_SETUP_DEFER_TASKRUN;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -483,6 +492,9 @@ bitflags::bitflags! {
 
         /// `1 << IOSQE_CQE_SKIP_SUCCESS_BIT`
         const CQE_SKIP_SUCCESS = 1 << sys::IOSQE_CQE_SKIP_SUCCESS_BIT as u8;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -502,6 +514,9 @@ bitflags::bitflags! {
 
         /// `IORING_CQE_F_NOTIF`
         const NOTIF = bitcast!(sys::IORING_CQE_F_NOTIF);
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -512,6 +527,9 @@ bitflags::bitflags! {
     pub struct IoringFsyncFlags: u32 {
         /// `IORING_FSYNC_DATASYNC`
         const DATASYNC = sys::IORING_FSYNC_DATASYNC;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -544,6 +562,9 @@ bitflags::bitflags! {
 
         /// `IORING_LINK_TIMEOUT_UPDATE`
         const LINK_TIMEOUT_UPDATE = sys::IORING_LINK_TIMEOUT_UPDATE;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -554,6 +575,9 @@ bitflags::bitflags! {
     pub struct SpliceFlags: u32 {
         /// `SPLICE_F_FD_IN_FIXED`
         const FD_IN_FIXED = sys::SPLICE_F_FD_IN_FIXED;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -564,6 +588,9 @@ bitflags::bitflags! {
     pub struct IoringMsgringFlags: u32 {
         /// `IORING_MSG_RING_CQE_SKIP`
         const CQE_SKIP = sys::IORING_MSG_RING_CQE_SKIP;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -583,6 +610,9 @@ bitflags::bitflags! {
 
         /// `IORING_ASYNC_CANCEL_FD`
         const FD_FIXED = sys::IORING_ASYNC_CANCEL_FD_FIXED;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -629,6 +659,9 @@ bitflags::bitflags! {
 
         /// `IORING_FEAT_LINKED_FILE`
         const LINKED_FILE = sys::IORING_FEAT_LINKED_FILE;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -639,6 +672,9 @@ bitflags::bitflags! {
     pub struct IoringOpFlags: u16 {
         /// `IO_URING_OP_SUPPORTED`
         const SUPPORTED = sys::IO_URING_OP_SUPPORTED as _;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -649,6 +685,9 @@ bitflags::bitflags! {
     pub struct IoringRsrcFlags: u32 {
         /// `IORING_RSRC_REGISTER_SPARSE`
         const REGISTER_SPARSE = sys::IORING_RSRC_REGISTER_SPARSE as _;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -665,6 +704,9 @@ bitflags::bitflags! {
 
         /// `IORING_SQ_TASKRUN`
         const TASKRUN = sys::IORING_SQ_TASKRUN;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -675,6 +717,9 @@ bitflags::bitflags! {
     pub struct IoringCqFlags: u32 {
         /// `IORING_CQ_EVENTFD_DISABLED`
         const EVENTFD_DISABLED = sys::IORING_CQ_EVENTFD_DISABLED;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -694,6 +739,9 @@ bitflags::bitflags! {
 
         /// `IORING_POLL_ADD_LEVEL`
         const ADD_LEVEL = sys::IORING_POLL_ADD_LEVEL;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -714,6 +762,9 @@ bitflags::bitflags! {
 
         /// `IORING_SEND_ZC_REPORT_USAGE` (since Linux 6.2)
         const ZC_REPORT_USAGE = sys::IORING_SEND_ZC_REPORT_USAGE as _;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -734,6 +785,9 @@ bitflags::bitflags! {
         ///
         /// See also [`IoringSendFlags::FIXED_BUF`].
         const FIXED_BUF = sys::IORING_RECVSEND_FIXED_BUF as _;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -744,6 +798,9 @@ bitflags::bitflags! {
     pub struct IoringAcceptFlags: u16 {
         /// `IORING_ACCEPT_MULTISHOT`
         const MULTISHOT = sys::IORING_ACCEPT_MULTISHOT as _;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -766,6 +823,9 @@ bitflags::bitflags! {
 
         /// `MSG_ERRQUEUE`
         const ERRQUEUE = net::MSG_ERRQUEUE;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -1245,72 +1305,63 @@ pub struct io_uring_buf {
 impl Default for ioprio_union {
     #[inline]
     fn default() -> Self {
-        // SAFETY: All of Linux's io_uring structs may be zero-initialized.
-        unsafe { zeroed::<Self>() }
+        default_union!(ioprio_union, ioprio)
     }
 }
 
 impl Default for len_union {
     #[inline]
     fn default() -> Self {
-        // SAFETY: All of Linux's io_uring structs may be zero-initialized.
-        unsafe { zeroed::<Self>() }
+        default_union!(len_union, len)
     }
 }
 
 impl Default for off_or_addr2_union {
     #[inline]
     fn default() -> Self {
-        // SAFETY: All of Linux's io_uring structs may be zero-initialized.
-        unsafe { zeroed::<Self>() }
+        default_union!(off_or_addr2_union, off)
     }
 }
 
 impl Default for addr_or_splice_off_in_union {
     #[inline]
     fn default() -> Self {
-        // SAFETY: All of Linux's io_uring structs may be zero-initialized.
-        unsafe { zeroed::<Self>() }
+        default_union!(addr_or_splice_off_in_union, splice_off_in)
     }
 }
 
 impl Default for addr3_or_cmd_union {
     #[inline]
     fn default() -> Self {
-        // SAFETY: All of Linux's io_uring structs may be zero-initialized.
-        unsafe { zeroed::<Self>() }
+        default_union!(addr3_or_cmd_union, addr3)
     }
 }
 
 impl Default for op_flags_union {
     #[inline]
     fn default() -> Self {
-        // SAFETY: All of Linux's io_uring structs may be zero-initialized.
-        unsafe { zeroed::<Self>() }
+        default_union!(op_flags_union, sync_range_flags)
     }
 }
 
 impl Default for buf_union {
     #[inline]
     fn default() -> Self {
-        // SAFETY: All of Linux's io_uring structs may be zero-initialized.
-        unsafe { zeroed::<Self>() }
+        default_union!(buf_union, buf_index)
     }
 }
 
 impl Default for splice_fd_in_or_file_index_union {
     #[inline]
     fn default() -> Self {
-        // SAFETY: All of Linux's io_uring structs may be zero-initialized.
-        unsafe { zeroed::<Self>() }
+        default_union!(splice_fd_in_or_file_index_union, splice_fd_in)
     }
 }
 
 impl Default for register_or_sqe_op_or_sqe_flags_union {
     #[inline]
     fn default() -> Self {
-        // SAFETY: All of Linux's io_uring structs may be zero-initialized.
-        unsafe { zeroed::<Self>() }
+        default_union!(register_or_sqe_op_or_sqe_flags_union, sqe_flags)
     }
 }
 

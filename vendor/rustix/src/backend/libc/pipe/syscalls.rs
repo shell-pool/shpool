@@ -18,7 +18,7 @@ use {
     crate::backend::MAX_IOV,
     crate::fd::BorrowedFd,
     crate::pipe::{IoSliceRaw, SpliceFlags},
-    crate::utils::optional_as_mut_ptr,
+    crate::utils::option_as_mut_ptr,
     core::cmp::min,
 };
 
@@ -55,15 +55,15 @@ pub(crate) fn pipe_with(flags: PipeFlags) -> io::Result<(OwnedFd, OwnedFd)> {
 #[cfg(linux_kernel)]
 #[inline]
 pub fn splice(
-    fd_in: BorrowedFd,
+    fd_in: BorrowedFd<'_>,
     off_in: Option<&mut u64>,
-    fd_out: BorrowedFd,
+    fd_out: BorrowedFd<'_>,
     off_out: Option<&mut u64>,
     len: usize,
     flags: SpliceFlags,
 ) -> io::Result<usize> {
-    let off_in = optional_as_mut_ptr(off_in).cast();
-    let off_out = optional_as_mut_ptr(off_out).cast();
+    let off_in = option_as_mut_ptr(off_in).cast();
+    let off_out = option_as_mut_ptr(off_out).cast();
 
     unsafe {
         ret_usize(c::splice(
@@ -80,8 +80,8 @@ pub fn splice(
 #[cfg(linux_kernel)]
 #[inline]
 pub unsafe fn vmsplice(
-    fd: BorrowedFd,
-    bufs: &[IoSliceRaw],
+    fd: BorrowedFd<'_>,
+    bufs: &[IoSliceRaw<'_>],
     flags: SpliceFlags,
 ) -> io::Result<usize> {
     ret_usize(c::vmsplice(
@@ -95,8 +95,8 @@ pub unsafe fn vmsplice(
 #[cfg(linux_kernel)]
 #[inline]
 pub fn tee(
-    fd_in: BorrowedFd,
-    fd_out: BorrowedFd,
+    fd_in: BorrowedFd<'_>,
+    fd_out: BorrowedFd<'_>,
     len: usize,
     flags: SpliceFlags,
 ) -> io::Result<usize> {

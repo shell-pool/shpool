@@ -148,6 +148,7 @@
 //!     * [android_log]
 //!     * [win_dbg_logger]
 //!     * [db_logger]
+//!     * [log-to-defmt]
 //! * For WebAssembly binaries:
 //!     * [console_log]
 //! * For dynamic libraries:
@@ -313,13 +314,14 @@
 //! [android_log]: https://docs.rs/android_log/*/android_log/
 //! [win_dbg_logger]: https://docs.rs/win_dbg_logger/*/win_dbg_logger/
 //! [db_logger]: https://docs.rs/db_logger/*/db_logger/
+//! [log-to-defmt]: https://docs.rs/log-to-defmt/*/log_to_defmt/
 //! [console_log]: https://docs.rs/console_log/*/console_log/
 //! [structured-logger]: https://docs.rs/structured-logger/latest/structured_logger/
 
 #![doc(
     html_logo_url = "https://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
     html_favicon_url = "https://www.rust-lang.org/favicon.ico",
-    html_root_url = "https://docs.rs/log/0.4.19"
+    html_root_url = "https://docs.rs/log/0.4.20"
 )]
 #![warn(missing_docs)]
 #![deny(missing_debug_implementations, unconditional_recursion)]
@@ -1466,64 +1468,7 @@ pub fn logger() -> &'static dyn Log {
 
 // WARNING: this is not part of the crate's public API and is subject to change at any time
 #[doc(hidden)]
-#[cfg(not(feature = "kv_unstable"))]
-pub fn __private_api_log(
-    args: fmt::Arguments,
-    level: Level,
-    &(target, module_path, file, line): &(&str, &'static str, &'static str, u32),
-    kvs: Option<&[(&str, &str)]>,
-) {
-    if kvs.is_some() {
-        panic!(
-            "key-value support is experimental and must be enabled using the `kv_unstable` feature"
-        )
-    }
-
-    logger().log(
-        &Record::builder()
-            .args(args)
-            .level(level)
-            .target(target)
-            .module_path_static(Some(module_path))
-            .file_static(Some(file))
-            .line(Some(line))
-            .build(),
-    );
-}
-
-// WARNING: this is not part of the crate's public API and is subject to change at any time
-#[doc(hidden)]
-#[cfg(feature = "kv_unstable")]
-pub fn __private_api_log(
-    args: fmt::Arguments,
-    level: Level,
-    &(target, module_path, file, line): &(&str, &'static str, &'static str, u32),
-    kvs: Option<&[(&str, &dyn kv::ToValue)]>,
-) {
-    logger().log(
-        &Record::builder()
-            .args(args)
-            .level(level)
-            .target(target)
-            .module_path_static(Some(module_path))
-            .file_static(Some(file))
-            .line(Some(line))
-            .key_values(&kvs)
-            .build(),
-    );
-}
-
-// WARNING: this is not part of the crate's public API and is subject to change at any time
-#[doc(hidden)]
-pub fn __private_api_enabled(level: Level, target: &str) -> bool {
-    logger().enabled(&Metadata::builder().level(level).target(target).build())
-}
-
-// WARNING: this is not part of the crate's public API and is subject to change at any time
-#[doc(hidden)]
-pub mod __private_api {
-    pub use std::option::Option;
-}
+pub mod __private_api;
 
 /// The statically resolved maximum log level.
 ///

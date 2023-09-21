@@ -48,7 +48,7 @@ pub(crate) fn clock_gettime(which_clock: ClockId) -> __kernel_timespec {
         // The `ClockId` enum only contains clocks which never fail. It may be
         // tempting to change this to `debug_assert_eq`, however they can still
         // fail on uncommon kernel configs, so we leave this in place to ensure
-        // that we don't execute UB if they ever do fail.
+        // that we don't execute undefined behavior if they ever do fail.
         assert_eq!(r0, 0);
         result.assume_init()
     }
@@ -287,11 +287,10 @@ unsafe fn _rustix_clock_gettime_via_syscall_old(
     clockid: c::c_int,
     res: *mut Timespec,
 ) -> io::Result<()> {
-    // Ordinarily `rustix` doesn't like to emulate system calls, but in
-    // the case of time APIs, it's specific to Linux, specific to
-    // 32-bit architectures *and* specific to old kernel versions, and
-    // it's not that hard to fix up here, so that no other code needs
-    // to worry about this.
+    // Ordinarily `rustix` doesn't like to emulate system calls, but in the
+    // case of time APIs, it's specific to Linux, specific to 32-bit
+    // architectures *and* specific to old kernel versions, and it's not that
+    // hard to fix up here, so that no other code needs to worry about this.
     let mut old_result = MaybeUninit::<__kernel_old_timespec>::uninit();
     let r0 = syscall!(__NR_clock_gettime, c_int(clockid), &mut old_result);
     match ret(r0) {
@@ -399,9 +398,9 @@ fn init() {
             let ptr = vdso.sym(cstr!("LINUX_4.15"), cstr!("__vdso_clock_gettime"));
             #[cfg(target_arch = "powerpc64")]
             let ptr = vdso.sym(cstr!("LINUX_2.6.15"), cstr!("__kernel_clock_gettime"));
-            #[cfg(target_arch = "mips")]
+            #[cfg(any(target_arch = "mips", target_arch = "mips32r6"))]
             let ptr = vdso.sym(cstr!("LINUX_2.6"), cstr!("__vdso_clock_gettime64"));
-            #[cfg(target_arch = "mips64")]
+            #[cfg(any(target_arch = "mips64", target_arch = "mips64r6"))]
             let ptr = vdso.sym(cstr!("LINUX_2.6"), cstr!("__vdso_clock_gettime"));
 
             // On all 64-bit platforms, the 64-bit `clock_gettime` symbols are
@@ -411,7 +410,12 @@ fn init() {
 
             // On some 32-bit platforms, the 64-bit `clock_gettime` symbols are not
             // available on older kernel versions.
-            #[cfg(any(target_arch = "arm", target_arch = "mips", target_arch = "x86"))]
+            #[cfg(any(
+                target_arch = "arm",
+                target_arch = "mips",
+                target_arch = "mips32r6",
+                target_arch = "x86"
+            ))]
             let ok = !ptr.is_null();
 
             if ok {

@@ -93,15 +93,9 @@ pub struct DFA {
     /// instead of the IDs being 0, 1, 2, 3, ..., they are 0*stride, 1*stride,
     /// 2*stride, 3*stride, ...
     trans: Vec<StateID>,
-    /// The matches for every match state in this DFA. This is indexed by order
-    /// of match states in the DFA. Namely, as constructed, match states are
-    /// always laid out sequentially and contiguously in memory. Thus, after
-    /// converting a match state ID to a match state index, the indices are
-    /// all adjacent.
-    ///
-    /// More concretely, when a search enters a match state with id 'sid', then
-    /// the matching patterns are at 'matches[(sid >> stride2) - 2]'. The '- 2'
-    /// is to offset the first two states of a DFA: the dead and fail states.
+    /// The matches for every match state in this DFA. This is first indexed by
+    /// state index (so that's `sid >> stride2`) and then by order in which the
+    /// matches are meant to occur.
     matches: Vec<Vec<PatternID>>,
     /// The amount of heap memory used, in bytes, by the inner Vecs of
     /// 'matches'.
@@ -174,13 +168,19 @@ impl DFA {
 
     /// Adds the given pattern IDs as matches to the given state and also
     /// records the added memory usage.
-    fn set_matches(&mut self, sid: StateID, pids: &[PatternID]) {
-        use core::mem::size_of;
-
-        assert!(!pids.is_empty(), "match state must have non-empty pids");
+    fn set_matches(
+        &mut self,
+        sid: StateID,
+        pids: impl Iterator<Item = PatternID>,
+    ) {
         let index = (sid.as_usize() >> self.stride2).checked_sub(2).unwrap();
-        self.matches[index].extend_from_slice(pids);
-        self.matches_memory_usage += size_of::<PatternID>() * pids.len();
+        let mut at_least_one = false;
+        for pid in pids {
+            self.matches[index].push(pid);
+            self.matches_memory_usage += PatternID::SIZE;
+            at_least_one = true;
+        }
+        assert!(at_least_one, "match state must have non-empty pids");
     }
 }
 
@@ -524,6 +524,18 @@ impl Builder {
             dfa.byte_classes.alphabet_len(),
             dfa.byte_classes.stride(),
         );
+        // The vectors can grow ~twice as big during construction because a
+        // Vec amortizes growth. But here, let's shrink things back down to
+        // what we actually need since we're never going to add more to it.
+        dfa.trans.shrink_to_fit();
+        dfa.pattern_lens.shrink_to_fit();
+        dfa.matches.shrink_to_fit();
+        // TODO: We might also want to shrink each Vec inside of `dfa.matches`,
+        // or even better, convert it to one contiguous allocation. But I think
+        // I went with nested allocs for good reason (can't remember), so this
+        // may be tricky to do. I decided not to shrink them here because it
+        // might require a fair bit of work to do. It's unclear whether it's
+        // worth it.
         Ok(dfa)
     }
 
@@ -543,11 +555,12 @@ impl Builder {
         };
         for (oldsid, state) in nnfa.states().iter().with_state_ids() {
             let newsid = old2new(oldsid);
-            if !state.matches.is_empty() {
-                dfa.set_matches(newsid, &state.matches);
+            if state.is_match() {
+                dfa.set_matches(newsid, nnfa.iter_matches(oldsid));
             }
             sparse_iter(
-                state,
+                nnfa,
+                oldsid,
                 &dfa.byte_classes,
                 |byte, class, mut oldnextsid| {
                     if oldnextsid == noncontiguous::NFA::FAIL {
@@ -556,7 +569,7 @@ impl Builder {
                         } else {
                             oldnextsid = nnfa.next_state(
                                 Anchored::No,
-                                state.fail,
+                                state.fail(),
                                 byte,
                             );
                         }
@@ -620,11 +633,12 @@ impl Builder {
                     remap_anchored[oldsid] = newsid;
                     is_anchored[newsid.as_usize() >> stride2] = true;
                 }
-                if !state.matches.is_empty() {
-                    dfa.set_matches(newsid, &state.matches);
+                if state.is_match() {
+                    dfa.set_matches(newsid, nnfa.iter_matches(oldsid));
                 }
                 sparse_iter(
-                    state,
+                    nnfa,
+                    oldsid,
                     &dfa.byte_classes,
                     |_, class, oldnextsid| {
                         let class = usize::from(class);
@@ -645,18 +659,19 @@ impl Builder {
                 remap_unanchored[oldsid] = unewsid;
                 remap_anchored[oldsid] = anewsid;
                 is_anchored[anewsid.as_usize() >> stride2] = true;
-                if !state.matches.is_empty() {
-                    dfa.set_matches(unewsid, &state.matches);
-                    dfa.set_matches(anewsid, &state.matches);
+                if state.is_match() {
+                    dfa.set_matches(unewsid, nnfa.iter_matches(oldsid));
+                    dfa.set_matches(anewsid, nnfa.iter_matches(oldsid));
                 }
                 sparse_iter(
-                    state,
+                    nnfa,
+                    oldsid,
                     &dfa.byte_classes,
                     |byte, class, oldnextsid| {
                         let class = usize::from(class);
                         if oldnextsid == noncontiguous::NFA::FAIL {
                             dfa.trans[unewsid.as_usize() + class] = nnfa
-                                .next_state(Anchored::No, state.fail, byte);
+                                .next_state(Anchored::No, state.fail(), byte);
                         } else {
                             dfa.trans[unewsid.as_usize() + class] = oldnextsid;
                             dfa.trans[anewsid.as_usize() + class] = oldnextsid;
@@ -763,14 +778,15 @@ impl Builder {
 /// `byte_classes.alphabet_len()` times, once for every possible class in
 /// ascending order.
 fn sparse_iter<F: FnMut(u8, u8, StateID)>(
-    state: &noncontiguous::State,
+    nnfa: &noncontiguous::NFA,
+    oldsid: StateID,
     classes: &ByteClasses,
     mut f: F,
 ) {
     let mut prev_class = None;
     let mut byte = 0usize;
-    for &(b, id) in state.trans.iter() {
-        while byte < usize::from(b) {
+    for t in nnfa.iter_trans(oldsid) {
+        while byte < usize::from(t.byte()) {
             let rep = byte.as_u8();
             let class = classes.get(rep);
             byte += 1;
@@ -779,11 +795,11 @@ fn sparse_iter<F: FnMut(u8, u8, StateID)>(
                 prev_class = Some(class);
             }
         }
-        let rep = b;
+        let rep = t.byte();
         let class = classes.get(rep);
         byte += 1;
         if prev_class != Some(class) {
-            f(rep, class, id);
+            f(rep, class, t.next());
             prev_class = Some(class);
         }
     }

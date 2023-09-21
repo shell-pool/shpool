@@ -2,7 +2,9 @@
 
 use crate::Flags;
 
-/// Get a random known flags value.
+/**
+Generate some arbitrary flags value with only known bits set.
+*/
 pub fn arbitrary<'a, B: Flags>(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<B>
 where
     B::Bits: arbitrary::Arbitrary<'a>,

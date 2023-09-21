@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.60.0"
 name = "bumpalo"
-version = "3.13.0"
+version = "3.14.0"
 authors = ["Nick Fitzgerald <fitzgen@gmail.com>"]
 exclude = [
     "/.github/*",
@@ -30,7 +30,7 @@ categories = [
     "rust-patterns",
     "no-std",
 ]
-license = "MIT/Apache-2.0"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/fitzgen/bumpalo"
 
 [package.metadata.docs.rs]
@@ -70,3 +70,4 @@ allocator_api = []
 boxed = []
 collections = []
 default = []
+std = []

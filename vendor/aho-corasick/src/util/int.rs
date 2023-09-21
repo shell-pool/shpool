@@ -118,6 +118,33 @@ impl U64 for u64 {
     }
 }
 
+pub(crate) trait I8 {
+    fn as_usize(self) -> usize;
+    fn to_bits(self) -> u8;
+    fn from_bits(n: u8) -> i8;
+}
+
+impl I8 for i8 {
+    fn as_usize(self) -> usize {
+        #[cfg(debug_assertions)]
+        {
+            usize::try_from(self).expect("i8 overflowed usize")
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            self as usize
+        }
+    }
+
+    fn to_bits(self) -> u8 {
+        self as u8
+    }
+
+    fn from_bits(n: u8) -> i8 {
+        n as i8
+    }
+}
+
 pub(crate) trait I32 {
     fn as_usize(self) -> usize;
     fn to_bits(self) -> u32;
@@ -142,6 +169,33 @@ impl I32 for i32 {
 
     fn from_bits(n: u32) -> i32 {
         n as i32
+    }
+}
+
+pub(crate) trait I64 {
+    fn as_usize(self) -> usize;
+    fn to_bits(self) -> u64;
+    fn from_bits(n: u64) -> i64;
+}
+
+impl I64 for i64 {
+    fn as_usize(self) -> usize {
+        #[cfg(debug_assertions)]
+        {
+            usize::try_from(self).expect("i64 overflowed usize")
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            self as usize
+        }
+    }
+
+    fn to_bits(self) -> u64 {
+        self as u64
+    }
+
+    fn from_bits(n: u64) -> i64 {
+        n as i64
     }
 }
 

@@ -1120,7 +1120,7 @@ impl<A: Array> SmallVec<A> {
         unsafe {
             let (mut ptr, mut len, cap) = self.triple_mut();
             if *len == cap {
-                self.reserve(1);
+                self.reserve_one_unchecked();
                 let (heap_ptr, heap_len) = self.data.heap_mut();
                 ptr = heap_ptr;
                 len = heap_len;
@@ -1225,13 +1225,23 @@ impl<A: Array> SmallVec<A> {
         infallible(self.try_reserve(additional))
     }
 
+    /// Internal method used to grow in push() and insert(), where we know already we have to grow.
+    #[cold]
+    fn reserve_one_unchecked(&mut self) {
+        debug_assert_eq!(self.len(), self.capacity());
+        let new_cap = self.len()
+            .checked_add(1)
+            .and_then(usize::checked_next_power_of_two)
+            .expect("capacity overflow");
+        infallible(self.try_grow(new_cap))
+    }
+
     /// Reserve capacity for `additional` more elements to be inserted.
     ///
     /// May reserve more space to avoid frequent reallocations.
     pub fn try_reserve(&mut self, additional: usize) -> Result<(), CollectionAllocErr> {
-        // prefer triple_mut() even if triple() would work
-        // so that the optimizer removes duplicated calls to it
-        // from callers like insert()
+        // prefer triple_mut() even if triple() would work so that the optimizer removes duplicated
+        // calls to it from callers.
         let (_, &mut len, cap) = self.triple_mut();
         if cap - len >= additional {
             return Ok(());
@@ -1357,10 +1367,14 @@ impl<A: Array> SmallVec<A> {
     ///
     /// Panics if `index > len`.
     pub fn insert(&mut self, index: usize, element: A::Item) {
-        self.reserve(1);
-
         unsafe {
-            let (ptr, len_ptr, _) = self.triple_mut();
+            let (mut ptr, mut len_ptr, cap) = self.triple_mut();
+            if *len_ptr == cap {
+                self.reserve_one_unchecked();
+                let (heap_ptr, heap_len_ptr) = self.data.heap_mut();
+                ptr = heap_ptr;
+                len_ptr = heap_len_ptr;
+            }
             let mut ptr = ptr.as_ptr();
             let len = *len_ptr;
             ptr = ptr.add(index);
@@ -1758,6 +1772,7 @@ where
     /// elements toward the back.
     ///
     /// For slices of `Copy` types, this is more efficient than `insert`.
+    #[inline]
     pub fn insert_from_slice(&mut self, index: usize, slice: &[A::Item]) {
         self.reserve(slice.len());
 

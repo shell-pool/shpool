@@ -5,15 +5,16 @@
 
 use core::fmt;
 use core::ops::{Add, Sub};
+use core::str::FromStr;
 
 #[cfg(feature = "rkyv")]
 use rkyv::{Archive, Deserialize, Serialize};
 
 use super::{LocalResult, Offset, TimeZone};
+use crate::duration::Duration as OldDuration;
+use crate::format::{scan, OUT_OF_RANGE};
 use crate::naive::{NaiveDate, NaiveDateTime, NaiveTime};
-use crate::oldtime::Duration as OldDuration;
-use crate::DateTime;
-use crate::Timelike;
+use crate::{DateTime, ParseError, Timelike};
 
 /// The time zone with fixed offset, from UTC-23:59:59 to UTC+23:59:59.
 ///
@@ -110,6 +111,15 @@ impl FixedOffset {
     #[inline]
     pub const fn utc_minus_local(&self) -> i32 {
         -self.local_minus_utc
+    }
+}
+
+/// Parsing a `str` into a `FixedOffset` uses the format [`%z`](crate::format::strftime).
+impl FromStr for FixedOffset {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (_, offset) = scan::timezone_offset(s, scan::colon_or_space, false, false, true)?;
+        Self::east_opt(offset).ok_or(OUT_OF_RANGE)
     }
 }
 
@@ -246,50 +256,41 @@ impl<Tz: TimeZone> Sub<FixedOffset> for DateTime<Tz> {
 mod tests {
     use super::FixedOffset;
     use crate::offset::TimeZone;
+    use std::str::FromStr;
 
     #[test]
     fn test_date_extreme_offset() {
         // starting from 0.3 we don't have an offset exceeding one day.
         // this makes everything easier!
+        let offset = FixedOffset::east_opt(86399).unwrap();
         assert_eq!(
-            format!(
-                "{:?}",
-                FixedOffset::east_opt(86399)
-                    .unwrap()
-                    .with_ymd_and_hms(2012, 2, 29, 5, 6, 7)
-                    .unwrap()
-            ),
-            "2012-02-29T05:06:07+23:59:59".to_string()
+            format!("{:?}", offset.with_ymd_and_hms(2012, 2, 29, 5, 6, 7).unwrap()),
+            "2012-02-29T05:06:07+23:59:59"
         );
+        let offset = FixedOffset::east_opt(-86399).unwrap();
         assert_eq!(
-            format!(
-                "{:?}",
-                FixedOffset::east_opt(86399)
-                    .unwrap()
-                    .with_ymd_and_hms(2012, 2, 29, 5, 6, 7)
-                    .unwrap()
-            ),
-            "2012-02-29T05:06:07+23:59:59".to_string()
+            format!("{:?}", offset.with_ymd_and_hms(2012, 2, 29, 5, 6, 7).unwrap()),
+            "2012-02-29T05:06:07-23:59:59"
         );
+        let offset = FixedOffset::west_opt(86399).unwrap();
         assert_eq!(
-            format!(
-                "{:?}",
-                FixedOffset::west_opt(86399)
-                    .unwrap()
-                    .with_ymd_and_hms(2012, 3, 4, 5, 6, 7)
-                    .unwrap()
-            ),
-            "2012-03-04T05:06:07-23:59:59".to_string()
+            format!("{:?}", offset.with_ymd_and_hms(2012, 3, 4, 5, 6, 7).unwrap()),
+            "2012-03-04T05:06:07-23:59:59"
         );
+        let offset = FixedOffset::west_opt(-86399).unwrap();
         assert_eq!(
-            format!(
-                "{:?}",
-                FixedOffset::west_opt(86399)
-                    .unwrap()
-                    .with_ymd_and_hms(2012, 3, 4, 5, 6, 7)
-                    .unwrap()
-            ),
-            "2012-03-04T05:06:07-23:59:59".to_string()
+            format!("{:?}", offset.with_ymd_and_hms(2012, 3, 4, 5, 6, 7).unwrap()),
+            "2012-03-04T05:06:07+23:59:59"
         );
+    }
+
+    #[test]
+    fn test_parse_offset() {
+        let offset = FixedOffset::from_str("-0500").unwrap();
+        assert_eq!(offset.local_minus_utc, -5 * 3600);
+        let offset = FixedOffset::from_str("-08:00").unwrap();
+        assert_eq!(offset.local_minus_utc, -8 * 3600);
+        let offset = FixedOffset::from_str("+06:30").unwrap();
+        assert_eq!(offset.local_minus_utc, (6 * 3600) + 1800);
     }
 }

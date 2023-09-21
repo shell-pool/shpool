@@ -3,27 +3,25 @@
 //! # Safety
 //!
 //! See the `rustix::backend` module documentation for details.
-#![allow(unsafe_code)]
-#![allow(clippy::undocumented_unsafe_blocks)]
+#![allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
 
 use crate::backend::c;
 use crate::backend::conv::{by_ref, c_uint, ret};
 use crate::fd::BorrowedFd;
 use crate::io;
 use crate::pid::Pid;
-#[cfg(feature = "procfs")]
+#[cfg(all(feature = "alloc", feature = "procfs"))]
 use crate::procfs;
 use crate::termios::{
     Action, ControlModes, InputModes, LocalModes, OptionalActions, OutputModes, QueueSelector,
     SpecialCodeIndex, Termios, Winsize,
 };
-#[cfg(feature = "procfs")]
+#[cfg(all(feature = "alloc", feature = "procfs"))]
 use crate::{ffi::CStr, fs::FileType, path::DecInt};
 use core::mem::MaybeUninit;
 use linux_raw_sys::general::IBSHIFT;
 use linux_raw_sys::ioctl::{
-    TCFLSH, TCSBRK, TCXONC, TIOCEXCL, TIOCGPGRP, TIOCGSID, TIOCGWINSZ, TIOCNXCL, TIOCSPGRP,
-    TIOCSWINSZ,
+    TCFLSH, TCSBRK, TCXONC, TIOCGPGRP, TIOCGSID, TIOCGWINSZ, TIOCSPGRP, TIOCSWINSZ,
 };
 
 #[inline]
@@ -56,14 +54,19 @@ pub(crate) fn tcgetpgrp(fd: BorrowedFd<'_>) -> io::Result<Pid> {
 
 #[inline]
 pub(crate) fn tcsetattr(
-    fd: BorrowedFd,
+    fd: BorrowedFd<'_>,
     optional_actions: OptionalActions,
     termios: &Termios,
 ) -> io::Result<()> {
     // Translate from `optional_actions` into an ioctl request code. On MIPS,
     // `optional_actions` already has `TCGETS` added to it.
     let request = linux_raw_sys::ioctl::TCSETS2
-        + if cfg!(any(target_arch = "mips", target_arch = "mips64")) {
+        + if cfg!(any(
+            target_arch = "mips",
+            target_arch = "mips32r6",
+            target_arch = "mips64",
+            target_arch = "mips64r6"
+        )) {
             optional_actions as u32 - linux_raw_sys::ioctl::TCSETS
         } else {
             optional_actions as u32
@@ -79,17 +82,17 @@ pub(crate) fn tcsetattr(
 }
 
 #[inline]
-pub(crate) fn tcsendbreak(fd: BorrowedFd) -> io::Result<()> {
+pub(crate) fn tcsendbreak(fd: BorrowedFd<'_>) -> io::Result<()> {
     unsafe { ret(syscall_readonly!(__NR_ioctl, fd, c_uint(TCSBRK), c_uint(0))) }
 }
 
 #[inline]
-pub(crate) fn tcdrain(fd: BorrowedFd) -> io::Result<()> {
+pub(crate) fn tcdrain(fd: BorrowedFd<'_>) -> io::Result<()> {
     unsafe { ret(syscall_readonly!(__NR_ioctl, fd, c_uint(TCSBRK), c_uint(1))) }
 }
 
 #[inline]
-pub(crate) fn tcflush(fd: BorrowedFd, queue_selector: QueueSelector) -> io::Result<()> {
+pub(crate) fn tcflush(fd: BorrowedFd<'_>, queue_selector: QueueSelector) -> io::Result<()> {
     unsafe {
         ret(syscall_readonly!(
             __NR_ioctl,
@@ -101,7 +104,7 @@ pub(crate) fn tcflush(fd: BorrowedFd, queue_selector: QueueSelector) -> io::Resu
 }
 
 #[inline]
-pub(crate) fn tcflow(fd: BorrowedFd, action: Action) -> io::Result<()> {
+pub(crate) fn tcflow(fd: BorrowedFd<'_>, action: Action) -> io::Result<()> {
     unsafe {
         ret(syscall_readonly!(
             __NR_ioctl,
@@ -113,7 +116,7 @@ pub(crate) fn tcflow(fd: BorrowedFd, action: Action) -> io::Result<()> {
 }
 
 #[inline]
-pub(crate) fn tcgetsid(fd: BorrowedFd) -> io::Result<Pid> {
+pub(crate) fn tcgetsid(fd: BorrowedFd<'_>) -> io::Result<Pid> {
     unsafe {
         let mut result = MaybeUninit::<c::pid_t>::uninit();
         ret(syscall!(__NR_ioctl, fd, c_uint(TIOCGSID), &mut result))?;
@@ -123,7 +126,7 @@ pub(crate) fn tcgetsid(fd: BorrowedFd) -> io::Result<Pid> {
 }
 
 #[inline]
-pub(crate) fn tcsetwinsize(fd: BorrowedFd, winsize: Winsize) -> io::Result<()> {
+pub(crate) fn tcsetwinsize(fd: BorrowedFd<'_>, winsize: Winsize) -> io::Result<()> {
     unsafe {
         ret(syscall!(
             __NR_ioctl,
@@ -137,16 +140,6 @@ pub(crate) fn tcsetwinsize(fd: BorrowedFd, winsize: Winsize) -> io::Result<()> {
 #[inline]
 pub(crate) fn tcsetpgrp(fd: BorrowedFd<'_>, pid: Pid) -> io::Result<()> {
     unsafe { ret(syscall!(__NR_ioctl, fd, c_uint(TIOCSPGRP), pid)) }
-}
-
-#[inline]
-pub(crate) fn ioctl_tiocexcl(fd: BorrowedFd<'_>) -> io::Result<()> {
-    unsafe { ret(syscall_readonly!(__NR_ioctl, fd, c_uint(TIOCEXCL))) }
-}
-
-#[inline]
-pub(crate) fn ioctl_tiocnxcl(fd: BorrowedFd<'_>) -> io::Result<()> {
-    unsafe { ret(syscall_readonly!(__NR_ioctl, fd, c_uint(TIOCNXCL))) }
 }
 
 /// A wrapper around a conceptual `cfsetspeed` which handles an arbitrary
@@ -235,8 +228,7 @@ pub(crate) fn isatty(fd: BorrowedFd<'_>) -> bool {
     tcgetwinsize(fd).is_ok()
 }
 
-#[cfg(feature = "procfs")]
-#[allow(unsafe_code)]
+#[cfg(all(feature = "alloc", feature = "procfs"))]
 pub(crate) fn ttyname(fd: BorrowedFd<'_>, buf: &mut [MaybeUninit<u8>]) -> io::Result<usize> {
     let fd_stat = crate::backend::fs::syscalls::fstat(fd)?;
 
@@ -251,7 +243,7 @@ pub(crate) fn ttyname(fd: BorrowedFd<'_>, buf: &mut [MaybeUninit<u8>]) -> io::Re
     // Get a fd to '/proc/self/fd'.
     let proc_self_fd = procfs::proc_self_fd()?;
 
-    // Gather the ttyname by reading the 'fd' file inside 'proc_self_fd'.
+    // Gather the ttyname by reading the "fd" file inside `proc_self_fd`.
     let r = crate::backend::fs::syscalls::readlinkat(
         proc_self_fd,
         DecInt::from_fd(fd).as_c_str(),

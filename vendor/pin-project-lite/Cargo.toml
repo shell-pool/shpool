@@ -13,7 +13,7 @@
 edition = "2018"
 rust-version = "1.37"
 name = "pin-project-lite"
-version = "0.2.10"
+version = "0.2.13"
 exclude = [
     "/.*",
     "/tools",
@@ -29,6 +29,7 @@ keywords = [
 ]
 categories = [
     "no-std",
+    "no-std::no-alloc",
     "rust-patterns",
 ]
 license = "Apache-2.0 OR MIT"
@@ -45,6 +46,12 @@ version = "1.0.9"
 
 [dev-dependencies.once_cell]
 version = "=1.14"
+
+[dev-dependencies.proc-macro2]
+version = "=1.0.65"
+
+[dev-dependencies.quote]
+version = "=1.0.30"
 
 [dev-dependencies.rustversion]
 version = "1"

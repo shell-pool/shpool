@@ -17,6 +17,9 @@ bitflags! {
         const CLOEXEC = bitcast!(c::IN_CLOEXEC);
         /// `IN_NONBLOCK`
         const NONBLOCK = bitcast!(c::IN_NONBLOCK);
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -71,6 +74,9 @@ bitflags! {
         const ONESHOT = c::IN_ONESHOT;
         /// `IN_ONLYDIR`
         const ONLYDIR = c::IN_ONLYDIR;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -98,22 +104,23 @@ pub fn inotify_add_watch<P: crate::path::Arg>(
     path: P,
     flags: WatchFlags,
 ) -> io::Result<i32> {
-    let path = path.as_cow_c_str().unwrap();
-    // SAFETY: The fd and path we are passing is guaranteed valid by the type
-    // system.
-    unsafe {
-        ret_c_int(c::inotify_add_watch(
-            borrowed_fd(inot),
-            c_str(&path),
-            flags.bits(),
-        ))
-    }
+    path.into_with_c_str(|path| {
+        // SAFETY: The fd and path we are passing is guaranteed valid by the type
+        // system.
+        unsafe {
+            ret_c_int(c::inotify_add_watch(
+                borrowed_fd(inot),
+                c_str(path),
+                flags.bits(),
+            ))
+        }
+    })
 }
 
 /// `inotify_rm_watch(self, wd)`—Removes a watch from this inotify
 ///
-/// The watch descriptor provided should have previously been returned
-/// by [`inotify_add_watch`] and not previously have been removed.
+/// The watch descriptor provided should have previously been returned by
+/// [`inotify_add_watch`] and not previously have been removed.
 #[doc(alias = "inotify_rm_watch")]
 pub fn inotify_remove_watch(inot: BorrowedFd<'_>, wd: i32) -> io::Result<()> {
     // Android's `inotify_rm_watch` takes `u32` despite that

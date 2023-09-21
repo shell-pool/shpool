@@ -14,7 +14,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use Errno;
+use crate::Errno;
 
 pub fn with_description<F, T>(_err: Errno, callback: F) -> T
 where

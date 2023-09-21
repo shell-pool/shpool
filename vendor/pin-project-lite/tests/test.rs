@@ -616,6 +616,7 @@ fn attrs() {
     pin_project! {
         /// dox1
         #[derive(Clone)]
+        #[project(!Unpin)]
         #[project = Enum2Proj]
         #[project_ref = Enum2ProjRef]
         /// dox2
@@ -682,11 +683,13 @@ fn pinned_drop() {
             req: Request,
         }
 
+        /// dox1
         impl<T, Request> PinnedDrop for Struct3<'_, T, Request>
         where
             T: Service<Request>,
             T::Error: std::error::Error,
         {
+            /// dox2
             fn drop(mut this: Pin<&mut Self>) {
                 **this.as_mut().project().was_dropped = true;
             }

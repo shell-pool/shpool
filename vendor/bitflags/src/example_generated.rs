@@ -21,16 +21,16 @@ __impl_internal_bitflags! {
         // Field `A`.
         ///
         /// This flag has the value `0b00000001`.
-        A = 0b00000001;
+        const A = 0b00000001;
         /// Field `B`.
         ///
         /// This flag has the value `0b00000010`.
-        B = 0b00000010;
+        const B = 0b00000010;
         /// Field `C`.
         ///
         /// This flag has the value `0b00000100`.
-        C = 0b00000100;
-        ABC = Self::A.bits() | Self::B.bits() | Self::C.bits();
+        const C = 0b00000100;
+        const ABC = Self::A.bits() | Self::B.bits() | Self::C.bits();
     }
 }
 
@@ -51,15 +51,15 @@ __impl_public_bitflags_consts! {
         /// Field `A`.
         ///
         /// This flag has the value `0b00000001`.
-        A = 0b00000001;
+        const A = 0b00000001;
         /// Field `B`.
         ///
         /// This flag has the value `0b00000010`.
-        B = 0b00000010;
+        const B = 0b00000010;
         /// Field `C`.
         ///
         /// This flag has the value `0b00000100`.
-        C = 0b00000100;
-        ABC = Self::A.bits() | Self::B.bits() | Self::C.bits();
+        const C = 0b00000100;
+        const ABC = Self::A.bits() | Self::B.bits() | Self::C.bits();
     }
 }

@@ -55,7 +55,8 @@
 //!  - Path arguments use [`Arg`], so they accept any string type.
 //!  - File descriptors are passed and returned via [`AsFd`] and [`OwnedFd`]
 //!    instead of bare integers, ensuring I/O safety.
-//!  - Constants use `enum`s and [`bitflags`] types.
+//!  - Constants use `enum`s and [`bitflags`] types, and enable [support for
+//!    externally defined flags].
 //!  - Multiplexed functions (eg. `fcntl`, `ioctl`, etc.) are de-multiplexed.
 //!  - Variadic functions (eg. `openat`, etc.) are presented as non-variadic.
 //!  - Functions that return strings automatically allocate sufficient memory
@@ -93,6 +94,7 @@
 //! [I/O-safe]: https://github.com/rust-lang/rfcs/blob/master/text/3128-io-safety.md
 //! [`Result`]: https://doc.rust-lang.org/stable/std/result/enum.Result.html
 //! [`Arg`]: https://docs.rs/rustix/*/rustix/path/trait.Arg.html
+//! [support for externally defined flags]: https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags
 
 #![deny(missing_docs)]
 #![allow(stable_features)]
@@ -102,10 +104,11 @@
 #![cfg_attr(all(wasi_ext, target_os = "wasi", feature = "std"), feature(wasi_ext))]
 #![cfg_attr(core_ffi_c, feature(core_ffi_c))]
 #![cfg_attr(core_c_str, feature(core_c_str))]
-#![cfg_attr(alloc_c_string, feature(alloc_c_string))]
-#![cfg_attr(alloc_ffi, feature(alloc_ffi))]
+#![cfg_attr(all(feature = "alloc", alloc_c_string), feature(alloc_c_string))]
+#![cfg_attr(all(feature = "alloc", alloc_ffi), feature(alloc_ffi))]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(feature = "rustc-dep-of-std", feature(ip))]
+#![cfg_attr(feature = "rustc-dep-of-std", allow(internal_features))]
 #![cfg_attr(
     any(feature = "rustc-dep-of-std", core_intrinsics),
     feature(core_intrinsics)
@@ -120,13 +123,24 @@
 // conditionalizing all the `use`s for them.
 #![cfg_attr(any(target_os = "redox", target_os = "wasi"), allow(unused_imports))]
 
-#[cfg(not(feature = "rustc-dep-of-std"))]
+#[cfg(all(feature = "alloc", not(feature = "rustc-dep-of-std")))]
 extern crate alloc;
+
+// Use `static_assertions` macros if we have them, or a polyfill otherwise.
+#[cfg(all(test, static_assertions))]
+#[macro_use]
+#[allow(unused_imports)]
+extern crate static_assertions;
+#[cfg(all(test, not(static_assertions)))]
+#[macro_use]
+#[allow(unused_imports)]
+mod static_assertions;
 
 // Internal utilities.
 #[cfg(not(windows))]
 #[macro_use]
 pub(crate) mod cstr;
+#[macro_use]
 pub(crate) mod utils;
 // Polyfill for `std` in `no_std` builds.
 #[cfg_attr(feature = "std", path = "maybe_polyfill/std/mod.rs")]
@@ -179,20 +193,7 @@ pub mod event;
 #[cfg(not(windows))]
 pub mod ffi;
 #[cfg(not(windows))]
-#[cfg(any(
-    feature = "fs",
-    all(
-        linux_raw,
-        not(feature = "use-libc-auxv"),
-        not(target_vendor = "mustang"),
-        any(
-            feature = "param",
-            feature = "runtime",
-            feature = "time",
-            target_arch = "x86",
-        )
-    )
-))]
+#[cfg(feature = "fs")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "fs")))]
 pub mod fs;
 pub mod io;
@@ -200,10 +201,15 @@ pub mod io;
 #[cfg(feature = "io_uring")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "io_uring")))]
 pub mod io_uring;
+pub mod ioctl;
 #[cfg(not(any(windows, target_os = "espidf", target_os = "wasi")))]
 #[cfg(feature = "mm")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "mm")))]
 pub mod mm;
+#[cfg(linux_kernel)]
+#[cfg(feature = "mount")]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "mount")))]
+pub mod mount;
 #[cfg(not(any(target_os = "redox", target_os = "wasi")))]
 #[cfg(feature = "net")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "net")))]
@@ -213,22 +219,11 @@ pub mod net;
 #[cfg_attr(doc_cfg, doc(cfg(feature = "param")))]
 pub mod param;
 #[cfg(not(windows))]
-#[cfg(any(
-    feature = "fs",
-    feature = "net",
-    all(
-        linux_raw,
-        not(feature = "use-libc-auxv"),
-        not(target_vendor = "mustang"),
-        any(
-            feature = "param",
-            feature = "runtime",
-            feature = "time",
-            target_arch = "x86",
-        )
-    )
-))]
-#[cfg_attr(doc_cfg, doc(cfg(any(feature = "fs", feature = "net"))))]
+#[cfg(any(feature = "fs", feature = "mount", feature = "net"))]
+#[cfg_attr(
+    doc_cfg,
+    doc(cfg(any(feature = "fs", feature = "mount", feature = "net")))
+)]
 pub mod path;
 #[cfg(feature = "pipe")]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "pipe")))]
@@ -276,9 +271,49 @@ pub mod time;
 #[cfg(not(windows))]
 #[cfg(feature = "runtime")]
 #[cfg(linux_raw)]
-#[doc(hidden)]
+#[cfg_attr(not(document_experimental_runtime_api), doc(hidden))]
 #[cfg_attr(doc_cfg, doc(cfg(feature = "runtime")))]
 pub mod runtime;
+
+// Temporarily provide some mount functions for use in the fs module for
+// backwards compatibility.
+#[cfg(linux_kernel)]
+#[cfg(all(feature = "fs", not(feature = "mount")))]
+pub(crate) mod mount;
+
+// Declare "fs" as a non-public module if "fs" isn't enabled but we need it for
+// reading procfs.
+#[cfg(not(windows))]
+#[cfg(not(feature = "fs"))]
+#[cfg(all(
+    linux_raw,
+    not(feature = "use-libc-auxv"),
+    not(feature = "use-explicitly-provided-auxv"),
+    any(
+        feature = "param",
+        feature = "runtime",
+        feature = "time",
+        target_arch = "x86",
+    )
+))]
+#[cfg_attr(doc_cfg, doc(cfg(feature = "fs")))]
+pub(crate) mod fs;
+
+// Similarly, declare `path` as a non-public module if needed.
+#[cfg(not(windows))]
+#[cfg(not(any(feature = "fs", feature = "mount", feature = "net")))]
+#[cfg(all(
+    linux_raw,
+    not(feature = "use-libc-auxv"),
+    not(feature = "use-explicitly-provided-auxv"),
+    any(
+        feature = "param",
+        feature = "runtime",
+        feature = "time",
+        target_arch = "x86",
+    )
+))]
+pub(crate) mod path;
 
 // Private modules used by multiple public modules.
 #[cfg(not(any(windows, target_os = "espidf")))]
@@ -309,7 +344,7 @@ mod signal;
     all(
         linux_raw,
         not(feature = "use-libc-auxv"),
-        not(target_vendor = "mustang"),
+        not(feature = "use-explicitly-provided-auxv"),
         any(
             feature = "param",
             feature = "runtime",
@@ -327,7 +362,7 @@ mod timespec;
     all(
         linux_raw,
         not(feature = "use-libc-auxv"),
-        not(target_vendor = "mustang"),
+        not(feature = "use-explicitly-provided-auxv"),
         any(
             feature = "param",
             feature = "runtime",

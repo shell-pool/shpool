@@ -879,6 +879,7 @@ impl Config {
     ///
     /// ```
     /// # if cfg!(miri) { return Ok(()); } // miri takes too long
+    /// # if !cfg!(target_pointer_width = "64") { return Ok(()); } // see #1039
     /// use regex_automata::{dfa::{dense, Automaton}, Input};
     ///
     /// // 600KB isn't enough!
@@ -912,6 +913,7 @@ impl Config {
     ///
     /// ```
     /// # if cfg!(miri) { return Ok(()); } // miri takes too long
+    /// # if !cfg!(target_pointer_width = "64") { return Ok(()); } // see #1039
     /// use regex_automata::{
     ///     dfa::{dense, Automaton, StartKind},
     ///     Anchored, Input,
@@ -1168,7 +1170,10 @@ impl Builder {
             .clone()
             // We can always forcefully disable captures because DFAs do not
             // support them.
-            .configure(thompson::Config::new().captures(false))
+            .configure(
+                thompson::Config::new()
+                    .which_captures(thompson::WhichCaptures::None),
+            )
             .build_many(patterns)
             .map_err(BuildError::nfa)?;
         self.build_from_nfa(&nfa)

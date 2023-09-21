@@ -106,9 +106,9 @@ def load_east_asian_widths() -> "list[EffectiveWidth]":
     `Ambiguous` chracters are assigned `EffectiveWidth.AMBIGUOUS`."""
     with fetch_open("EastAsianWidth.txt") as eaw:
         # matches a width assignment for a single codepoint, i.e. "1F336;N  # ..."
-        single = re.compile(r"^([0-9A-F]+);(\w+) +# (\w+)")
+        single = re.compile(r"^([0-9A-F]+)\s+;\s+(\w+) +# (\w+)")
         # matches a width assignment for a range of codepoints, i.e. "3001..3003;W  # ..."
-        multiple = re.compile(r"^([0-9A-F]+)\.\.([0-9A-F]+);(\w+) +# (\w+)")
+        multiple = re.compile(r"^([0-9A-F]+)\.\.([0-9A-F]+)\s+;\s+(\w+) +# (\w+)")
         # map between width category code and condensed width
         width_codes = {
             **{c: EffectiveWidth.NARROW for c in ["N", "Na", "H"]},

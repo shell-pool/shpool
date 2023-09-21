@@ -58,10 +58,11 @@ by default. The rest of the API is conditional with cargo feature flags:
 | Name       | Description
 | ---------- | ---------------------
 | `event`    | [`rustix::event`]—Polling and event operations.
-| `fs`       | [`rustix::fs`] and [`rustix::path`]—Filesystem operations.
+| `fs`       | [`rustix::fs`]—Filesystem operations.
 | `io_uring` | [`rustix::io_uring`]—Linux io_uring.
 | `mm`       | [`rustix::mm`]—Memory map operations.
-| `net`      | [`rustix::net`] and [`rustix::path`]—Network-related operations.
+| `mount`    | [`rustix::mount`]—Linux mount API.
+| `net`      | [`rustix::net`]—Network-related operations.
 | `param`    | [`rustix::param`]—Process parameters.
 | `pipe`     | [`rustix::pipe`]—Pipe operations.
 | `process`  | [`rustix::process`]—Process-associated operations.
@@ -76,10 +77,11 @@ by default. The rest of the API is conditional with cargo feature flags:
 |            |
 | `use-libc` | Enable the libc backend.
 
-[`rustix::event`]: https://docs.rs/rustix/*/rustix/fs/index.html
+[`rustix::event`]: https://docs.rs/rustix/*/rustix/event/index.html
 [`rustix::fs`]: https://docs.rs/rustix/*/rustix/fs/index.html
 [`rustix::io_uring`]: https://docs.rs/rustix/*/rustix/io_uring/index.html
 [`rustix::mm`]: https://docs.rs/rustix/*/rustix/mm/index.html
+[`rustix::mount`]: https://docs.rs/rustix/*/rustix/mount/index.html
 [`rustix::net`]: https://docs.rs/rustix/*/rustix/net/index.html
 [`rustix::param`]: https://docs.rs/rustix/*/rustix/param/index.html
 [`rustix::pipe`]: https://docs.rs/rustix/*/rustix/pipe/index.html
@@ -95,7 +97,6 @@ by default. The rest of the API is conditional with cargo feature flags:
 [`rustix::io`]: https://docs.rs/rustix/*/rustix/io/index.html
 [`rustix::fd`]: https://docs.rs/rustix/*/rustix/fd/index.html
 [`rustix::ffi`]: https://docs.rs/rustix/*/rustix/ffi/index.html
-[`rustix::path`]: https://docs.rs/rustix/*/rustix/path/index.html
 
 ## 64-bit Large File Support (LFS) and Year 2038 (y2038) support
 
@@ -106,8 +107,8 @@ struct that's 64-bit even on 32-bit platforms.
 
 ## Similar crates
 
-`rustix` is similar to [`nix`], [`simple_libc`], [`unix`], [`nc`], and
-[`uapi`]. `rustix` is architected for [I/O safety] with most APIs using
+`rustix` is similar to [`nix`], [`simple_libc`], [`unix`], [`nc`], [`uapi`],
+and [`rusl`]. `rustix` is architected for [I/O safety] with most APIs using
 [`OwnedFd`] and [`AsFd`] to manipulate file descriptors rather than `File` or
 even `c_int`, and supporting multiple backends so that it can use direct
 syscalls while still being usable on all platforms `libc` supports. Like `nix`,
@@ -154,6 +155,7 @@ version of this crate.
 [`nc`]: https://crates.io/crates/nc
 [`simple_libc`]: https://crates.io/crates/simple_libc
 [`uapi`]: https://crates.io/crates/uapi
+[`rusl`]: https://lib.rs/crates/rusl
 [`relibc`]: https://github.com/redox-os/relibc
 [`syscall`]: https://crates.io/crates/syscall
 [`sc`]: https://crates.io/crates/sc

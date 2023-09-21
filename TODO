@@ -1,8 +1,7 @@
 
 - There is a lot of heartbeat overhead. See if we can reduce that.
    - maybe we can get rid of the heartbeat thread and just have the
-     reader thread to zero length writes every so often?
-- See about replacing the supervisor thread with the reader thread.
+     reader thread do zero length writes every so often?
 - Exit with a success error code when a session gets manually detached (either
   via shpool detach or with the upcoming detach keybinding).
 - Allow users to specify a command to run instead of their default shell.

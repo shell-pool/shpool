@@ -107,7 +107,7 @@
 //! [derive section of the manual]: https://serde.rs/derive.html
 //! [data formats]: https://serde.rs/#data-formats
 
-use lib::*;
+use crate::lib::*;
 
 mod fmt;
 mod impls;
@@ -115,15 +115,15 @@ mod impossible;
 
 pub use self::impossible::Impossible;
 
+#[cfg(not(any(feature = "std", feature = "unstable")))]
+#[doc(no_inline)]
+pub use crate::std_error::Error as StdError;
 #[cfg(all(feature = "unstable", not(feature = "std")))]
-#[doc(inline)]
+#[doc(no_inline)]
 pub use core::error::Error as StdError;
 #[cfg(feature = "std")]
 #[doc(no_inline)]
 pub use std::error::Error as StdError;
-#[cfg(not(any(feature = "std", feature = "unstable")))]
-#[doc(no_inline)]
-pub use std_error::Error as StdError;
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -488,30 +488,27 @@ pub trait Serializer: Sized {
     /// ```
     fn serialize_i64(self, v: i64) -> Result<Self::Ok, Self::Error>;
 
-    serde_if_integer128! {
-        /// Serialize an `i128` value.
-        ///
-        /// ```edition2021
-        /// # use serde::Serializer;
-        /// #
-        /// # serde::__private_serialize!();
-        /// #
-        /// impl Serialize for i128 {
-        ///     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        ///     where
-        ///         S: Serializer,
-        ///     {
-        ///         serializer.serialize_i128(*self)
-        ///     }
-        /// }
-        /// ```
-        ///
-        /// This method is available only on Rust compiler versions >=1.26. The
-        /// default behavior unconditionally returns an error.
-        fn serialize_i128(self, v: i128) -> Result<Self::Ok, Self::Error> {
-            let _ = v;
-            Err(Error::custom("i128 is not supported"))
-        }
+    /// Serialize an `i128` value.
+    ///
+    /// ```edition2021
+    /// # use serde::Serializer;
+    /// #
+    /// # serde::__private_serialize!();
+    /// #
+    /// impl Serialize for i128 {
+    ///     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    ///     where
+    ///         S: Serializer,
+    ///     {
+    ///         serializer.serialize_i128(*self)
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// The default behavior unconditionally returns an error.
+    fn serialize_i128(self, v: i128) -> Result<Self::Ok, Self::Error> {
+        let _ = v;
+        Err(Error::custom("i128 is not supported"))
     }
 
     /// Serialize a `u8` value.
@@ -598,30 +595,27 @@ pub trait Serializer: Sized {
     /// ```
     fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error>;
 
-    serde_if_integer128! {
-        /// Serialize a `u128` value.
-        ///
-        /// ```edition2021
-        /// # use serde::Serializer;
-        /// #
-        /// # serde::__private_serialize!();
-        /// #
-        /// impl Serialize for u128 {
-        ///     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        ///     where
-        ///         S: Serializer,
-        ///     {
-        ///         serializer.serialize_u128(*self)
-        ///     }
-        /// }
-        /// ```
-        ///
-        /// This method is available only on Rust compiler versions >=1.26. The
-        /// default behavior unconditionally returns an error.
-        fn serialize_u128(self, v: u128) -> Result<Self::Ok, Self::Error> {
-            let _ = v;
-            Err(Error::custom("u128 is not supported"))
-        }
+    /// Serialize a `u128` value.
+    ///
+    /// ```edition2021
+    /// # use serde::Serializer;
+    /// #
+    /// # serde::__private_serialize!();
+    /// #
+    /// impl Serialize for u128 {
+    ///     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    ///     where
+    ///         S: Serializer,
+    ///     {
+    ///         serializer.serialize_u128(*self)
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// The default behavior unconditionally returns an error.
+    fn serialize_u128(self, v: u128) -> Result<Self::Ok, Self::Error> {
+        let _ = v;
+        Err(Error::custom("u128 is not supported"))
     }
 
     /// Serialize an `f32` value.
@@ -1279,22 +1273,9 @@ pub trait Serializer: Sized {
         I: IntoIterator,
         <I as IntoIterator>::Item: Serialize,
     {
-        let iter = iter.into_iter();
-        let mut serializer = try!(self.serialize_seq(iterator_len_hint(&iter)));
-
-        #[cfg(not(no_iterator_try_fold))]
-        {
-            let mut iter = iter;
-            try!(iter.try_for_each(|item| serializer.serialize_element(&item)));
-        }
-
-        #[cfg(no_iterator_try_fold)]
-        {
-            for item in iter {
-                try!(serializer.serialize_element(&item));
-            }
-        }
-
+        let mut iter = iter.into_iter();
+        let mut serializer = tri!(self.serialize_seq(iterator_len_hint(&iter)));
+        tri!(iter.try_for_each(|item| serializer.serialize_element(&item)));
         serializer.end()
     }
 
@@ -1330,22 +1311,9 @@ pub trait Serializer: Sized {
         V: Serialize,
         I: IntoIterator<Item = (K, V)>,
     {
-        let iter = iter.into_iter();
-        let mut serializer = try!(self.serialize_map(iterator_len_hint(&iter)));
-
-        #[cfg(not(no_iterator_try_fold))]
-        {
-            let mut iter = iter;
-            try!(iter.try_for_each(|(key, value)| serializer.serialize_entry(&key, &value)));
-        }
-
-        #[cfg(no_iterator_try_fold)]
-        {
-            for (key, value) in iter {
-                try!(serializer.serialize_entry(&key, &value));
-            }
-        }
-
+        let mut iter = iter.into_iter();
+        let mut serializer = tri!(self.serialize_map(iterator_len_hint(&iter)));
+        tri!(iter.try_for_each(|(key, value)| serializer.serialize_entry(&key, &value)));
         serializer.end()
     }
 
@@ -1839,7 +1807,7 @@ pub trait SerializeMap {
         K: Serialize,
         V: Serialize,
     {
-        try!(self.serialize_key(key));
+        tri!(self.serialize_key(key));
         self.serialize_value(value)
     }
 

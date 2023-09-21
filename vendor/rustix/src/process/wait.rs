@@ -22,6 +22,9 @@ bitflags! {
         /// Return if a stopped child has been resumed by delivery of
         /// [`Signal::Cont`].
         const CONTINUED = bitcast!(backend::process::wait::WCONTINUED);
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -42,6 +45,9 @@ bitflags! {
         const NOWAIT = bitcast!(backend::process::wait::WNOWAIT);
         /// Wait for processes that have been stopped.
         const STOPPED = bitcast!(backend::process::wait::WSTOPPED);
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -170,7 +176,7 @@ impl WaitidStatus {
     /// Returns the number of the signal that stopped the process,
     /// if the process was stopped by a signal.
     #[inline]
-    #[cfg(not(any(target_os = "netbsd", target_os = "fuchsia", target_os = "emscripten")))]
+    #[cfg(not(any(target_os = "emscripten", target_os = "fuchsia", target_os = "netbsd")))]
     pub fn stopping_signal(&self) -> Option<u32> {
         if self.stopped() {
             Some(self.si_status() as _)
@@ -182,7 +188,7 @@ impl WaitidStatus {
     /// Returns the number of the signal that trapped the process,
     /// if the process was trapped by a signal.
     #[inline]
-    #[cfg(not(any(target_os = "netbsd", target_os = "fuchsia", target_os = "emscripten")))]
+    #[cfg(not(any(target_os = "emscripten", target_os = "fuchsia", target_os = "netbsd")))]
     pub fn trapping_signal(&self) -> Option<u32> {
         if self.trapped() {
             Some(self.si_status() as _)
@@ -194,7 +200,7 @@ impl WaitidStatus {
     /// Returns the exit status number returned by the process,
     /// if it exited normally.
     #[inline]
-    #[cfg(not(any(target_os = "netbsd", target_os = "fuchsia", target_os = "emscripten")))]
+    #[cfg(not(any(target_os = "emscripten", target_os = "fuchsia", target_os = "netbsd")))]
     pub fn exit_status(&self) -> Option<u32> {
         if self.exited() {
             Some(self.si_status() as _)
@@ -206,7 +212,7 @@ impl WaitidStatus {
     /// Returns the number of the signal that terminated the process,
     /// if the process was terminated by a signal.
     #[inline]
-    #[cfg(not(any(target_os = "netbsd", target_os = "fuchsia", target_os = "emscripten")))]
+    #[cfg(not(any(target_os = "emscripten", target_os = "fuchsia", target_os = "netbsd")))]
     pub fn terminating_signal(&self) -> Option<u32> {
         if self.killed() || self.dumped() {
             Some(self.si_status() as _)
@@ -231,7 +237,7 @@ impl WaitidStatus {
         self.0.si_code
     }
 
-    #[cfg(not(any(target_os = "netbsd", target_os = "fuchsia", target_os = "emscripten")))]
+    #[cfg(not(any(target_os = "emscripten", target_os = "fuchsia", target_os = "netbsd")))]
     #[allow(unsafe_code)]
     fn si_status(&self) -> backend::c::c_int {
         // SAFETY: POSIX [specifies] that the `siginfo_t` returned by a

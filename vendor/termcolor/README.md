@@ -21,7 +21,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-termcolor = "1.1"
+termcolor = "1.2"
 ```
 
 ### Organization

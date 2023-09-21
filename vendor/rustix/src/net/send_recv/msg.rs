@@ -107,11 +107,15 @@ impl<'buf, 'slice, 'fd> SendAncillaryBuffer<'buf, 'slice, 'fd> {
 
     /// Returns a pointer to the message data.
     pub(crate) fn as_control_ptr(&mut self) -> *mut u8 {
-        if self.length > 0 {
-            self.buffer.as_mut_ptr()
-        } else {
-            ptr::null_mut()
+        // When the length is zero, we may be using a `&[]` address, which may
+        // be an invalid but non-null pointer, and on some platforms, that
+        // causes `sendmsg` to fail with `EFAULT` or `EINVAL`
+        #[cfg(not(linux_kernel))]
+        if self.length == 0 {
+            return core::ptr::null_mut();
         }
+
+        self.buffer.as_mut_ptr()
     }
 
     /// Returns the length of the message data.
@@ -223,6 +227,14 @@ impl<'buf> RecvAncillaryBuffer<'buf> {
 
     /// Returns a pointer to the message data.
     pub(crate) fn as_control_ptr(&mut self) -> *mut u8 {
+        // When the length is zero, we may be using a `&[]` address, which may
+        // be an invalid but non-null pointer, and on some platforms, that
+        // causes `sendmsg` to fail with `EFAULT` or `EINVAL`
+        #[cfg(not(linux_kernel))]
+        if self.buffer.is_empty() {
+            return core::ptr::null_mut();
+        }
+
         self.buffer.as_mut_ptr()
     }
 
@@ -674,9 +686,9 @@ impl<T> DoubleEndedIterator for AncillaryIter<'_, T> {
 
 mod messages {
     use crate::backend::c;
+    use crate::backend::net::msghdr;
     use core::iter::FusedIterator;
     use core::marker::PhantomData;
-    use core::mem::zeroed;
     use core::ptr::NonNull;
 
     /// An iterator over the messages in an ancillary buffer.
@@ -697,7 +709,7 @@ mod messages {
         /// Create a new iterator over messages from a byte buffer.
         pub(super) fn new(buf: &'buf mut [u8]) -> Self {
             let msghdr = {
-                let mut h: c::msghdr = unsafe { zeroed() };
+                let mut h = msghdr::zero_msghdr();
                 h.msg_control = buf.as_mut_ptr().cast();
                 h.msg_controllen = buf.len().try_into().expect("buffer too large for msghdr");
                 h

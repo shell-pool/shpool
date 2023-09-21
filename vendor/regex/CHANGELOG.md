@@ -1,3 +1,82 @@
+1.9.5 (2023-09-02)
+==================
+This is a patch release that hopefully mostly fixes a performance bug that
+occurs when sharing a regex across multiple threads.
+
+Issue [#934](https://github.com/rust-lang/regex/issues/934)
+explains this in more detail. It is [also noted in the crate
+documentation](https://docs.rs/regex/latest/regex/#sharing-a-regex-across-threads-can-result-in-contention).
+The bug can appear when sharing a regex across multiple threads simultaneously,
+as might be the case when using a regex from a `OnceLock`, `lazy_static` or
+similar primitive. Usually high contention only results when using many threads
+to execute searches on small haystacks.
+
+One can avoid the contention problem entirely through one of two methods.
+The first is to use lower level APIs from `regex-automata` that require passing
+state explicitly, such as [`meta::Regex::search_with`](https://docs.rs/regex-automata/latest/regex_automata/meta/struct.Regex.html#method.search_with).
+The second is to clone a regex and send it to other threads explicitly. This
+will not use any additional memory usage compared to sharing the regex. The
+only downside of this approach is that it may be less convenient, for example,
+it won't work with things like `OnceLock` or `lazy_static` or `once_cell`.
+
+With that said, as of this release, the contention performance problems have
+been greatly reduced. This was achieved by changing the free-list so that it
+was sharded across threads, and that ensuring each sharded mutex occupies a
+single cache line to mitigate false sharing. So while contention may still
+impact performance in some cases, it should be a lot better now.
+
+Because of the changes to how the free-list works, please report any issues you
+find with this release. That not only includes search time regressions but also
+significant regressions in memory usage. Reporting improvements is also welcome
+as well! If possible, provide a reproduction.
+
+Bug fixes:
+
+* [BUG #934](https://github.com/rust-lang/regex/issues/934):
+Fix a performance bug where high contention on a single regex led to massive
+slow downs.
+
+
+1.9.4 (2023-08-26)
+==================
+This is a patch release that fixes a bug where `RegexSet::is_match(..)` could
+incorrectly return false (even when `RegexSet::matches(..).matched_any()`
+returns true).
+
+Bug fixes:
+
+* [BUG #1070](https://github.com/rust-lang/regex/issues/1070):
+Fix a bug where a prefilter was incorrectly configured for a `RegexSet`.
+
+
+1.9.3 (2023-08-05)
+==================
+This is a patch release that fixes a bug where some searches could result in
+incorrect match offsets being reported. It is difficult to characterize the
+types of regexes susceptible to this bug. They generally involve patterns
+that contain no prefix or suffix literals, but have an inner literal along with
+a regex prefix that can conditionally match.
+
+Bug fixes:
+
+* [BUG #1060](https://github.com/rust-lang/regex/issues/1060):
+Fix a bug with the reverse inner literal optimization reporting incorrect match
+offsets.
+
+
+1.9.2 (2023-08-05)
+==================
+This is a patch release that fixes another memory usage regression. This
+particular regression occurred only when using a `RegexSet`. In some cases,
+much more heap memory (by one or two orders of magnitude) was allocated than in
+versions prior to 1.9.0.
+
+Bug fixes:
+
+* [BUG #1059](https://github.com/rust-lang/regex/issues/1059):
+Fix a memory usage regression when using a `RegexSet`.
+
+
 1.9.1 (2023-07-07)
 ==================
 This is a patch release which fixes a memory usage regression. In the regex

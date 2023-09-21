@@ -30,6 +30,9 @@ bitflags! {
         const PROCESS_ID = CLONE_NEWPID;
         /// Network name space.
         const NETWORK = CLONE_NEWNET;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -65,7 +68,7 @@ bitflags! {
         /// `CLONE_FS`.
         const FS = CLONE_FS;
         /// `CLONE_NEWCGROUP`.
-        const NWCGROUP = CLONE_NEWCGROUP;
+        const NEWCGROUP = CLONE_NEWCGROUP;
         /// `CLONE_NEWIPC`.
         const NEWIPC = CLONE_NEWIPC;
         /// `CLONE_NEWNET`.
@@ -78,8 +81,13 @@ bitflags! {
         const NEWTIME = CLONE_NEWTIME;
         /// `CLONE_NEWUSER`.
         const NEWUSER = CLONE_NEWUSER;
+        /// `CLONE_NEWUTS`
+        const NEWUTS = CLONE_NEWUTS;
         /// `CLONE_SYSVSEM`.
         const SYSVSEM = CLONE_SYSVSEM;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -94,7 +102,7 @@ bitflags! {
 ///
 /// [Linux]: https://man7.org/linux/man-pages/man2/setns.2.html
 pub fn move_into_link_name_space(
-    fd: BorrowedFd,
+    fd: BorrowedFd<'_>,
     allowed_type: Option<LinkNameSpaceType>,
 ) -> io::Result<()> {
     let allowed_type = allowed_type.map_or(0, |t| t as c_int);
@@ -111,7 +119,7 @@ pub fn move_into_link_name_space(
 ///
 /// [Linux]: https://man7.org/linux/man-pages/man2/setns.2.html
 pub fn move_into_thread_name_spaces(
-    fd: BorrowedFd,
+    fd: BorrowedFd<'_>,
     allowed_types: ThreadNameSpaceType,
 ) -> io::Result<()> {
     syscalls::setns(fd, allowed_types.bits() as c_int).map(|_r| ())

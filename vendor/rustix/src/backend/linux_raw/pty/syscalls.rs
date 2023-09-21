@@ -3,22 +3,21 @@
 //! # Safety
 //!
 //! See the `rustix::backend` module documentation for details.
-#![allow(unsafe_code)]
-#![allow(clippy::undocumented_unsafe_blocks)]
+#![allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
 
-use crate::backend::c;
-use crate::backend::conv::{by_ref, c_uint, ret, ret_owned_fd};
-use crate::fd::{BorrowedFd, OwnedFd};
-use crate::ffi::CString;
+use crate::backend::conv::{by_ref, c_uint, ret};
+use crate::fd::BorrowedFd;
 use crate::io;
-use crate::path::DecInt;
-use crate::pty::OpenptFlags;
-use alloc::vec::Vec;
-use core::mem::MaybeUninit;
-use linux_raw_sys::ioctl::{TIOCGPTN, TIOCGPTPEER, TIOCSPTLCK};
+use linux_raw_sys::ioctl::TIOCSPTLCK;
+#[cfg(feature = "alloc")]
+use {
+    crate::backend::c, crate::ffi::CString, crate::path::DecInt, alloc::vec::Vec,
+    core::mem::MaybeUninit, linux_raw_sys::ioctl::TIOCGPTN,
+};
 
+#[cfg(feature = "alloc")]
 #[inline]
-pub(crate) fn ptsname(fd: BorrowedFd, mut buffer: Vec<u8>) -> io::Result<CString> {
+pub(crate) fn ptsname(fd: BorrowedFd<'_>, mut buffer: Vec<u8>) -> io::Result<CString> {
     unsafe {
         let mut n = MaybeUninit::<c::c_int>::uninit();
         ret(syscall!(__NR_ioctl, fd, c_uint(TIOCGPTN), &mut n))?;
@@ -32,26 +31,13 @@ pub(crate) fn ptsname(fd: BorrowedFd, mut buffer: Vec<u8>) -> io::Result<CString
 }
 
 #[inline]
-pub(crate) fn unlockpt(fd: BorrowedFd) -> io::Result<()> {
+pub(crate) fn unlockpt(fd: BorrowedFd<'_>) -> io::Result<()> {
     unsafe {
         ret(syscall_readonly!(
             __NR_ioctl,
             fd,
             c_uint(TIOCSPTLCK),
             by_ref(&0)
-        ))
-    }
-}
-
-#[cfg(target_os = "linux")]
-#[inline]
-pub(crate) fn ioctl_tiocgptpeer(fd: BorrowedFd, flags: OpenptFlags) -> io::Result<OwnedFd> {
-    unsafe {
-        ret_owned_fd(syscall_readonly!(
-            __NR_ioctl,
-            fd,
-            c_uint(TIOCGPTPEER),
-            flags
         ))
     }
 }

@@ -10,9 +10,10 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-rust-version = "1.19"
+edition = "2018"
+rust-version = "1.31"
 name = "serde"
-version = "1.0.177"
+version = "1.0.188"
 authors = [
     "Erick Tryzelaar <erick.tryzelaar@gmail.com>",
     "David Tolnay <dtolnay@gmail.com>",
@@ -50,7 +51,7 @@ features = [
 doc-scrape-examples = false
 
 [dependencies.serde_derive]
-version = "=1.0.177"
+version = "1"
 optional = true
 
 [dev-dependencies.serde_derive]
@@ -63,3 +64,6 @@ derive = ["serde_derive"]
 rc = []
 std = []
 unstable = []
+
+[target."cfg(any())".dependencies.serde_derive]
+version = "=1.0.188"

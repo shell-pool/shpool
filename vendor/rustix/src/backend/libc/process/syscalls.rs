@@ -3,9 +3,11 @@
 #[cfg(any(linux_kernel, target_os = "dragonfly", target_os = "fuchsia"))]
 use super::types::RawCpuSet;
 use crate::backend::c;
+#[cfg(not(any(target_os = "wasi", target_os = "fuchsia")))]
+use crate::backend::conv::borrowed_fd;
 #[cfg(feature = "fs")]
 use crate::backend::conv::c_str;
-#[cfg(all(feature = "fs", not(target_os = "wasi")))]
+#[cfg(all(feature = "alloc", feature = "fs", not(target_os = "wasi")))]
 use crate::backend::conv::ret_discarded_char_ptr;
 #[cfg(not(any(
     target_os = "espidf",
@@ -14,12 +16,14 @@ use crate::backend::conv::ret_discarded_char_ptr;
     target_os = "wasi"
 )))]
 use crate::backend::conv::ret_infallible;
+#[cfg(not(target_os = "wasi"))]
+use crate::backend::conv::ret_pid_t;
 #[cfg(linux_kernel)]
 use crate::backend::conv::ret_u32;
-#[cfg(not(target_os = "wasi"))]
-use crate::backend::conv::{borrowed_fd, ret_pid_t, ret_usize};
+#[cfg(all(feature = "alloc", not(target_os = "wasi")))]
+use crate::backend::conv::ret_usize;
 use crate::backend::conv::{ret, ret_c_int};
-#[cfg(not(target_os = "wasi"))]
+#[cfg(not(any(target_os = "wasi", target_os = "fuchsia")))]
 use crate::fd::BorrowedFd;
 #[cfg(target_os = "linux")]
 use crate::fd::{AsRawFd, OwnedFd, RawFd};
@@ -28,12 +32,14 @@ use crate::ffi::CStr;
 #[cfg(feature = "fs")]
 use crate::fs::Mode;
 use crate::io;
+#[cfg(all(feature = "alloc", not(target_os = "wasi")))]
+use crate::process::Gid;
+#[cfg(not(target_os = "wasi"))]
+use crate::process::Pid;
 #[cfg(not(any(target_os = "espidf", target_os = "fuchsia", target_os = "wasi")))]
 use crate::process::Uid;
 #[cfg(linux_kernel)]
 use crate::process::{Cpuid, MembarrierCommand, MembarrierQuery};
-#[cfg(not(target_os = "wasi"))]
-use crate::process::{Gid, Pid};
 #[cfg(not(any(target_os = "espidf", target_os = "wasi")))]
 use crate::process::{RawPid, Signal, WaitOptions, WaitStatus};
 #[cfg(not(any(
@@ -73,7 +79,7 @@ pub(crate) fn chroot(path: &CStr) -> io::Result<()> {
     unsafe { ret(c::chroot(c_str(path))) }
 }
 
-#[cfg(feature = "fs")]
+#[cfg(all(feature = "alloc", feature = "fs"))]
 #[cfg(not(target_os = "wasi"))]
 pub(crate) fn getcwd(buf: &mut [MaybeUninit<u8>]) -> io::Result<()> {
     unsafe { ret_discarded_char_ptr(c::getcwd(buf.as_mut_ptr().cast(), buf.len())) }
@@ -612,20 +618,9 @@ pub(crate) fn pidfd_getfd(
     }
 }
 
-#[cfg(not(target_os = "wasi"))]
+#[cfg(all(feature = "alloc", not(target_os = "wasi")))]
 pub(crate) fn getgroups(buf: &mut [Gid]) -> io::Result<usize> {
     let len = buf.len().try_into().map_err(|_| io::Errno::NOMEM)?;
 
     unsafe { ret_usize(c::getgroups(len, buf.as_mut_ptr().cast()) as isize) }
-}
-
-#[cfg(not(any(
-    target_os = "aix",
-    target_os = "espidf",
-    target_os = "redox",
-    target_os = "wasi"
-)))]
-#[inline]
-pub(crate) fn ioctl_tiocsctty(fd: BorrowedFd<'_>) -> io::Result<()> {
-    unsafe { ret(c::ioctl(borrowed_fd(fd), c::TIOCSCTTY as _, &0_u32)) }
 }

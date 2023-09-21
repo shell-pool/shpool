@@ -21,8 +21,8 @@ macro_rules! __impl_external_bitflags_my_library {
     (
         $InternalBitFlags:ident: $T:ty, $PublicBitFlags:ident {
             $(
-                $(#[$attr:ident $($args:tt)*])*
-                $Flag:ident;
+                $(#[$inner:ident $($args:tt)*])*
+                const $Flag:tt;
             )*
         }
     ) => {
@@ -37,8 +37,8 @@ macro_rules! __impl_external_bitflags_my_library {
     (
         $InternalBitFlags:ident: $T:ty, $PublicBitFlags:ident {
             $(
-                $(#[$attr:ident $($args:tt)*])*
-                $Flag:ident;
+                $(#[$inner:ident $($args:tt)*])*
+                const $Flag:tt;
             )*
         }
     ) => {};
@@ -57,8 +57,8 @@ Now, we add our macro call to the `__impl_external_bitflags` macro body:
 __impl_external_bitflags_my_library! {
     $InternalBitFlags: $T, $PublicBitFlags {
         $(
-            $(#[$attr $($args)*])*
-            $Flag;
+            $(#[$inner $($args)*])*
+            const $Flag;
         )*
     }
 }
@@ -83,8 +83,8 @@ macro_rules! __impl_external_bitflags {
     (
         $InternalBitFlags:ident: $T:ty, $PublicBitFlags:ident {
             $(
-                $(#[$attr:ident $($args:tt)*])*
-                $Flag:ident;
+                $(#[$inner:ident $($args:tt)*])*
+                const $Flag:tt;
             )*
         }
     ) => {
@@ -95,8 +95,8 @@ macro_rules! __impl_external_bitflags {
         __impl_external_bitflags_serde! {
             $InternalBitFlags: $T, $PublicBitFlags {
                 $(
-                    $(#[$attr $($args)*])*
-                    $Flag;
+                    $(#[$inner $($args)*])*
+                    const $Flag;
                 )*
             }
         }
@@ -104,8 +104,8 @@ macro_rules! __impl_external_bitflags {
         __impl_external_bitflags_arbitrary! {
             $InternalBitFlags: $T, $PublicBitFlags {
                 $(
-                    $(#[$attr $($args)*])*
-                    $Flag;
+                    $(#[$inner $($args)*])*
+                    const $Flag;
                 )*
             }
         }
@@ -113,8 +113,8 @@ macro_rules! __impl_external_bitflags {
         __impl_external_bitflags_bytemuck! {
             $InternalBitFlags: $T, $PublicBitFlags {
                 $(
-                    $(#[$attr $($args)*])*
-                    $Flag;
+                    $(#[$inner $($args)*])*
+                    const $Flag;
                 )*
             }
         }
@@ -132,8 +132,8 @@ macro_rules! __impl_external_bitflags_serde {
     (
         $InternalBitFlags:ident: $T:ty, $PublicBitFlags:ident {
             $(
-                $(#[$attr:ident $($args:tt)*])*
-                $Flag:ident;
+                $(#[$inner:ident $($args:tt)*])*
+                const $Flag:tt;
             )*
         }
     ) => {
@@ -168,8 +168,8 @@ macro_rules! __impl_external_bitflags_serde {
     (
         $InternalBitFlags:ident: $T:ty, $PublicBitFlags:ident {
             $(
-                $(#[$attr:ident $($args:tt)*])*
-                $Flag:ident;
+                $(#[$inner:ident $($args:tt)*])*
+                const $Flag:tt;
             )*
         }
     ) => {};
@@ -189,8 +189,8 @@ macro_rules! __impl_external_bitflags_arbitrary {
     (
             $InternalBitFlags:ident: $T:ty, $PublicBitFlags:ident {
                 $(
-                    $(#[$attr:ident $($args:tt)*])*
-                    $Flag:ident;
+                    $(#[$inner:ident $($args:tt)*])*
+                    const $Flag:tt;
                 )*
             }
     ) => {
@@ -211,8 +211,8 @@ macro_rules! __impl_external_bitflags_arbitrary {
     (
         $InternalBitFlags:ident: $T:ty, $PublicBitFlags:ident {
             $(
-                $(#[$attr:ident $($args:tt)*])*
-                $Flag:ident;
+                $(#[$inner:ident $($args:tt)*])*
+                const $Flag:tt;
             )*
         }
     ) => {};
@@ -226,8 +226,8 @@ macro_rules! __impl_external_bitflags_bytemuck {
     (
         $InternalBitFlags:ident: $T:ty, $PublicBitFlags:ident {
             $(
-                $(#[$attr:ident $($args:tt)*])*
-                $Flag:ident;
+                $(#[$inner:ident $($args:tt)*])*
+                const $Flag:tt;
             )*
         }
     ) => {
@@ -254,8 +254,8 @@ macro_rules! __impl_external_bitflags_bytemuck {
     (
         $InternalBitFlags:ident: $T:ty, $PublicBitFlags:ident {
             $(
-                $(#[$attr:ident $($args:tt)*])*
-                $Flag:ident;
+                $(#[$inner:ident $($args:tt)*])*
+                const $Flag:tt;
             )*
         }
     ) => {};

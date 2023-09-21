@@ -1,18 +1,12 @@
+//! Macros for checking that types have the same layout as other types.
+
 #![allow(unused_macros)]
 
 /// Check that the size and alignment of a type match the `sys` bindings.
 macro_rules! check_type {
     ($struct:ident) => {
-        assert_eq!(
-            (
-                core::mem::size_of::<$struct>(),
-                core::mem::align_of::<$struct>()
-            ),
-            (
-                core::mem::size_of::<c::$struct>(),
-                core::mem::align_of::<c::$struct>()
-            )
-        );
+        assert_eq_size!($struct, c::$struct);
+        assert_eq_align!($struct, c::$struct);
     };
 }
 
@@ -20,13 +14,8 @@ macro_rules! check_type {
 /// renamed to avoid having types like `bindgen_ty_1` in the API.
 macro_rules! check_renamed_type {
     ($to:ident, $from:ident) => {
-        assert_eq!(
-            (core::mem::size_of::<$to>(), core::mem::align_of::<$to>()),
-            (
-                core::mem::size_of::<c::$from>(),
-                core::mem::align_of::<c::$from>()
-            )
-        );
+        assert_eq_size!($to, c::$from);
+        assert_eq_align!($to, c::$from);
     };
 }
 
@@ -34,15 +23,16 @@ macro_rules! check_renamed_type {
 /// corresponding field in the `sys` bindings.
 macro_rules! check_struct_field {
     ($struct:ident, $field:ident) => {
+        const_assert_eq!(
+            memoffset::offset_of!($struct, $field),
+            memoffset::offset_of!(c::$struct, $field)
+        );
+
+        // This can't use `const_assert_eq` because `span_of` returns a
+        // `Range`, which can't be compared in const contexts.
         assert_eq!(
-            (
-                memoffset::offset_of!($struct, $field),
-                memoffset::span_of!($struct, $field)
-            ),
-            (
-                memoffset::offset_of!(c::$struct, $field),
-                memoffset::span_of!(c::$struct, $field)
-            )
+            memoffset::span_of!($struct, $field),
+            memoffset::span_of!(c::$struct, $field)
         );
     };
 }
@@ -51,15 +41,15 @@ macro_rules! check_struct_field {
 /// we've renamed to avoid having types like `bindgen_ty_1` in the API.
 macro_rules! check_struct_renamed_field {
     ($struct:ident, $to:ident, $from:ident) => {
+        const_assert_eq!(
+            memoffset::offset_of!($struct, $to),
+            memoffset::offset_of!(c::$struct, $from)
+        );
+
+        // As above, this can't use `const_assert_eq`.
         assert_eq!(
-            (
-                memoffset::offset_of!($struct, $to),
-                memoffset::span_of!($struct, $to)
-            ),
-            (
-                memoffset::offset_of!(c::$struct, $from),
-                memoffset::span_of!(c::$struct, $from)
-            )
+            memoffset::span_of!($struct, $to),
+            memoffset::span_of!(c::$struct, $from)
         );
     };
 }
@@ -68,15 +58,15 @@ macro_rules! check_struct_renamed_field {
 /// and a field are renamed.
 macro_rules! check_renamed_struct_renamed_field {
     ($to_struct:ident, $from_struct:ident, $to:ident, $from:ident) => {
+        const_assert_eq!(
+            memoffset::offset_of!($to_struct, $to),
+            memoffset::offset_of!(c::$from_struct, $from)
+        );
+
+        // As above, this can't use `const_assert_eq`.
         assert_eq!(
-            (
-                memoffset::offset_of!($to_struct, $to),
-                memoffset::span_of!($to_struct, $to)
-            ),
-            (
-                memoffset::offset_of!(c::$from_struct, $from),
-                memoffset::span_of!(c::$from_struct, $from)
-            )
+            memoffset::span_of!($to_struct, $to),
+            memoffset::span_of!(c::$from_struct, $from)
         );
     };
 }
@@ -89,9 +79,9 @@ macro_rules! check_struct {
 
         // Check that we have all the fields.
         if false {
+            #[allow(unreachable_code)]
             let _test = $name {
-                // SAFETY: This code is guarded by `if false`.
-                $($field: unsafe { core::mem::zeroed() }),*
+                $($field: panic!()),*
             };
         }
 

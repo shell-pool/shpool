@@ -6,35 +6,39 @@
 #![allow(unsafe_code)]
 
 use crate::backend::c;
-use crate::backend::elf::*;
 #[cfg(feature = "param")]
 use crate::ffi::CStr;
 #[cfg(not(feature = "runtime"))]
 use core::ptr::null;
-#[cfg(feature = "runtime")]
-use core::slice;
+use linux_raw_sys::elf::*;
 
 // `getauxval` wasn't supported in glibc until 2.16. Also this lets us use
 // `*mut` as the return type to preserve strict provenance.
 #[cfg(not(feature = "runtime"))]
 weak!(fn getauxval(c::c_ulong) -> *mut c::c_void);
 
-// With the "runtime" feature, go ahead and depend on `getauxval` existing
-// so that we never fail.
+// With the "runtime" feature, go ahead and depend on `getauxval` existing so
+// that we never fail.
 #[cfg(feature = "runtime")]
 extern "C" {
     fn getauxval(type_: c::c_ulong) -> *mut c::c_void;
 }
 
+#[cfg(feature = "runtime")]
 const AT_PHDR: c::c_ulong = 3;
+#[cfg(feature = "runtime")]
+const AT_PHENT: c::c_ulong = 4;
+#[cfg(feature = "runtime")]
 const AT_PHNUM: c::c_ulong = 5;
+#[cfg(feature = "runtime")]
+const AT_ENTRY: c::c_ulong = 9;
 const AT_HWCAP: c::c_ulong = 16;
 const AT_HWCAP2: c::c_ulong = 26;
 const AT_EXECFN: c::c_ulong = 31;
 const AT_SYSINFO_EHDR: c::c_ulong = 33;
 
-// Declare `sysconf` ourselves so that we don't depend on all of libc
-// just for this.
+// Declare `sysconf` ourselves so that we don't depend on all of libc just for
+// this.
 extern "C" {
     fn sysconf(name: c::c_int) -> c::c_long;
 }
@@ -50,14 +54,18 @@ const _SC_CLK_TCK: c::c_int = 2;
 
 #[test]
 fn test_abi() {
-    assert_eq!(self::_SC_PAGESIZE, ::libc::_SC_PAGESIZE);
-    assert_eq!(self::_SC_CLK_TCK, ::libc::_SC_CLK_TCK);
-    assert_eq!(self::AT_PHDR, ::libc::AT_PHDR);
-    assert_eq!(self::AT_PHNUM, ::libc::AT_PHNUM);
-    assert_eq!(self::AT_HWCAP, ::libc::AT_HWCAP);
-    assert_eq!(self::AT_HWCAP2, ::libc::AT_HWCAP2);
-    assert_eq!(self::AT_EXECFN, ::libc::AT_EXECFN);
-    assert_eq!(self::AT_SYSINFO_EHDR, ::libc::AT_SYSINFO_EHDR);
+    const_assert_eq!(self::_SC_PAGESIZE, ::libc::_SC_PAGESIZE);
+    const_assert_eq!(self::_SC_CLK_TCK, ::libc::_SC_CLK_TCK);
+    const_assert_eq!(self::AT_HWCAP, ::libc::AT_HWCAP);
+    const_assert_eq!(self::AT_HWCAP2, ::libc::AT_HWCAP2);
+    const_assert_eq!(self::AT_EXECFN, ::libc::AT_EXECFN);
+    const_assert_eq!(self::AT_SYSINFO_EHDR, ::libc::AT_SYSINFO_EHDR);
+    #[cfg(feature = "runtime")]
+    const_assert_eq!(self::AT_PHDR, ::libc::AT_PHDR);
+    #[cfg(feature = "runtime")]
+    const_assert_eq!(self::AT_PHNUM, ::libc::AT_PHNUM);
+    #[cfg(feature = "runtime")]
+    const_assert_eq!(self::AT_ENTRY, ::libc::AT_ENTRY);
 }
 
 #[cfg(feature = "param")]
@@ -114,22 +122,13 @@ pub(crate) fn linux_execfn() -> &'static CStr {
 
 #[cfg(feature = "runtime")]
 #[inline]
-pub(crate) fn exe_phdrs() -> (*const c::c_void, usize) {
+pub(crate) fn exe_phdrs() -> (*const c::c_void, usize, usize) {
     unsafe {
         let phdr = getauxval(AT_PHDR) as *const c::c_void;
+        let phent = getauxval(AT_PHENT) as usize;
         let phnum = getauxval(AT_PHNUM) as usize;
-        (phdr, phnum)
+        (phdr, phent, phnum)
     }
-}
-
-#[cfg(feature = "runtime")]
-#[inline]
-pub(in super::super) fn exe_phdrs_slice() -> &'static [Elf_Phdr] {
-    let (phdr, phnum) = exe_phdrs();
-
-    // SAFETY: We assume the `AT_PHDR` and `AT_PHNUM` values provided by the
-    // kernel form a valid slice.
-    unsafe { slice::from_raw_parts(phdr.cast(), phnum) }
 }
 
 /// `AT_SYSINFO_EHDR` isn't present on all platforms in all configurations,
@@ -149,4 +148,10 @@ pub(in super::super) fn sysinfo_ehdr() -> *const Elf_Ehdr {
     unsafe {
         getauxval(AT_SYSINFO_EHDR) as *const Elf_Ehdr
     }
+}
+
+#[cfg(feature = "runtime")]
+#[inline]
+pub(crate) fn entry() -> usize {
+    unsafe { getauxval(AT_ENTRY) as usize }
 }

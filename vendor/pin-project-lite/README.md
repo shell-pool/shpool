@@ -105,13 +105,14 @@ description of the compile error.
 
 ### Different: No support for custom Unpin implementation
 
-pin-project supports this by [`UnsafeUnpin`][unsafe-unpin] and [`!Unpin`][not-unpin].
+pin-project supports this by [`UnsafeUnpin`][unsafe-unpin]. (`!Unpin` is supported by both [pin-project][not-unpin] and [pin-project-lite][not-unpin-lite].)
 
 ### Different: No support for tuple structs and tuple variants
 
 pin-project supports this.
 
 [not-unpin]: https://docs.rs/pin-project/1/pin_project/attr.pin_project.html#unpin
+[not-unpin-lite]: https://docs.rs/pin-project-lite/0.2/pin_project_lite/macro.pin_project.html#unpin
 [pin-project]: https://github.com/taiki-e/pin-project
 [unsafe-unpin]: https://docs.rs/pin-project/1/pin_project/attr.pin_project.html#unsafeunpin
 

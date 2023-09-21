@@ -105,7 +105,7 @@ pub fn tell<Fd: AsFd>(fd: Fd) -> io::Result<u64> {
     backend::fs::syscalls::tell(fd.as_fd())
 }
 
-/// `fchmod(fd)`—Sets open file or directory permissions.
+/// `fchmod(fd, mode)`—Sets open file or directory permissions.
 ///
 /// This implementation does not support `O_PATH` file descriptors, even on
 /// platforms where the host libc emulates it.
@@ -122,7 +122,7 @@ pub fn fchmod<Fd: AsFd>(fd: Fd, mode: Mode) -> io::Result<()> {
     backend::fs::syscalls::fchmod(fd.as_fd(), mode)
 }
 
-/// `fchown(fd)`—Sets open file or directory ownership.
+/// `fchown(fd, owner, group)`—Sets open file or directory ownership.
 ///
 /// # References
 ///  - [POSIX]
@@ -256,7 +256,7 @@ pub(crate) fn _is_file_read_write(fd: BorrowedFd<'_>) -> io::Result<(bool, bool)
     let mode = backend::fs::syscalls::fcntl_getfl(fd)?;
 
     // Check for `O_PATH`.
-    #[cfg(any(linux_kernel, target_os = "fuchsia", target_os = "emscripten"))]
+    #[cfg(any(linux_kernel, target_os = "emscripten", target_os = "fuchsia"))]
     if mode.contains(OFlags::PATH) {
         return Ok((false, false));
     }

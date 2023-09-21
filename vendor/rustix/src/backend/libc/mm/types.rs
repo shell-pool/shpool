@@ -16,6 +16,9 @@ bitflags! {
         const WRITE = bitcast!(c::PROT_WRITE);
         /// `PROT_EXEC`
         const EXEC = bitcast!(c::PROT_EXEC);
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -40,6 +43,24 @@ bitflags! {
         /// `PROT_GROWSDOWN`
         #[cfg(linux_kernel)]
         const GROWSDOWN = bitcast!(c::PROT_GROWSDOWN);
+        /// `PROT_SEM`
+        #[cfg(linux_kernel)]
+        const SEM = linux_raw_sys::general::PROT_SEM;
+        /// `PROT_BTI`
+        #[cfg(all(linux_kernel, target_arch = "aarch64"))]
+        const BTI = linux_raw_sys::general::PROT_BTI;
+        /// `PROT_MTE`
+        #[cfg(all(linux_kernel, target_arch = "aarch64"))]
+        const MTE = linux_raw_sys::general::PROT_MTE;
+        /// `PROT_SAO`
+        #[cfg(all(linux_kernel, any(target_arch = "powerpc", target_arch = "powerpc64")))]
+        const SAO = linux_raw_sys::general::PROT_SAO;
+        /// `PROT_ADI`
+        #[cfg(all(linux_kernel, any(target_arch = "sparc", target_arch = "sparc64")))]
+        const ADI = linux_raw_sys::general::PROT_ADI;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -59,6 +80,7 @@ bitflags! {
         #[cfg(not(any(
             bsd,
             solarish,
+            target_os = "aix",
             target_os = "android",
             target_os = "emscripten",
             target_os = "fuchsia",
@@ -73,6 +95,7 @@ bitflags! {
         #[cfg(not(any(
             bsd,
             solarish,
+            target_os = "aix",
             target_os = "haiku",
             target_os = "nto",
             target_os = "redox",
@@ -84,6 +107,7 @@ bitflags! {
         #[cfg(not(any(
             bsd,
             solarish,
+            target_os = "aix",
             target_os = "android",
             target_os = "emscripten",
             target_os = "fuchsia",
@@ -96,6 +120,7 @@ bitflags! {
         #[cfg(not(any(
             bsd,
             solarish,
+            target_os = "aix",
             target_os = "haiku",
             target_os = "nto",
             target_os = "redox",
@@ -105,6 +130,7 @@ bitflags! {
         #[cfg(not(any(
             bsd,
             solarish,
+            target_os = "aix",
             target_os = "haiku",
             target_os = "nto",
             target_os = "redox",
@@ -114,6 +140,7 @@ bitflags! {
         #[cfg(not(any(
             bsd,
             solarish,
+            target_os = "aix",
             target_os = "android",
             target_os = "emscripten",
             target_os = "fuchsia",
@@ -126,6 +153,7 @@ bitflags! {
         #[cfg(not(any(
             bsd,
             solarish,
+            target_os = "aix",
             target_os = "android",
             target_os = "emscripten",
             target_os = "fuchsia",
@@ -138,6 +166,7 @@ bitflags! {
         #[cfg(not(any(
             bsd,
             solarish,
+            target_os = "aix",
             target_os = "haiku",
             target_os = "nto",
             target_os = "redox",
@@ -147,7 +176,12 @@ bitflags! {
         #[cfg(freebsdlike)]
         const NOCORE = bitcast!(c::MAP_NOCORE);
         /// `MAP_NORESERVE`
-        #[cfg(not(any(freebsdlike, target_os = "nto", target_os = "redox")))]
+        #[cfg(not(any(
+            freebsdlike,
+            target_os = "aix",
+            target_os = "nto",
+            target_os = "redox",
+        )))]
         const NORESERVE = bitcast!(c::MAP_NORESERVE);
         /// `MAP_NOSYNC`
         #[cfg(freebsdlike)]
@@ -156,6 +190,7 @@ bitflags! {
         #[cfg(not(any(
             bsd,
             solarish,
+            target_os = "aix",
             target_os = "haiku",
             target_os = "nto",
             target_os = "redox",
@@ -165,6 +200,7 @@ bitflags! {
         #[cfg(not(any(
             apple,
             solarish,
+            target_os = "aix",
             target_os = "dragonfly",
             target_os = "haiku",
             target_os = "netbsd",
@@ -178,6 +214,7 @@ bitflags! {
         #[cfg(not(any(
             bsd,
             solarish,
+            target_os = "aix",
             target_os = "android",
             target_os = "emscripten",
             target_os = "fuchsia",
@@ -186,13 +223,16 @@ bitflags! {
             target_os = "redox",
             all(
                 linux_kernel,
-                any(target_arch = "mips", target_arch = "mips64"),
+                any(target_arch = "mips", target_arch = "mips32r6", target_arch = "mips64", target_arch = "mips64r6"),
             )
         )))]
         const SYNC = bitcast!(c::MAP_SYNC);
         /// `MAP_UNINITIALIZED`
         #[cfg(any())]
         const UNINITIALIZED = bitcast!(c::MAP_UNINITIALIZED);
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -209,6 +249,9 @@ bitflags! {
     pub struct MremapFlags: u32 {
         /// `MREMAP_MAYMOVE`
         const MAYMOVE = bitcast!(c::MREMAP_MAYMOVE);
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -228,6 +271,9 @@ bitflags! {
         /// file (so that they can be updated with the fresh values just
         /// written).
         const INVALIDATE = bitcast!(c::MS_INVALIDATE);
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -241,6 +287,9 @@ bitflags! {
     pub struct MlockFlags: u32 {
         /// `MLOCK_ONFAULT`
         const ONFAULT = bitcast!(c::MLOCK_ONFAULT);
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -318,7 +367,15 @@ pub enum Advice {
     #[cfg(linux_kernel)]
     LinuxHwPoison = bitcast!(c::MADV_HWPOISON),
     /// `MADV_SOFT_OFFLINE`
-    #[cfg(all(linux_kernel, not(any(target_arch = "mips", target_arch = "mips64"))))]
+    #[cfg(all(
+        linux_kernel,
+        not(any(
+            target_arch = "mips",
+            target_arch = "mips32r6",
+            target_arch = "mips64",
+            target_arch = "mips64r6"
+        ))
+    ))]
     LinuxSoftOffline = bitcast!(c::MADV_SOFT_OFFLINE),
     /// `MADV_MERGEABLE`
     #[cfg(linux_kernel)]
@@ -380,5 +437,8 @@ bitflags! {
         const CLOEXEC = bitcast!(c::O_CLOEXEC);
         /// `O_NONBLOCK`
         const NONBLOCK = bitcast!(c::O_NONBLOCK);
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }

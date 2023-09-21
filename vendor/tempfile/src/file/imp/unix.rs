@@ -14,7 +14,10 @@ use crate::util;
 use std::path::Path;
 
 #[cfg(not(target_os = "redox"))]
-use rustix::fs::{linkat, renameat, unlinkat, AtFlags, CWD};
+use {
+    rustix::fs::{rename, unlink},
+    std::fs::hard_link,
+};
 
 pub fn create_named(path: &Path, open_options: &mut OpenOptions) -> io::Result<File> {
     open_options.read(true).write(true).create_new(true);
@@ -103,13 +106,13 @@ pub fn reopen(_file: &File, _path: &Path) -> io::Result<File> {
 #[cfg(not(target_os = "redox"))]
 pub fn persist(old_path: &Path, new_path: &Path, overwrite: bool) -> io::Result<()> {
     if overwrite {
-        renameat(CWD, old_path, CWD, new_path)?;
+        rename(old_path, new_path)?;
     } else {
         // On Linux, use `renameat_with` to avoid overwriting an existing name,
         // if the kernel and the filesystem support it.
         #[cfg(any(target_os = "android", target_os = "linux"))]
         {
-            use rustix::fs::{renameat_with, RenameFlags};
+            use rustix::fs::{renameat_with, RenameFlags, CWD};
             use rustix::io::Errno;
             use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 
@@ -124,12 +127,13 @@ pub fn persist(old_path: &Path, new_path: &Path, overwrite: bool) -> io::Result<
             }
         }
 
-        // Otherwise use `linkat` to create the new filesystem name, which
-        // will fail if the name already exists, and then `unlinkat` to remove
+        // Otherwise use `hard_link` to create the new filesystem name, which
+        // will fail if the name already exists, and then `unlink` to remove
         // the old name.
-        linkat(CWD, old_path, CWD, new_path, AtFlags::empty())?;
+        hard_link(old_path, new_path)?;
+
         // Ignore unlink errors. Can we do better?
-        let _ = unlinkat(CWD, old_path, AtFlags::empty());
+        let _ = unlink(old_path);
     }
     Ok(())
 }

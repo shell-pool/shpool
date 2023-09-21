@@ -20,6 +20,9 @@ bitflags! {
 
         /// `TFD_CLOEXEC`
         const CLOEXEC = linux_raw_sys::general::TFD_CLOEXEC;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -35,6 +38,9 @@ bitflags! {
 
         /// `TFD_TIMER_CANCEL_ON_SET`
         const CANCEL_ON_SET = linux_raw_sys::general::TFD_TIMER_CANCEL_ON_SET;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -47,10 +53,10 @@ bitflags! {
 pub enum TimerfdClockId {
     /// `CLOCK_REALTIME`—A clock that tells the “real” time.
     ///
-    /// This is a clock that tells the amount of time elapsed since the
-    /// Unix epoch, 1970-01-01T00:00:00Z. The clock is externally settable, so
-    /// it is not monotonic. Successive reads may see decreasing times, so it
-    /// isn't reliable for measuring durations.
+    /// This is a clock that tells the amount of time elapsed since the Unix
+    /// epoch, 1970-01-01T00:00:00Z. The clock is externally settable, so it is
+    /// not monotonic. Successive reads may see decreasing times, so it isn't
+    /// reliable for measuring durations.
     Realtime = linux_raw_sys::general::CLOCK_REALTIME,
 
     /// `CLOCK_MONOTONIC`—A clock that tells an abstract time.

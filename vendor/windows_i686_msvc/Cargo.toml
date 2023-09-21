@@ -12,7 +12,7 @@
 [package]
 edition = "2018"
 name = "windows_i686_msvc"
-version = "0.48.0"
+version = "0.48.5"
 authors = ["Microsoft"]
 description = "Import lib for Windows"
 license = "MIT OR Apache-2.0"

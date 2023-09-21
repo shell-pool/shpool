@@ -40,7 +40,9 @@ let matches: Vec<PatternID> = searcher
     .collect();
 assert_eq!(vec![PatternID::ZERO], matches);
 # Some(()) }
-# if cfg!(all(feature = "std", target_arch = "x86_64")) {
+# if cfg!(all(feature = "std", any(
+#     target_arch = "x86_64", target_arch = "aarch64",
+# ))) {
 #     example().unwrap()
 # } else {
 #     assert!(example().is_none());
@@ -66,7 +68,9 @@ let matches: Vec<PatternID> = searcher
     .collect();
 assert_eq!(vec![PatternID::must(1)], matches);
 # Some(()) }
-# if cfg!(all(feature = "std", target_arch = "x86_64")) {
+# if cfg!(all(feature = "std", any(
+#     target_arch = "x86_64", target_arch = "aarch64",
+# ))) {
 #     example().unwrap()
 # } else {
 #     assert!(example().is_none());
@@ -95,8 +99,8 @@ implementation detail, here are some common reasons:
   so, but this limit may fluctuate based on available CPU features.
 * The available packed algorithms require CPU features that aren't available.
   For example, currently, this crate only provides packed algorithms for
-  `x86_64`. Therefore, constructing a packed searcher on any other target
-  (e.g., ARM) will always fail.
+  `x86_64` and `aarch64`. Therefore, constructing a packed searcher on any
+  other target will always fail.
 * Zero patterns were given, or one of the patterns given was empty. Packed
   searchers require at least one pattern and that all patterns are non-empty.
 * Something else about the nature of the patterns (typically based on
@@ -107,10 +111,10 @@ implementation detail, here are some common reasons:
 pub use crate::packed::api::{Builder, Config, FindIter, MatchKind, Searcher};
 
 mod api;
+mod ext;
 mod pattern;
 mod rabinkarp;
 mod teddy;
 #[cfg(all(feature = "std", test))]
 mod tests;
-#[cfg(all(feature = "std", target_arch = "x86_64"))]
 mod vector;

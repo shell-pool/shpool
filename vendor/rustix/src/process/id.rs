@@ -8,6 +8,7 @@
 #![allow(unsafe_code)]
 
 use crate::{backend, io};
+#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 #[cfg(linux_kernel)]
 use backend::process::types::RawCpuid;
@@ -208,12 +209,11 @@ pub fn setsid() -> io::Result<Pid> {
 ///
 /// [POSIX]: https://pubs.opengroup.org/onlinepubs/9699919799/functions/getgroups.html
 /// [Linux]: https://man7.org/linux/man-pages/man2/getgroups.2.html
+#[cfg(feature = "alloc")]
 pub fn getgroups() -> io::Result<Vec<Gid>> {
-    let mut buffer = Vec::new();
-
     // This code would benefit from having a better way to read into
     // uninitialized memory, but that requires `unsafe`.
-    buffer.reserve(8);
+    let mut buffer = Vec::with_capacity(8);
     buffer.resize(buffer.capacity(), Gid::ROOT);
 
     loop {

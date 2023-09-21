@@ -30,6 +30,9 @@ bitflags! {
         const NVAL = linux_raw_sys::general::POLLNVAL as u16;
         /// `POLLRDHUP`
         const RDHUP = linux_raw_sys::general::POLLRDHUP as u16;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -81,7 +84,7 @@ impl<'fd> PollFd<'fd> {
     /// Returns the ready events.
     #[inline]
     pub fn revents(&self) -> PollFlags {
-        // Use `unwrap()` here because in theory we know we know all the bits
+        // Use `.unwrap()` here because in theory we know we know all the bits
         // the OS might set here, but OS's have added extensions in the past.
         PollFlags::from_bits(self.revents).unwrap()
     }

@@ -1996,7 +1996,7 @@ impl AhoCorasick {
     ///     .ascii_case_insensitive(true)
     ///     .build(&["foobar", "bruce", "triskaidekaphobia", "springsteen"])
     ///     .unwrap();
-    /// assert_eq!(9_128, ac.memory_usage());
+    /// assert_eq!(10_879, ac.memory_usage());
     ///
     /// let ac = AhoCorasick::builder()
     ///     .kind(Some(AhoCorasickKind::ContiguousNFA))
@@ -2579,6 +2579,7 @@ impl AhoCorasickBuilder {
     /// More to the point, the memory usage increases superlinearly as this
     /// number increases.
     pub fn dense_depth(&mut self, depth: usize) -> &mut AhoCorasickBuilder {
+        self.nfa_noncontiguous.dense_depth(depth);
         self.nfa_contiguous.dense_depth(depth);
         self
     }

@@ -1,3 +1,5 @@
+//! Libc and supplemental types and constants.
+
 #![allow(unused_imports)]
 
 // Import everything from libc, but we'll add some stuff and override some
@@ -11,6 +13,10 @@ pub(crate) const PROC_SUPER_MAGIC: u32 = 0x0000_9fa0;
 /// `NFS_SUPER_MAGIC`—The magic number for the NFS filesystem.
 #[cfg(all(linux_kernel, target_env = "musl"))]
 pub(crate) const NFS_SUPER_MAGIC: u32 = 0x0000_6969;
+
+#[cfg(feature = "process")]
+#[cfg(not(any(target_os = "espidf", target_os = "wasi")))]
+pub(crate) const EXIT_SIGNALED_SIGABRT: c_int = 128 + SIGABRT as c_int;
 
 // TODO: Upstream these.
 #[cfg(all(linux_kernel, feature = "net"))]
@@ -62,7 +68,9 @@ pub(crate) const ETH_P_MCTP: c_int = linux_raw_sys::if_ether::ETH_P_MCTP as _;
     linux_kernel,
     any(
         target_arch = "mips",
+        target_arch = "mips32r6",
         target_arch = "mips64",
+        target_arch = "mips64r6",
         target_arch = "sparc",
         target_arch = "sparc64"
     )
@@ -74,6 +82,9 @@ pub(crate) const SIGEMT: c_int = linux_raw_sys::general::SIGEMT as _;
 pub(crate) const IUCLC: tcflag_t = linux_raw_sys::general::IUCLC as _;
 #[cfg(all(linux_kernel, feature = "termios"))]
 pub(crate) const XCASE: tcflag_t = linux_raw_sys::general::XCASE as _;
+
+#[cfg(target_os = "aix")]
+pub(crate) const MSG_DONTWAIT: c_int = libc::MSG_NONBLOCK;
 
 // On PowerPC, the regular `termios` has the `termios2` fields and there is no
 // `termios2`. linux-raw-sys has aliases `termios2` to `termios` to cover this
@@ -102,13 +113,15 @@ pub(super) use libc::open64 as open;
 pub(super) use libc::posix_fallocate64 as posix_fallocate;
 #[cfg(any(all(linux_like, not(target_os = "android")), target_os = "aix"))]
 pub(super) use libc::{blkcnt64_t as blkcnt_t, rlim64_t as rlim_t};
+// TODO: AIX has `stat64x`, `fstat64x`, `lstat64x`, and `stat64xat`; add them
+// to the upstream libc crate and implement rustix's `statat` etc. with them.
 #[cfg(target_os = "aix")]
 pub(super) use libc::{
-    blksize64_t as blksize_t, fstat64 as fstat, fstatat, fstatfs64 as fstatfs,
-    fstatvfs64 as fstatvfs, ftruncate64 as ftruncate, getrlimit64 as getrlimit, ino_t,
-    lseek64 as lseek, mmap, off64_t as off_t, openat, posix_fadvise64 as posix_fadvise, preadv,
-    pwritev, rlimit64 as rlimit, setrlimit64 as setrlimit, statfs64 as statfs,
-    statvfs64 as statvfs, RLIM_INFINITY,
+    blksize64_t as blksize_t, fstat64 as fstat, fstatfs64 as fstatfs, fstatvfs64 as fstatvfs,
+    ftruncate64 as ftruncate, getrlimit64 as getrlimit, ino_t, lseek64 as lseek, mmap,
+    off64_t as off_t, openat, posix_fadvise64 as posix_fadvise, preadv, pwritev,
+    rlimit64 as rlimit, setrlimit64 as setrlimit, statfs64 as statfs, statvfs64 as statvfs,
+    RLIM_INFINITY,
 };
 #[cfg(linux_like)]
 pub(super) use libc::{
@@ -123,7 +136,14 @@ pub(super) use libc::{
     host_info64_t as host_info_t, host_statistics64 as host_statistics,
     vm_statistics64_t as vm_statistics_t,
 };
-#[cfg(not(all(linux_kernel, any(target_pointer_width = "32", target_arch = "mips64"))))]
+#[cfg(not(all(
+    linux_kernel,
+    any(
+        target_pointer_width = "32",
+        target_arch = "mips64",
+        target_arch = "mips64r6"
+    )
+)))]
 #[cfg(any(linux_like, target_os = "aix"))]
 pub(super) use libc::{lstat64 as lstat, stat64 as stat};
 #[cfg(any(linux_kernel, target_os = "aix", target_os = "emscripten"))]

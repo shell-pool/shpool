@@ -33,9 +33,9 @@ use crate::{Date, DateTime};
 /// # Example
 ///
 /// ```
-/// use chrono::{DateTime, TimeZone, NaiveDateTime, Utc};
+/// use chrono::{TimeZone, NaiveDateTime, Utc};
 ///
-/// let dt = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp_opt(61, 0).unwrap(), Utc);
+/// let dt = Utc.from_utc_datetime(&NaiveDateTime::from_timestamp_opt(61, 0).unwrap());
 ///
 /// assert_eq!(Utc.timestamp_opt(61, 0).unwrap(), dt);
 /// assert_eq!(Utc.with_ymd_and_hms(1970, 1, 1, 0, 1, 1).unwrap(), dt);
@@ -59,7 +59,28 @@ impl Utc {
         Utc::now().date()
     }
 
-    /// Returns a `DateTime` which corresponds to the current date and time.
+    /// Returns a `DateTime<Utc>` which corresponds to the current date and time in UTC.
+    ///
+    /// See also the similar [`Local::now()`] which returns `DateTime<Local>`, i.e. the local date
+    /// and time including offset from UTC.
+    ///
+    /// [`Local::now()`]: crate::Local::now
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #![allow(unused_variables)]
+    /// # use chrono::{FixedOffset, Utc};
+    /// // Current time in UTC
+    /// let now_utc = Utc::now();
+    ///
+    /// // Current date in UTC
+    /// let today_utc = now_utc.date_naive();
+    ///
+    /// // Current time in some timezone (let's use +05:00)
+    /// let offset = FixedOffset::east_opt(5 * 60 * 60).unwrap();
+    /// let now_with_offset = Utc::now().with_timezone(&offset);
+    /// ```
     #[cfg(not(all(
         target_arch = "wasm32",
         feature = "wasmbind",
@@ -71,7 +92,7 @@ impl Utc {
             SystemTime::now().duration_since(UNIX_EPOCH).expect("system time before Unix epoch");
         let naive =
             NaiveDateTime::from_timestamp_opt(now.as_secs() as i64, now.subsec_nanos()).unwrap();
-        DateTime::from_utc(naive, Utc)
+        Utc.from_utc_datetime(&naive)
     }
 
     /// Returns a `DateTime` which corresponds to the current date and time.

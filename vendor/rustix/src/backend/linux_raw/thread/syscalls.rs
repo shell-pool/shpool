@@ -3,8 +3,7 @@
 //! # Safety
 //!
 //! See the `rustix::backend` module documentation for details.
-#![allow(unsafe_code)]
-#![allow(clippy::undocumented_unsafe_blocks)]
+#![allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
 
 use crate::backend::c;
 use crate::backend::conv::{
@@ -274,7 +273,7 @@ unsafe fn futex_old(
 }
 
 #[inline]
-pub(crate) fn setns(fd: BorrowedFd, nstype: c::c_int) -> io::Result<c::c_int> {
+pub(crate) fn setns(fd: BorrowedFd<'_>, nstype: c::c_int) -> io::Result<c::c_int> {
     unsafe { ret_c_int(syscall_readonly!(__NR_setns, fd, c_int(nstype))) }
 }
 

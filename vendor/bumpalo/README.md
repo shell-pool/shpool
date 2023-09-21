@@ -155,7 +155,14 @@ in its space itself.
 
 ### `#![no_std]` Support
 
-Bumpalo is a `no_std` crate. It depends only on the `alloc` and `core` crates.
+Bumpalo is a `no_std` crate by default. It depends only on the `alloc` and `core` crates.
+
+### `std` Support
+
+You can optionally decide to enable the `std` feature in order to enable some
+std only trait implementations for some collections:
+
+* `std::io::Write` for `Vec<'bump, u8>`
 
 ### Thread support
 
@@ -179,7 +186,7 @@ First, enable the `allocator_api` feature in your `Cargo.toml`:
 
 ```toml
 [dependencies]
-bumpalo = { version = "3.9", features = ["allocator_api"] }
+bumpalo = { version = "3", features = ["allocator_api"] }
 ```
 
 Next, enable the `allocator_api` nightly Rust feature in your `src/lib.rs` or

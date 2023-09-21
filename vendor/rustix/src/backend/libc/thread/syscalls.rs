@@ -5,17 +5,15 @@ use crate::backend::conv::ret;
 use crate::io;
 #[cfg(not(target_os = "redox"))]
 use crate::thread::{NanosleepRelativeResult, Timespec};
-#[cfg(all(
-    any(target_arch = "arm", target_arch = "mips", target_arch = "x86"),
-    target_env = "gnu",
-))]
+#[cfg(all(target_env = "gnu", fix_y2038))]
 use crate::timespec::LibcTimespec;
 use core::mem::MaybeUninit;
 #[cfg(linux_kernel)]
 use {
-    crate::backend::conv::{borrowed_fd, ret_c_int},
+    crate::backend::conv::{borrowed_fd, ret_c_int, ret_usize},
     crate::fd::BorrowedFd,
     crate::pid::Pid,
+    crate::thread::{FutexFlags, FutexOperation},
     crate::utils::as_mut_ptr,
 };
 #[cfg(not(any(
@@ -30,15 +28,9 @@ use {
 )))]
 use {crate::thread::ClockId, core::ptr::null_mut};
 
-#[cfg(all(
-    any(target_arch = "arm", target_arch = "mips", target_arch = "x86"),
-    target_env = "gnu",
-))]
+#[cfg(all(target_env = "gnu", fix_y2038))]
 weak!(fn __clock_nanosleep_time64(c::clockid_t, c::c_int, *const LibcTimespec, *mut LibcTimespec) -> c::c_int);
-#[cfg(all(
-    any(target_arch = "arm", target_arch = "mips", target_arch = "x86"),
-    target_env = "gnu",
-))]
+#[cfg(all(target_env = "gnu", fix_y2038))]
 weak!(fn __nanosleep64(*const LibcTimespec, *mut LibcTimespec) -> c::c_int);
 
 #[cfg(not(any(
@@ -54,41 +46,38 @@ weak!(fn __nanosleep64(*const LibcTimespec, *mut LibcTimespec) -> c::c_int);
 )))]
 #[inline]
 pub(crate) fn clock_nanosleep_relative(id: ClockId, request: &Timespec) -> NanosleepRelativeResult {
-    let flags = 0;
-
-    // 32-bit gnu version: libc has `clock_nanosleep` but it is not y2038 safe
-    // by default.
-    #[cfg(all(
-        any(target_arch = "arm", target_arch = "mips", target_arch = "x86"),
-        target_env = "gnu",
-    ))]
-    unsafe {
-        let mut remain = MaybeUninit::<LibcTimespec>::uninit();
-
+    // Old 32-bit version: libc has `clock_nanosleep` but it is not y2038 safe
+    // by default. But there may be a `__clock_nanosleep_time64` we can use.
+    #[cfg(fix_y2038)]
+    {
+        #[cfg(target_env = "gnu")]
         if let Some(libc_clock_nanosleep) = __clock_nanosleep_time64.get() {
-            match libc_clock_nanosleep(
-                id as c::clockid_t,
-                flags,
-                &request.clone().into(),
-                remain.as_mut_ptr(),
-            ) {
-                0 => NanosleepRelativeResult::Ok,
-                err if err == io::Errno::INTR.0 => {
-                    NanosleepRelativeResult::Interrupted(remain.assume_init().into())
-                }
-                err => NanosleepRelativeResult::Err(io::Errno(err)),
+            let flags = 0;
+            let mut remain = MaybeUninit::<LibcTimespec>::uninit();
+
+            unsafe {
+                return match libc_clock_nanosleep(
+                    id as c::clockid_t,
+                    flags,
+                    &request.clone().into(),
+                    remain.as_mut_ptr(),
+                ) {
+                    0 => NanosleepRelativeResult::Ok,
+                    err if err == io::Errno::INTR.0 => {
+                        NanosleepRelativeResult::Interrupted(remain.assume_init().into())
+                    }
+                    err => NanosleepRelativeResult::Err(io::Errno(err)),
+                };
             }
-        } else {
-            clock_nanosleep_relative_old(id, request)
         }
+
+        clock_nanosleep_relative_old(id, request)
     }
 
     // Main version: libc is y2038 safe and has `clock_nanosleep`.
-    #[cfg(not(all(
-        any(target_arch = "arm", target_arch = "mips", target_arch = "x86"),
-        target_env = "gnu",
-    )))]
+    #[cfg(not(fix_y2038))]
     unsafe {
+        let flags = 0;
         let mut remain = MaybeUninit::<Timespec>::uninit();
 
         match c::clock_nanosleep(id as c::clockid_t, flags, request, remain.as_mut_ptr()) {
@@ -102,10 +91,10 @@ pub(crate) fn clock_nanosleep_relative(id: ClockId, request: &Timespec) -> Nanos
 }
 
 #[cfg(all(
-    any(target_arch = "arm", target_arch = "mips", target_arch = "x86"),
-    target_env = "gnu",
+    fix_y2038,
+    not(any(apple, target_os = "emscripten", target_os = "haiku"))
 ))]
-unsafe fn clock_nanosleep_relative_old(id: ClockId, request: &Timespec) -> NanosleepRelativeResult {
+fn clock_nanosleep_relative_old(id: ClockId, request: &Timespec) -> NanosleepRelativeResult {
     let tv_sec = match request.tv_sec.try_into() {
         Ok(tv_sec) => tv_sec,
         Err(_) => return NanosleepRelativeResult::Err(io::Errno::OVERFLOW),
@@ -118,22 +107,24 @@ unsafe fn clock_nanosleep_relative_old(id: ClockId, request: &Timespec) -> Nanos
     let mut old_remain = MaybeUninit::<c::timespec>::uninit();
     let flags = 0;
 
-    match c::clock_nanosleep(
-        id as c::clockid_t,
-        flags,
-        &old_request,
-        old_remain.as_mut_ptr(),
-    ) {
-        0 => NanosleepRelativeResult::Ok,
-        err if err == io::Errno::INTR.0 => {
-            let old_remain = old_remain.assume_init();
-            let remain = Timespec {
-                tv_sec: old_remain.tv_sec.into(),
-                tv_nsec: old_remain.tv_nsec.into(),
-            };
-            NanosleepRelativeResult::Interrupted(remain)
+    unsafe {
+        match c::clock_nanosleep(
+            id as c::clockid_t,
+            flags,
+            &old_request,
+            old_remain.as_mut_ptr(),
+        ) {
+            0 => NanosleepRelativeResult::Ok,
+            err if err == io::Errno::INTR.0 => {
+                let old_remain = old_remain.assume_init();
+                let remain = Timespec {
+                    tv_sec: old_remain.tv_sec.into(),
+                    tv_nsec: old_remain.tv_nsec.into(),
+                };
+                NanosleepRelativeResult::Interrupted(remain)
+            }
+            err => NanosleepRelativeResult::Err(io::Errno(err)),
         }
-        err => NanosleepRelativeResult::Err(io::Errno(err)),
     }
 }
 
@@ -150,46 +141,46 @@ unsafe fn clock_nanosleep_relative_old(id: ClockId, request: &Timespec) -> Nanos
 )))]
 #[inline]
 pub(crate) fn clock_nanosleep_absolute(id: ClockId, request: &Timespec) -> io::Result<()> {
-    let flags = c::TIMER_ABSTIME;
-
-    // 32-bit gnu version: libc has `clock_nanosleep` but it is not y2038 safe
-    // by default.
-    #[cfg(all(
-        any(target_arch = "arm", target_arch = "mips", target_arch = "x86"),
-        target_env = "gnu",
-    ))]
+    // Old 32-bit version: libc has `clock_nanosleep` but it is not y2038 safe
+    // by default. But there may be a `__clock_nanosleep_time64` we can use.
+    #[cfg(fix_y2038)]
     {
+        #[cfg(target_env = "gnu")]
         if let Some(libc_clock_nanosleep) = __clock_nanosleep_time64.get() {
-            match unsafe {
-                libc_clock_nanosleep(
-                    id as c::clockid_t,
-                    flags,
-                    &request.clone().into(),
-                    null_mut(),
-                )
-            } {
-                0 => Ok(()),
-                err => Err(io::Errno(err)),
+            let flags = c::TIMER_ABSTIME;
+            unsafe {
+                return match {
+                    libc_clock_nanosleep(
+                        id as c::clockid_t,
+                        flags,
+                        &request.clone().into(),
+                        null_mut(),
+                    )
+                } {
+                    0 => Ok(()),
+                    err => Err(io::Errno(err)),
+                };
             }
-        } else {
-            clock_nanosleep_absolute_old(id, request)
         }
+
+        clock_nanosleep_absolute_old(id, request)
     }
 
     // Main version: libc is y2038 safe and has `clock_nanosleep`.
-    #[cfg(not(all(
-        any(target_arch = "arm", target_arch = "mips", target_arch = "x86"),
-        target_env = "gnu",
-    )))]
-    match unsafe { c::clock_nanosleep(id as c::clockid_t, flags as _, request, null_mut()) } {
-        0 => Ok(()),
-        err => Err(io::Errno(err)),
+    #[cfg(not(fix_y2038))]
+    {
+        let flags = c::TIMER_ABSTIME;
+
+        match unsafe { c::clock_nanosleep(id as c::clockid_t, flags as _, request, null_mut()) } {
+            0 => Ok(()),
+            err => Err(io::Errno(err)),
+        }
     }
 }
 
 #[cfg(all(
-    any(target_arch = "arm", target_arch = "mips", target_arch = "x86"),
-    target_env = "gnu",
+    fix_y2038,
+    not(any(apple, target_os = "emscripten", target_os = "haiku"))
 ))]
 fn clock_nanosleep_absolute_old(id: ClockId, request: &Timespec) -> io::Result<()> {
     let flags = c::TIMER_ABSTIME;
@@ -207,33 +198,29 @@ fn clock_nanosleep_absolute_old(id: ClockId, request: &Timespec) -> io::Result<(
 #[cfg(not(target_os = "redox"))]
 #[inline]
 pub(crate) fn nanosleep(request: &Timespec) -> NanosleepRelativeResult {
-    // 32-bit gnu version: libc has `nanosleep` but it is not y2038 safe by
-    // default.
-    #[cfg(all(
-        any(target_arch = "arm", target_arch = "mips", target_arch = "x86"),
-        target_env = "gnu",
-    ))]
-    unsafe {
-        let mut remain = MaybeUninit::<LibcTimespec>::uninit();
-
+    // Old 32-bit version: libc has `nanosleep` but it is not y2038 safe by
+    // default. But there may be a `__nanosleep64` we can use.
+    #[cfg(fix_y2038)]
+    {
+        #[cfg(target_env = "gnu")]
         if let Some(libc_nanosleep) = __nanosleep64.get() {
-            match ret(libc_nanosleep(&request.clone().into(), remain.as_mut_ptr())) {
-                Ok(()) => NanosleepRelativeResult::Ok,
-                Err(io::Errno::INTR) => {
-                    NanosleepRelativeResult::Interrupted(remain.assume_init().into())
-                }
-                Err(err) => NanosleepRelativeResult::Err(err),
+            let mut remain = MaybeUninit::<LibcTimespec>::uninit();
+            unsafe {
+                return match ret(libc_nanosleep(&request.clone().into(), remain.as_mut_ptr())) {
+                    Ok(()) => NanosleepRelativeResult::Ok,
+                    Err(io::Errno::INTR) => {
+                        NanosleepRelativeResult::Interrupted(remain.assume_init().into())
+                    }
+                    Err(err) => NanosleepRelativeResult::Err(err),
+                };
             }
-        } else {
-            nanosleep_old(request)
         }
+
+        nanosleep_old(request)
     }
 
     // Main version: libc is y2038 safe and has `nanosleep`.
-    #[cfg(not(all(
-        any(target_arch = "arm", target_arch = "mips", target_arch = "x86"),
-        target_env = "gnu",
-    )))]
+    #[cfg(not(fix_y2038))]
     unsafe {
         let mut remain = MaybeUninit::<Timespec>::uninit();
 
@@ -245,11 +232,8 @@ pub(crate) fn nanosleep(request: &Timespec) -> NanosleepRelativeResult {
     }
 }
 
-#[cfg(all(
-    any(target_arch = "arm", target_arch = "mips", target_arch = "x86"),
-    target_env = "gnu",
-))]
-unsafe fn nanosleep_old(request: &Timespec) -> NanosleepRelativeResult {
+#[cfg(fix_y2038)]
+fn nanosleep_old(request: &Timespec) -> NanosleepRelativeResult {
     let tv_sec = match request.tv_sec.try_into() {
         Ok(tv_sec) => tv_sec,
         Err(_) => return NanosleepRelativeResult::Err(io::Errno::OVERFLOW),
@@ -261,17 +245,19 @@ unsafe fn nanosleep_old(request: &Timespec) -> NanosleepRelativeResult {
     let old_request = c::timespec { tv_sec, tv_nsec };
     let mut old_remain = MaybeUninit::<c::timespec>::uninit();
 
-    match ret(c::nanosleep(&old_request, old_remain.as_mut_ptr())) {
-        Ok(()) => NanosleepRelativeResult::Ok,
-        Err(io::Errno::INTR) => {
-            let old_remain = old_remain.assume_init();
-            let remain = Timespec {
-                tv_sec: old_remain.tv_sec.into(),
-                tv_nsec: old_remain.tv_nsec.into(),
-            };
-            NanosleepRelativeResult::Interrupted(remain)
+    unsafe {
+        match ret(c::nanosleep(&old_request, old_remain.as_mut_ptr())) {
+            Ok(()) => NanosleepRelativeResult::Ok,
+            Err(io::Errno::INTR) => {
+                let old_remain = old_remain.assume_init();
+                let remain = Timespec {
+                    tv_sec: old_remain.tv_sec.into(),
+                    tv_nsec: old_remain.tv_nsec.into(),
+                };
+                NanosleepRelativeResult::Interrupted(remain)
+            }
+            Err(err) => NanosleepRelativeResult::Err(err),
         }
-        Err(err) => NanosleepRelativeResult::Err(err),
     }
 }
 
@@ -294,7 +280,7 @@ pub(crate) fn gettid() -> Pid {
 
 #[cfg(linux_kernel)]
 #[inline]
-pub(crate) fn setns(fd: BorrowedFd, nstype: c::c_int) -> io::Result<c::c_int> {
+pub(crate) fn setns(fd: BorrowedFd<'_>, nstype: c::c_int) -> io::Result<c::c_int> {
     // `setns` wasn't supported in glibc until 2.14, and musl until 0.9.5,
     // so use `syscall`.
     weak_or_syscall! {
@@ -404,4 +390,121 @@ pub(crate) fn setresgid_thread(
     }
 
     unsafe { ret(setresgid(rgid.as_raw(), egid.as_raw(), sgid.as_raw())) }
+}
+
+// TODO: This could be de-multiplexed.
+#[cfg(linux_kernel)]
+pub(crate) unsafe fn futex(
+    uaddr: *mut u32,
+    op: FutexOperation,
+    flags: FutexFlags,
+    val: u32,
+    utime: *const Timespec,
+    uaddr2: *mut u32,
+    val3: u32,
+) -> io::Result<usize> {
+    #[cfg(all(
+        target_pointer_width = "32",
+        not(any(target_arch = "aarch64", target_arch = "x86_64"))
+    ))]
+    {
+        // TODO: Upstream this to the libc crate.
+        #[allow(non_upper_case_globals)]
+        const SYS_futex_time64: i32 = linux_raw_sys::general::__NR_futex_time64 as i32;
+
+        syscall! {
+            fn futex_time64(
+                uaddr: *mut u32,
+                futex_op: c::c_int,
+                val: u32,
+                timeout: *const Timespec,
+                uaddr2: *mut u32,
+                val3: u32
+            ) via SYS_futex_time64 -> c::ssize_t
+        }
+
+        ret_usize(futex_time64(
+            uaddr,
+            op as i32 | flags.bits() as i32,
+            val,
+            utime,
+            uaddr2,
+            val3,
+        ))
+        .or_else(|err| {
+            // See the comments in `rustix_clock_gettime_via_syscall` about
+            // emulation.
+            if err == io::Errno::NOSYS {
+                futex_old(uaddr, op, flags, val, utime, uaddr2, val3)
+            } else {
+                Err(err)
+            }
+        })
+    }
+
+    #[cfg(any(
+        target_pointer_width = "64",
+        target_arch = "aarch64",
+        target_arch = "x86_64"
+    ))]
+    {
+        syscall! {
+            fn futex(
+                uaddr: *mut u32,
+                futex_op: c::c_int,
+                val: u32,
+                timeout: *const linux_raw_sys::general::__kernel_timespec,
+                uaddr2: *mut u32,
+                val3: u32
+            ) via SYS_futex -> c::c_long
+        }
+
+        ret_usize(futex(
+            uaddr,
+            op as i32 | flags.bits() as i32,
+            val,
+            utime.cast(),
+            uaddr2,
+            val3,
+        ) as isize)
+    }
+}
+
+#[cfg(linux_kernel)]
+#[cfg(all(
+    target_pointer_width = "32",
+    not(any(target_arch = "aarch64", target_arch = "x86_64"))
+))]
+unsafe fn futex_old(
+    uaddr: *mut u32,
+    op: FutexOperation,
+    flags: FutexFlags,
+    val: u32,
+    utime: *const Timespec,
+    uaddr2: *mut u32,
+    val3: u32,
+) -> io::Result<usize> {
+    syscall! {
+        fn futex(
+            uaddr: *mut u32,
+            futex_op: c::c_int,
+            val: u32,
+            timeout: *const linux_raw_sys::general::__kernel_old_timespec,
+            uaddr2: *mut u32,
+            val3: u32
+        ) via SYS_futex -> c::c_long
+    }
+
+    let old_utime = linux_raw_sys::general::__kernel_old_timespec {
+        tv_sec: (*utime).tv_sec.try_into().map_err(|_| io::Errno::INVAL)?,
+        tv_nsec: (*utime).tv_nsec.try_into().map_err(|_| io::Errno::INVAL)?,
+    };
+    ret_usize(futex(
+        uaddr,
+        op as i32 | flags.bits() as i32,
+        val,
+        &old_utime,
+        uaddr2,
+        val3,
+    ) as isize)
 }

@@ -47,6 +47,18 @@ pub mod default {
     assert_not_unpin!(Enum<PhantomPinned, PhantomPinned>);
 
     pin_project! {
+        #[project(!Unpin)]
+        enum NotUnpinEnum<T, U> {
+            V1 {
+                #[pin] f1: Inner<T>,
+                f2: U,
+            }
+        }
+    }
+
+    assert_not_unpin!(NotUnpinEnum<(), ()>);
+
+    pin_project! {
         struct TrivialBounds {
             #[pin]
             f: PhantomPinned,
@@ -64,4 +76,25 @@ pub mod default {
     }
 
     assert_unpin!(PinRef<'_, PhantomPinned, PhantomPinned>);
+
+    pin_project! {
+        #[project(!Unpin)]
+        struct NotUnpin<U> {
+            #[pin]
+            u: U
+        }
+    }
+
+    assert_not_unpin!(NotUnpin<()>);
+
+    pin_project! {
+        #[project(!Unpin)]
+        struct NotUnpinRef<'a, T, U> {
+            #[pin]
+            f1: &'a mut Inner<T>,
+            f2: U
+        }
+    }
+
+    assert_not_unpin!(NotUnpinRef<'_, (), ()>);
 }

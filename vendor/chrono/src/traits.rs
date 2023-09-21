@@ -1,6 +1,33 @@
 use crate::{IsoWeek, Weekday};
 
 /// The common set of methods for date component.
+///
+/// Methods such as [`year`], [`month`], [`day`] and [`weekday`] can be used to get basic
+/// information about the date.
+///
+/// The `with_*` methods can change the date.
+///
+/// # Warning
+///
+/// The `with_*` methods can be convenient to change a single component of a date, but they must be
+/// used with some care. Examples to watch out for:
+///
+/// - [`with_year`] changes the year component of a year-month-day value. Don't use this method if
+///   you want the ordinal to stay the same after changing the year, of if you want the week and
+///   weekday values to stay the same.
+/// - Don't combine two `with_*` methods to change two components of the date. For example to
+///   change both the year and month components of a date. This could fail because an intermediate
+///   value does not exist, while the final date would be valid.
+///
+/// For more complex changes to a date, it is best to use the methods on [`NaiveDate`] to create a
+/// new value instead of altering an existing date.
+///
+/// [`year`]: Datelike::year
+/// [`month`]: Datelike::month
+/// [`day`]: Datelike::day
+/// [`weekday`]: Datelike::weekday
+/// [`with_year`]: Datelike::with_year
+/// [`NaiveDate`]: crate::NaiveDate
 pub trait Datelike: Sized {
     /// Returns the year number in the [calendar date](./naive/struct.NaiveDate.html#calendar-date).
     fn year(&self) -> i32;
@@ -53,39 +80,157 @@ pub trait Datelike: Sized {
     /// Returns the ISO week.
     fn iso_week(&self) -> IsoWeek;
 
-    /// Makes a new value with the year number changed.
+    /// Makes a new value with the year number changed, while keeping the same month and day.
     ///
-    /// Returns `None` when the resulting value would be invalid.
+    /// This method assumes you want to work on the date as a year-month-day value. Don't use it if
+    /// you want the ordinal to stay the same after changing the year, of if you want the week and
+    /// weekday values to stay the same.
+    ///
+    /// # Errors
+    ///
+    /// Returns `None` when:
+    ///
+    /// - The resulting date does not exist (February 29 in a non-leap year).
+    /// - The year is out of range for [`NaiveDate`].
+    /// - In case of [`DateTime<Tz>`] if the resulting date and time fall within a timezone
+    ///   transition such as from DST to standard time.
+    ///
+    /// [`NaiveDate`]: crate::NaiveDate
+    /// [`DateTime<Tz>`]: crate::DateTime
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chrono::{NaiveDate, Datelike};
+    ///
+    /// assert_eq!(
+    ///     NaiveDate::from_ymd_opt(2020, 5, 13).unwrap().with_year(2023).unwrap(),
+    ///     NaiveDate::from_ymd_opt(2023, 5, 13).unwrap()
+    /// );
+    /// // Resulting date 2023-02-29 does not exist:
+    /// assert!(NaiveDate::from_ymd_opt(2020, 2, 29).unwrap().with_year(2023).is_none());
+    ///
+    /// // Don't use `with_year` if you want the ordinal date to stay the same:
+    /// assert_ne!(
+    ///     NaiveDate::from_yo_opt(2020, 100).unwrap().with_year(2023).unwrap(),
+    ///     NaiveDate::from_yo_opt(2023, 100).unwrap() // result is 2023-101
+    /// );
+    /// ```
     fn with_year(&self, year: i32) -> Option<Self>;
 
     /// Makes a new value with the month number (starting from 1) changed.
     ///
-    /// Returns `None` when the resulting value would be invalid.
+    /// # Errors
+    ///
+    /// Returns `None` when:
+    ///
+    /// - The resulting date does not exist (for example `month(4)` when day of the month is 31).
+    /// - In case of [`DateTime<Tz>`] if the resulting date and time fall within a timezone
+    ///   transition such as from DST to standard time.
+    /// - The value for `month` is out of range.
+    ///
+    /// [`DateTime<Tz>`]: crate::DateTime
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chrono::{NaiveDate, Datelike};
+    ///
+    /// assert_eq!(
+    ///     NaiveDate::from_ymd_opt(2023, 5, 12).unwrap().with_month(9).unwrap(),
+    ///     NaiveDate::from_ymd_opt(2023, 9, 12).unwrap()
+    /// );
+    /// // Resulting date 2023-09-31 does not exist:
+    /// assert!(NaiveDate::from_ymd_opt(2023, 5, 31).unwrap().with_month(9).is_none());
+    /// ```
+    ///
+    /// Don't combine multiple `Datelike::with_*` methods. The intermediate value may not exist.
+    /// ```
+    /// use chrono::{NaiveDate, Datelike};
+    ///
+    /// fn with_year_month(date: NaiveDate, year: i32, month: u32) -> Option<NaiveDate> {
+    ///     date.with_year(year)?.with_month(month)
+    /// }
+    /// let d = NaiveDate::from_ymd_opt(2020, 2, 29).unwrap();
+    /// assert!(with_year_month(d, 2019, 1).is_none()); // fails because of invalid intermediate value
+    ///
+    /// // Correct version:
+    /// fn with_year_month_fixed(date: NaiveDate, year: i32, month: u32) -> Option<NaiveDate> {
+    ///     NaiveDate::from_ymd_opt(year, month, date.day())
+    /// }
+    /// let d = NaiveDate::from_ymd_opt(2020, 2, 29).unwrap();
+    /// assert_eq!(with_year_month_fixed(d, 2019, 1), NaiveDate::from_ymd_opt(2019, 1, 29));
+    /// ```
     fn with_month(&self, month: u32) -> Option<Self>;
 
     /// Makes a new value with the month number (starting from 0) changed.
     ///
-    /// Returns `None` when the resulting value would be invalid.
+    /// # Errors
+    ///
+    /// Returns `None` when:
+    ///
+    /// - The resulting date does not exist (for example `month0(3)` when day of the month is 31).
+    /// - In case of [`DateTime<Tz>`] if the resulting date and time fall within a timezone
+    ///   transition such as from DST to standard time.
+    /// - The value for `month0` is out of range.
+    ///
+    /// [`DateTime<Tz>`]: crate::DateTime
     fn with_month0(&self, month0: u32) -> Option<Self>;
 
     /// Makes a new value with the day of month (starting from 1) changed.
     ///
-    /// Returns `None` when the resulting value would be invalid.
+    /// # Errors
+    ///
+    /// Returns `None` when:
+    ///
+    /// - The resulting date does not exist (for example `day(31)` in April).
+    /// - In case of [`DateTime<Tz>`] if the resulting date and time fall within a timezone
+    ///   transition such as from DST to standard time.
+    /// - The value for `day` is out of range.
+    ///
+    /// [`DateTime<Tz>`]: crate::DateTime
     fn with_day(&self, day: u32) -> Option<Self>;
 
     /// Makes a new value with the day of month (starting from 0) changed.
     ///
-    /// Returns `None` when the resulting value would be invalid.
+    /// # Errors
+    ///
+    /// Returns `None` when:
+    ///
+    /// - The resulting date does not exist (for example `day0(30)` in April).
+    /// - In case of [`DateTime<Tz>`] if the resulting date and time fall within a timezone
+    ///   transition such as from DST to standard time.
+    /// - The value for `day0` is out of range.
+    ///
+    /// [`DateTime<Tz>`]: crate::DateTime
     fn with_day0(&self, day0: u32) -> Option<Self>;
 
     /// Makes a new value with the day of year (starting from 1) changed.
     ///
-    /// Returns `None` when the resulting value would be invalid.
+    /// # Errors
+    ///
+    /// Returns `None` when:
+    ///
+    /// - The resulting date does not exist (`with_ordinal(366)` in a non-leap year).
+    /// - In case of [`DateTime<Tz>`] if the resulting date and time fall within a timezone
+    ///   transition such as from DST to standard time.
+    /// - The value for `ordinal` is out of range.
+    ///
+    /// [`DateTime<Tz>`]: crate::DateTime
     fn with_ordinal(&self, ordinal: u32) -> Option<Self>;
 
     /// Makes a new value with the day of year (starting from 0) changed.
     ///
-    /// Returns `None` when the resulting value would be invalid.
+    /// # Errors
+    ///
+    /// Returns `None` when:
+    ///
+    /// - The resulting date does not exist (`with_ordinal0(365)` in a non-leap year).
+    /// - In case of [`DateTime<Tz>`] if the resulting date and time fall within a timezone
+    ///   transition such as from DST to standard time.
+    /// - The value for `ordinal0` is out of range.
+    ///
+    /// [`DateTime<Tz>`]: crate::DateTime
     fn with_ordinal0(&self, ordinal0: u32) -> Option<Self>;
 
     /// Counts the days in the proleptic Gregorian calendar, with January 1, Year 1 (CE) as day 1.
@@ -171,6 +316,11 @@ pub trait Timelike: Sized {
     fn with_nanosecond(&self, nano: u32) -> Option<Self>;
 
     /// Returns the number of non-leap seconds past the last midnight.
+    ///
+    /// Every value in 00:00:00-23:59:59 maps to an integer in 0-86399.
+    ///
+    /// This method is not intended to provide the real number of seconds since midnight on a given
+    /// day. It does not take things like DST transitions into account.
     #[inline]
     fn num_seconds_from_midnight(&self) -> u32 {
         self.hour() * 3600 + self.minute() * 60 + self.second()

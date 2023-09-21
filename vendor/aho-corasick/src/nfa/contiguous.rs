@@ -684,6 +684,8 @@ impl<'a> State<'a> {
     /// dense format. Otherwise, the choice between dense and sparse will be
     /// automatically chosen based on the old state.
     fn write(
+        nnfa: &noncontiguous::NFA,
+        oldsid: StateID,
         old: &noncontiguous::State,
         classes: &ByteClasses,
         dst: &mut Vec<u32>,
@@ -692,45 +694,46 @@ impl<'a> State<'a> {
         let sid = StateID::new(dst.len()).map_err(|e| {
             BuildError::state_id_overflow(StateID::MAX.as_u64(), e.attempted())
         })?;
+        let old_len = nnfa.iter_trans(oldsid).count();
         // For states with a lot of transitions, we might as well just make
         // them dense. These kinds of hot states tend to be very rare, so we're
         // okay with it. This also gives us more sentinels in the state's
         // 'kind', which lets us create different state kinds to save on
         // space.
-        let kind = if force_dense
-            || old.trans.len() > State::MAX_SPARSE_TRANSITIONS
-        {
+        let kind = if force_dense || old_len > State::MAX_SPARSE_TRANSITIONS {
             State::KIND_DENSE
-        } else if old.trans.len() == 1 && old.matches.is_empty() {
+        } else if old_len == 1 && !old.is_match() {
             State::KIND_ONE
         } else {
             // For a sparse state, the kind is just the number of transitions.
-            u32::try_from(old.trans.len()).unwrap()
+            u32::try_from(old_len).unwrap()
         };
         if kind == State::KIND_DENSE {
             dst.push(kind);
-            dst.push(old.fail.as_u32());
-            State::write_dense_trans(old, classes, dst)?;
+            dst.push(old.fail().as_u32());
+            State::write_dense_trans(nnfa, oldsid, classes, dst)?;
         } else if kind == State::KIND_ONE {
-            let class = u32::from(classes.get(old.trans[0].0));
+            let t = nnfa.iter_trans(oldsid).next().unwrap();
+            let class = u32::from(classes.get(t.byte()));
             dst.push(kind | (class << 8));
-            dst.push(old.fail.as_u32());
-            dst.push(old.trans[0].1.as_u32());
+            dst.push(old.fail().as_u32());
+            dst.push(t.next().as_u32());
         } else {
             dst.push(kind);
-            dst.push(old.fail.as_u32());
-            State::write_sparse_trans(old, classes, dst)?;
+            dst.push(old.fail().as_u32());
+            State::write_sparse_trans(nnfa, oldsid, classes, dst)?;
         }
         // Now finally write the number of matches and the matches themselves.
-        if !old.matches.is_empty() {
-            if old.matches.len() == 1 {
-                let pid = old.matches[0].as_u32();
+        if old.is_match() {
+            let matches_len = nnfa.iter_matches(oldsid).count();
+            if matches_len == 1 {
+                let pid = nnfa.iter_matches(oldsid).next().unwrap().as_u32();
                 assert_eq!(0, pid & (1 << 31));
                 dst.push((1 << 31) | pid);
             } else {
-                assert_eq!(0, old.matches.len() & (1 << 31));
-                dst.push(old.matches.len().as_u32());
-                dst.extend(old.matches.iter().map(|pid| pid.as_u32()));
+                assert_eq!(0, matches_len & (1 << 31));
+                dst.push(matches_len.as_u32());
+                dst.extend(nnfa.iter_matches(oldsid).map(|pid| pid.as_u32()));
             }
         }
         Ok(sid)
@@ -744,13 +747,14 @@ impl<'a> State<'a> {
     /// This returns an error if `dst` became so big that `StateID`s can no
     /// longer be created for new states.
     fn write_sparse_trans(
-        old: &noncontiguous::State,
+        nnfa: &noncontiguous::NFA,
+        oldsid: StateID,
         classes: &ByteClasses,
         dst: &mut Vec<u32>,
     ) -> Result<(), BuildError> {
         let (mut chunk, mut len) = ([0; 4], 0);
-        for &(byte, _) in old.trans.iter() {
-            chunk[len] = classes.get(byte);
+        for t in nnfa.iter_trans(oldsid) {
+            chunk[len] = classes.get(t.byte());
             len += 1;
             if len == 4 {
                 dst.push(u32::from_ne_bytes(chunk));
@@ -773,8 +777,8 @@ impl<'a> State<'a> {
             }
             dst.push(u32::from_ne_bytes(chunk));
         }
-        for &(_, next) in old.trans.iter() {
-            dst.push(next.as_u32());
+        for t in nnfa.iter_trans(oldsid) {
+            dst.push(t.next().as_u32());
         }
         Ok(())
     }
@@ -787,7 +791,8 @@ impl<'a> State<'a> {
     /// This returns an error if `dst` became so big that `StateID`s can no
     /// longer be created for new states.
     fn write_dense_trans(
-        old: &noncontiguous::State,
+        nnfa: &noncontiguous::NFA,
+        oldsid: StateID,
         classes: &ByteClasses,
         dst: &mut Vec<u32>,
     ) -> Result<(), BuildError> {
@@ -807,8 +812,9 @@ impl<'a> State<'a> {
                 .take(classes.alphabet_len()),
         );
         assert!(start < dst.len(), "equivalence classes are never empty");
-        for &(byte, next) in old.trans.iter() {
-            dst[start + usize::from(classes.get(byte))] = next.as_u32();
+        for t in nnfa.iter_trans(oldsid) {
+            dst[start + usize::from(classes.get(t.byte()))] =
+                t.next().as_u32();
         }
         Ok(())
     }
@@ -960,8 +966,10 @@ impl Builder {
                 index_to_state_id[oldsid] = NFA::FAIL;
                 continue;
             }
-            let force_dense = state.depth.as_usize() < self.dense_depth;
+            let force_dense = state.depth().as_usize() < self.dense_depth;
             let newsid = State::write(
+                nnfa,
+                oldsid,
                 state,
                 &nfa.byte_classes,
                 &mut nfa.repr,
@@ -992,6 +1000,11 @@ impl Builder {
             nfa.memory_usage(),
             nfa.byte_classes.alphabet_len(),
         );
+        // The vectors can grow ~twice as big during construction because a
+        // Vec amortizes growth. But here, let's shrink things back down to
+        // what we actually need since we're never going to add more to it.
+        nfa.repr.shrink_to_fit();
+        nfa.pattern_lens.shrink_to_fit();
         Ok(nfa)
     }
 

@@ -3,8 +3,7 @@
 //! # Safety
 //!
 //! See the `rustix::backend` module documentation for details.
-#![allow(unsafe_code)]
-#![allow(clippy::undocumented_unsafe_blocks)]
+#![allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
 
 use super::msghdr::{
     with_noaddr_msghdr, with_recv_msghdr, with_unix_msghdr, with_v4_msghdr, with_v6_msghdr,
@@ -51,7 +50,7 @@ pub(crate) fn socket(
         ret_owned_fd(syscall_readonly!(
             __NR_socketcall,
             x86_sys(SYS_SOCKET),
-            slice_just_addr::<ArgReg<SocketArg>, _>(&[
+            slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                 family.into(),
                 type_.into(),
                 protocol.into(),
@@ -81,7 +80,7 @@ pub(crate) fn socket_with(
         ret_owned_fd(syscall_readonly!(
             __NR_socketcall,
             x86_sys(SYS_SOCKET),
-            slice_just_addr::<ArgReg<SocketArg>, _>(&[
+            slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                 family.into(),
                 (type_, flags).into(),
                 protocol.into(),
@@ -116,7 +115,7 @@ pub(crate) fn socketpair(
         ret(syscall!(
             __NR_socketcall,
             x86_sys(SYS_SOCKETPAIR),
-            slice_just_addr::<ArgReg<SocketArg>, _>(&[
+            slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                 family.into(),
                 (type_, flags).into(),
                 protocol.into(),
@@ -140,7 +139,7 @@ pub(crate) fn accept(fd: BorrowedFd<'_>) -> io::Result<OwnedFd> {
         let fd = ret_owned_fd(syscall_readonly!(
             __NR_socketcall,
             x86_sys(SYS_ACCEPT),
-            slice_just_addr::<ArgReg<SocketArg>, _>(&[fd.into(), zero(), zero()])
+            slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[fd.into(), zero(), zero()])
         ))?;
         Ok(fd)
     }
@@ -158,7 +157,7 @@ pub(crate) fn accept_with(fd: BorrowedFd<'_>, flags: SocketFlags) -> io::Result<
         let fd = ret_owned_fd(syscall_readonly!(
             __NR_socketcall,
             x86_sys(SYS_ACCEPT4),
-            slice_just_addr::<ArgReg<SocketArg>, _>(&[fd.into(), zero(), zero(), flags.into()])
+            slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[fd.into(), zero(), zero(), flags.into()])
         ))?;
         Ok(fd)
     }
@@ -188,7 +187,7 @@ pub(crate) fn acceptfrom(fd: BorrowedFd<'_>) -> io::Result<(OwnedFd, Option<Sock
         let fd = ret_owned_fd(syscall!(
             __NR_socketcall,
             x86_sys(SYS_ACCEPT),
-            slice_just_addr::<ArgReg<SocketArg>, _>(&[
+            slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                 fd.into(),
                 (&mut storage).into(),
                 by_mut(&mut addrlen),
@@ -229,7 +228,7 @@ pub(crate) fn acceptfrom_with(
         let fd = ret_owned_fd(syscall!(
             __NR_socketcall,
             x86_sys(SYS_ACCEPT4),
-            slice_just_addr::<ArgReg<SocketArg>, _>(&[
+            slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                 fd.into(),
                 (&mut storage).into(),
                 by_mut(&mut addrlen),
@@ -262,7 +261,7 @@ pub(crate) fn recvmsg(
             ret_usize(syscall!(
                 __NR_socketcall,
                 x86_sys(SYS_RECVMSG),
-                slice_just_addr::<ArgReg<SocketArg>, _>(&[
+                slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                     sockfd.into(),
                     by_mut(msghdr),
                     msg_flags.into(),
@@ -301,7 +300,7 @@ pub(crate) fn sendmsg(
             ret_usize(syscall!(
                 __NR_socketcall,
                 x86_sys(SYS_SENDMSG),
-                slice_just_addr::<ArgReg<SocketArg>, _>(&[
+                slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                     sockfd.into(),
                     by_ref(&msghdr),
                     msg_flags.into()
@@ -331,7 +330,7 @@ pub(crate) fn sendmsg_v4(
             ret_usize(syscall!(
                 __NR_socketcall,
                 x86_sys(SYS_SENDMSG),
-                slice_just_addr::<ArgReg<SocketArg>, _>(&[
+                slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                     sockfd.into(),
                     by_ref(&msghdr),
                     msg_flags.into(),
@@ -361,7 +360,7 @@ pub(crate) fn sendmsg_v6(
             ret_usize(syscall!(
                 __NR_socketcall,
                 x86_sys(SYS_SENDMSG),
-                slice_just_addr::<ArgReg<SocketArg>, _>(&[
+                slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                     sockfd.into(),
                     by_ref(&msghdr),
                     msg_flags.into()
@@ -391,7 +390,7 @@ pub(crate) fn sendmsg_unix(
             ret_usize(syscall!(
                 __NR_socketcall,
                 x86_sys(SYS_SENDMSG),
-                slice_just_addr::<ArgReg<SocketArg>, _>(&[
+                slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                     sockfd.into(),
                     by_ref(&msghdr),
                     msg_flags.into()
@@ -418,7 +417,7 @@ pub(crate) fn shutdown(fd: BorrowedFd<'_>, how: Shutdown) -> io::Result<()> {
         ret(syscall_readonly!(
             __NR_socketcall,
             x86_sys(SYS_SHUTDOWN),
-            slice_just_addr::<ArgReg<SocketArg>, _>(&[fd.into(), c_uint(how as c::c_uint)])
+            slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[fd.into(), c_uint(how as c::c_uint)])
         ))
     }
 }
@@ -430,6 +429,7 @@ pub(crate) fn send(fd: BorrowedFd<'_>, buf: &[u8], flags: SendFlags) -> io::Resu
     #[cfg(not(any(
         target_arch = "aarch64",
         target_arch = "mips64",
+        target_arch = "mips64r6",
         target_arch = "riscv64",
         target_arch = "x86",
         target_arch = "x86_64",
@@ -440,6 +440,7 @@ pub(crate) fn send(fd: BorrowedFd<'_>, buf: &[u8], flags: SendFlags) -> io::Resu
     #[cfg(any(
         target_arch = "aarch64",
         target_arch = "mips64",
+        target_arch = "mips64r6",
         target_arch = "riscv64",
         target_arch = "x86_64",
     ))]
@@ -459,7 +460,12 @@ pub(crate) fn send(fd: BorrowedFd<'_>, buf: &[u8], flags: SendFlags) -> io::Resu
         ret_usize(syscall_readonly!(
             __NR_socketcall,
             x86_sys(SYS_SEND),
-            slice_just_addr::<ArgReg<SocketArg>, _>(&[fd.into(), buf_addr, buf_len, flags.into()])
+            slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
+                fd.into(),
+                buf_addr,
+                buf_len,
+                flags.into()
+            ])
         ))
     }
 }
@@ -490,7 +496,7 @@ pub(crate) fn sendto_v4(
         ret_usize(syscall_readonly!(
             __NR_socketcall,
             x86_sys(SYS_SENDTO),
-            slice_just_addr::<ArgReg<SocketArg>, _>(&[
+            slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                 fd.into(),
                 buf_addr,
                 buf_len,
@@ -528,7 +534,7 @@ pub(crate) fn sendto_v6(
         ret_usize(syscall_readonly!(
             __NR_socketcall,
             x86_sys(SYS_SENDTO),
-            slice_just_addr::<ArgReg<SocketArg>, _>(&[
+            slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                 fd.into(),
                 buf_addr,
                 buf_len,
@@ -566,7 +572,7 @@ pub(crate) fn sendto_unix(
         ret_usize(syscall_readonly!(
             __NR_socketcall,
             x86_sys(SYS_SENDTO),
-            slice_just_addr::<ArgReg<SocketArg>, _>(&[
+            slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                 fd.into(),
                 buf_addr,
                 buf_len,
@@ -585,6 +591,7 @@ pub(crate) fn recv(fd: BorrowedFd<'_>, buf: &mut [u8], flags: RecvFlags) -> io::
     #[cfg(not(any(
         target_arch = "aarch64",
         target_arch = "mips64",
+        target_arch = "mips64r6",
         target_arch = "riscv64",
         target_arch = "x86",
         target_arch = "x86_64",
@@ -595,6 +602,7 @@ pub(crate) fn recv(fd: BorrowedFd<'_>, buf: &mut [u8], flags: RecvFlags) -> io::
     #[cfg(any(
         target_arch = "aarch64",
         target_arch = "mips64",
+        target_arch = "mips64r6",
         target_arch = "riscv64",
         target_arch = "x86_64",
     ))]
@@ -614,7 +622,7 @@ pub(crate) fn recv(fd: BorrowedFd<'_>, buf: &mut [u8], flags: RecvFlags) -> io::
         ret_usize(syscall!(
             __NR_socketcall,
             x86_sys(SYS_RECV),
-            slice_just_addr::<ArgReg<SocketArg>, _>(&[
+            slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                 fd.into(),
                 buf_addr_mut,
                 buf_len,
@@ -655,7 +663,7 @@ pub(crate) fn recvfrom(
         let nread = ret_usize(syscall!(
             __NR_socketcall,
             x86_sys(SYS_RECVFROM),
-            slice_just_addr::<ArgReg<SocketArg>, _>(&[
+            slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                 fd.into(),
                 buf_addr_mut,
                 buf_len,
@@ -696,7 +704,7 @@ pub(crate) fn getpeername(fd: BorrowedFd<'_>) -> io::Result<Option<SocketAddrAny
         ret(syscall!(
             __NR_socketcall,
             x86_sys(SYS_GETPEERNAME),
-            slice_just_addr::<ArgReg<SocketArg>, _>(&[
+            slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                 fd.into(),
                 (&mut storage).into(),
                 by_mut(&mut addrlen),
@@ -733,7 +741,7 @@ pub(crate) fn getsockname(fd: BorrowedFd<'_>) -> io::Result<SocketAddrAny> {
         ret(syscall!(
             __NR_socketcall,
             x86_sys(SYS_GETSOCKNAME),
-            slice_just_addr::<ArgReg<SocketArg>, _>(&[
+            slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                 fd.into(),
                 (&mut storage).into(),
                 by_mut(&mut addrlen),
@@ -762,7 +770,7 @@ pub(crate) fn bind_v4(fd: BorrowedFd<'_>, addr: &SocketAddrV4) -> io::Result<()>
         ret(syscall_readonly!(
             __NR_socketcall,
             x86_sys(SYS_BIND),
-            slice_just_addr::<ArgReg<SocketArg>, _>(&[
+            slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                 fd.into(),
                 by_ref(&encode_sockaddr_v4(addr)),
                 size_of::<sockaddr_in, _>(),
@@ -787,7 +795,7 @@ pub(crate) fn bind_v6(fd: BorrowedFd<'_>, addr: &SocketAddrV6) -> io::Result<()>
         ret(syscall_readonly!(
             __NR_socketcall,
             x86_sys(SYS_BIND),
-            slice_just_addr::<ArgReg<SocketArg>, _>(&[
+            slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                 fd.into(),
                 by_ref(&encode_sockaddr_v6(addr)),
                 size_of::<sockaddr_in6, _>(),
@@ -812,7 +820,7 @@ pub(crate) fn bind_unix(fd: BorrowedFd<'_>, addr: &SocketAddrUnix) -> io::Result
         ret(syscall_readonly!(
             __NR_socketcall,
             x86_sys(SYS_BIND),
-            slice_just_addr::<ArgReg<SocketArg>, _>(&[
+            slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                 fd.into(),
                 by_ref(&addr.unix),
                 socklen_t(addr.addr_len()),
@@ -837,7 +845,7 @@ pub(crate) fn connect_v4(fd: BorrowedFd<'_>, addr: &SocketAddrV4) -> io::Result<
         ret(syscall_readonly!(
             __NR_socketcall,
             x86_sys(SYS_CONNECT),
-            slice_just_addr::<ArgReg<SocketArg>, _>(&[
+            slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                 fd.into(),
                 by_ref(&encode_sockaddr_v4(addr)),
                 size_of::<sockaddr_in, _>(),
@@ -862,7 +870,7 @@ pub(crate) fn connect_v6(fd: BorrowedFd<'_>, addr: &SocketAddrV6) -> io::Result<
         ret(syscall_readonly!(
             __NR_socketcall,
             x86_sys(SYS_CONNECT),
-            slice_just_addr::<ArgReg<SocketArg>, _>(&[
+            slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                 fd.into(),
                 by_ref(&encode_sockaddr_v6(addr)),
                 size_of::<sockaddr_in6, _>(),
@@ -887,7 +895,7 @@ pub(crate) fn connect_unix(fd: BorrowedFd<'_>, addr: &SocketAddrUnix) -> io::Res
         ret(syscall_readonly!(
             __NR_socketcall,
             x86_sys(SYS_CONNECT),
-            slice_just_addr::<ArgReg<SocketArg>, _>(&[
+            slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                 fd.into(),
                 by_ref(&addr.unix),
                 socklen_t(addr.addr_len()),
@@ -907,7 +915,7 @@ pub(crate) fn listen(fd: BorrowedFd<'_>, backlog: c::c_int) -> io::Result<()> {
         ret(syscall_readonly!(
             __NR_socketcall,
             x86_sys(SYS_LISTEN),
-            slice_just_addr::<ArgReg<SocketArg>, _>(&[fd.into(), c_int(backlog)])
+            slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[fd.into(), c_int(backlog)])
         ))
     }
 }
@@ -916,10 +924,11 @@ pub(crate) mod sockopt {
     use super::{c, BorrowedFd};
     use crate::io;
     use crate::net::sockopt::Timeout;
-    use crate::net::{Ipv4Addr, Ipv6Addr, SocketType};
+    use crate::net::{AddressFamily, Ipv4Addr, Ipv6Addr, SocketType};
     use c::{SO_RCVTIMEO_NEW, SO_RCVTIMEO_OLD, SO_SNDTIMEO_NEW, SO_SNDTIMEO_OLD};
     use core::time::Duration;
     use linux_raw_sys::general::{__kernel_timespec, timeval};
+    use linux_raw_sys::net::{SO_ACCEPTCONN, TCP_KEEPCNT, TCP_KEEPIDLE, TCP_KEEPINTVL};
 
     #[inline]
     fn getsockopt<T: Copy>(fd: BorrowedFd<'_>, level: u32, optname: u32) -> io::Result<T> {
@@ -956,7 +965,7 @@ pub(crate) mod sockopt {
             ret(syscall!(
                 __NR_socketcall,
                 x86_sys(SYS_GETSOCKOPT),
-                slice_just_addr::<ArgReg<SocketArg>, _>(&[
+                slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                     fd.into(),
                     c_uint(level),
                     c_uint(optname),
@@ -1004,7 +1013,7 @@ pub(crate) mod sockopt {
             ret(syscall_readonly!(
                 __NR_socketcall,
                 x86_sys(SYS_SETSOCKOPT),
-                slice_just_addr::<ArgReg<SocketArg>, _>(&[
+                slice_just_addr::<ArgReg<'_, SocketArg>, _>(&[
                     fd.into(),
                     c_uint(level),
                     c_uint(optname),
@@ -1031,6 +1040,11 @@ pub(crate) mod sockopt {
     }
 
     #[inline]
+    pub(crate) fn get_socket_reuseaddr(fd: BorrowedFd<'_>) -> io::Result<bool> {
+        getsockopt(fd, c::SOL_SOCKET as _, c::SO_REUSEADDR).map(to_bool)
+    }
+
+    #[inline]
     pub(crate) fn set_socket_broadcast(fd: BorrowedFd<'_>, broadcast: bool) -> io::Result<()> {
         setsockopt(
             fd,
@@ -1052,11 +1066,7 @@ pub(crate) mod sockopt {
     ) -> io::Result<()> {
         // Convert `linger` to seconds, rounding up.
         let l_linger = if let Some(linger) = linger {
-            let mut l_linger = linger.as_secs();
-            if linger.subsec_nanos() != 0 {
-                l_linger = l_linger.checked_add(1).ok_or(io::Errno::INVAL)?;
-            }
-            l_linger.try_into().map_err(|_e| io::Errno::INVAL)?
+            duration_to_secs(linger)?
         } else {
             0
         };
@@ -1268,6 +1278,19 @@ pub(crate) mod sockopt {
     }
 
     #[inline]
+    pub(crate) fn get_socket_domain(fd: BorrowedFd<'_>) -> io::Result<AddressFamily> {
+        let domain: c::c_int = getsockopt(fd, c::SOL_SOCKET as _, c::SO_DOMAIN)?;
+        Ok(AddressFamily(
+            domain.try_into().map_err(|_| io::Errno::OPNOTSUPP)?,
+        ))
+    }
+
+    #[inline]
+    pub(crate) fn get_socket_acceptconn(fd: BorrowedFd<'_>) -> io::Result<bool> {
+        getsockopt(fd, c::SOL_SOCKET as _, SO_ACCEPTCONN).map(to_bool)
+    }
+
+    #[inline]
     pub(crate) fn set_ip_ttl(fd: BorrowedFd<'_>, ttl: u32) -> io::Result<()> {
         setsockopt(fd, c::IPPROTO_IP as _, c::IP_TTL, ttl)
     }
@@ -1416,6 +1439,40 @@ pub(crate) mod sockopt {
     }
 
     #[inline]
+    pub(crate) fn set_tcp_keepcnt(fd: BorrowedFd<'_>, count: u32) -> io::Result<()> {
+        setsockopt(fd, c::IPPROTO_TCP as _, TCP_KEEPCNT, count)
+    }
+
+    #[inline]
+    pub(crate) fn get_tcp_keepcnt(fd: BorrowedFd<'_>) -> io::Result<u32> {
+        getsockopt(fd, c::IPPROTO_TCP as _, TCP_KEEPCNT)
+    }
+
+    #[inline]
+    pub(crate) fn set_tcp_keepidle(fd: BorrowedFd<'_>, duration: Duration) -> io::Result<()> {
+        let secs: c::c_uint = duration_to_secs(duration)?;
+        setsockopt(fd, c::IPPROTO_TCP as _, TCP_KEEPIDLE, secs)
+    }
+
+    #[inline]
+    pub(crate) fn get_tcp_keepidle(fd: BorrowedFd<'_>) -> io::Result<Duration> {
+        let secs: c::c_uint = getsockopt(fd, c::IPPROTO_TCP as _, TCP_KEEPIDLE)?;
+        Ok(Duration::from_secs(secs as u64))
+    }
+
+    #[inline]
+    pub(crate) fn set_tcp_keepintvl(fd: BorrowedFd<'_>, duration: Duration) -> io::Result<()> {
+        let secs: c::c_uint = duration_to_secs(duration)?;
+        setsockopt(fd, c::IPPROTO_TCP as _, TCP_KEEPINTVL, secs)
+    }
+
+    #[inline]
+    pub(crate) fn get_tcp_keepintvl(fd: BorrowedFd<'_>) -> io::Result<Duration> {
+        let secs: c::c_uint = getsockopt(fd, c::IPPROTO_TCP as _, TCP_KEEPINTVL)?;
+        Ok(Duration::from_secs(secs as u64))
+    }
+
+    #[inline]
     fn to_imr(multiaddr: &Ipv4Addr, interface: &Ipv4Addr) -> c::ip_mreq {
         c::ip_mreq {
             imr_multiaddr: to_imr_addr(multiaddr),
@@ -1460,5 +1517,15 @@ pub(crate) mod sockopt {
     #[inline]
     fn to_bool(value: c::c_uint) -> bool {
         value != 0
+    }
+
+    /// Convert to seconds, rounding up if necessary.
+    #[inline]
+    fn duration_to_secs<T: TryFrom<u64>>(duration: Duration) -> io::Result<T> {
+        let mut secs = duration.as_secs();
+        if duration.subsec_nanos() != 0 {
+            secs = secs.checked_add(1).ok_or(io::Errno::INVAL)?;
+        }
+        T::try_from(secs).map_err(|_e| io::Errno::INVAL)
     }
 }

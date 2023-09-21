@@ -5,28 +5,8 @@
  * Various scanning routines for the parser.
  */
 
-#![allow(deprecated)]
-
 use super::{ParseResult, INVALID, OUT_OF_RANGE, TOO_SHORT};
 use crate::Weekday;
-
-/// Returns true when two slices are equal case-insensitively (in ASCII).
-/// Assumes that the `pattern` is already converted to lower case.
-fn equals(s: &[u8], pattern: &str) -> bool {
-    let mut xs = s.iter().map(|&c| match c {
-        b'A'..=b'Z' => c + 32,
-        _ => c,
-    });
-    let mut ys = pattern.as_bytes().iter().cloned();
-    loop {
-        match (xs.next(), ys.next()) {
-            (None, None) => return true,
-            (None, _) | (_, None) => return false,
-            (Some(x), Some(y)) if x != y => return false,
-            _ => (),
-        }
-    }
-}
 
 /// Tries to parse the non-negative number from `min` to `max` digits.
 ///
@@ -79,7 +59,7 @@ pub(super) fn nanosecond(s: &str) -> ParseResult<(&str, i64)> {
     let v = v.checked_mul(SCALE[consumed]).ok_or(OUT_OF_RANGE)?;
 
     // if there are more than 9 digits, skip next digits.
-    let s = s.trim_left_matches(|c: char| c.is_ascii_digit());
+    let s = s.trim_start_matches(|c: char| c.is_ascii_digit());
 
     Ok((s, v))
 }
@@ -145,14 +125,16 @@ pub(super) fn short_weekday(s: &str) -> ParseResult<(&str, Weekday)> {
 /// It prefers long month names to short month names when both are possible.
 pub(super) fn short_or_long_month0(s: &str) -> ParseResult<(&str, u8)> {
     // lowercased month names, minus first three chars
-    static LONG_MONTH_SUFFIXES: [&str; 12] =
-        ["uary", "ruary", "ch", "il", "", "e", "y", "ust", "tember", "ober", "ember", "ember"];
+    static LONG_MONTH_SUFFIXES: [&[u8]; 12] = [
+        b"uary", b"ruary", b"ch", b"il", b"", b"e", b"y", b"ust", b"tember", b"ober", b"ember",
+        b"ember",
+    ];
 
     let (mut s, month0) = short_month0(s)?;
 
     // tries to consume the suffix if possible
     let suffix = LONG_MONTH_SUFFIXES[month0 as usize];
-    if s.len() >= suffix.len() && equals(&s.as_bytes()[..suffix.len()], suffix) {
+    if s.len() >= suffix.len() && s.as_bytes()[..suffix.len()].eq_ignore_ascii_case(suffix) {
         s = &s[suffix.len()..];
     }
 
@@ -163,14 +145,14 @@ pub(super) fn short_or_long_month0(s: &str) -> ParseResult<(&str, u8)> {
 /// It prefers long weekday names to short weekday names when both are possible.
 pub(super) fn short_or_long_weekday(s: &str) -> ParseResult<(&str, Weekday)> {
     // lowercased weekday names, minus first three chars
-    static LONG_WEEKDAY_SUFFIXES: [&str; 7] =
-        ["day", "sday", "nesday", "rsday", "day", "urday", "day"];
+    static LONG_WEEKDAY_SUFFIXES: [&[u8]; 7] =
+        [b"day", b"sday", b"nesday", b"rsday", b"day", b"urday", b"day"];
 
     let (mut s, weekday) = short_weekday(s)?;
 
     // tries to consume the suffix if possible
     let suffix = LONG_WEEKDAY_SUFFIXES[weekday.num_days_from_monday() as usize];
-    if s.len() >= suffix.len() && equals(&s.as_bytes()[..suffix.len()], suffix) {
+    if s.len() >= suffix.len() && s.as_bytes()[..suffix.len()].eq_ignore_ascii_case(suffix) {
         s = &s[suffix.len()..];
     }
 
@@ -188,7 +170,7 @@ pub(super) fn char(s: &str, c1: u8) -> ParseResult<&str> {
 
 /// Tries to consume one or more whitespace.
 pub(super) fn space(s: &str) -> ParseResult<&str> {
-    let s_ = s.trim_left();
+    let s_ = s.trim_start();
     if s_.len() < s.len() {
         Ok(s_)
     } else if s.is_empty() {
@@ -199,29 +181,40 @@ pub(super) fn space(s: &str) -> ParseResult<&str> {
 }
 
 /// Consumes any number (including zero) of colon or spaces.
-pub(super) fn colon_or_space(s: &str) -> ParseResult<&str> {
-    Ok(s.trim_left_matches(|c: char| c == ':' || c.is_whitespace()))
+pub(crate) fn colon_or_space(s: &str) -> ParseResult<&str> {
+    Ok(s.trim_start_matches(|c: char| c == ':' || c.is_whitespace()))
 }
 
-/// Tries to parse `[-+]\d\d` continued by `\d\d`. Return an offset in seconds if possible.
+/// Parse a timezone from `s` and return the offset in seconds.
 ///
-/// The additional `colon` may be used to parse a mandatory or optional `:`
-/// between hours and minutes, and should return either a new suffix or `Err` when parsing fails.
-pub(super) fn timezone_offset<F>(s: &str, consume_colon: F) -> ParseResult<(&str, i32)>
-where
-    F: FnMut(&str) -> ParseResult<&str>,
-{
-    timezone_offset_internal(s, consume_colon, false)
-}
-
-fn timezone_offset_internal<F>(
+/// The `consume_colon` function is used to parse a mandatory or optional `:`
+/// separator between hours offset and minutes offset.
+///
+/// The `allow_missing_minutes` flag allows the timezone minutes offset to be
+/// missing from `s`.
+///
+/// The `allow_tz_minus_sign` flag allows the timezone offset negative character
+/// to also be `−` MINUS SIGN (U+2212) in addition to the typical
+/// ASCII-compatible `-` HYPHEN-MINUS (U+2D).
+/// This is part of [RFC 3339 & ISO 8601].
+///
+/// [RFC 3339 & ISO 8601]: https://en.wikipedia.org/w/index.php?title=ISO_8601&oldid=1114309368#Time_offsets_from_UTC
+pub(crate) fn timezone_offset<F>(
     mut s: &str,
     mut consume_colon: F,
+    allow_zulu: bool,
     allow_missing_minutes: bool,
+    allow_tz_minus_sign: bool,
 ) -> ParseResult<(&str, i32)>
 where
     F: FnMut(&str) -> ParseResult<&str>,
 {
+    if allow_zulu {
+        if let Some(&b'Z' | &b'z') = s.as_bytes().first() {
+            return Ok((&s[1..], 0));
+        }
+    }
+
     const fn digits(s: &str) -> ParseResult<(u8, u8)> {
         let b = s.as_bytes();
         if b.len() < 2 {
@@ -230,13 +223,31 @@ where
             Ok((b[0], b[1]))
         }
     }
-    let negative = match s.as_bytes().first() {
-        Some(&b'+') => false,
-        Some(&b'-') => true,
+    let negative = match s.chars().next() {
+        Some('+') => {
+            // PLUS SIGN (U+2B)
+            s = &s['+'.len_utf8()..];
+
+            false
+        }
+        Some('-') => {
+            // HYPHEN-MINUS (U+2D)
+            s = &s['-'.len_utf8()..];
+
+            true
+        }
+        Some('−') => {
+            // MINUS SIGN (U+2212)
+            if !allow_tz_minus_sign {
+                return Err(INVALID);
+            }
+            s = &s['−'.len_utf8()..];
+
+            true
+        }
         Some(_) => return Err(INVALID),
         None => return Err(TOO_SHORT),
     };
-    s = &s[1..];
 
     // hours (00--99)
     let hours = match digits(s)? {
@@ -271,41 +282,6 @@ where
     Ok((s, if negative { -seconds } else { seconds }))
 }
 
-/// Same as `timezone_offset` but also allows for `z`/`Z` which is the same as `+00:00`.
-pub(super) fn timezone_offset_zulu<F>(s: &str, colon: F) -> ParseResult<(&str, i32)>
-where
-    F: FnMut(&str) -> ParseResult<&str>,
-{
-    let bytes = s.as_bytes();
-    match bytes.first() {
-        Some(&b'z') | Some(&b'Z') => Ok((&s[1..], 0)),
-        Some(&b'u') | Some(&b'U') => {
-            if bytes.len() >= 3 {
-                let (b, c) = (bytes[1], bytes[2]);
-                match (b | 32, c | 32) {
-                    (b't', b'c') => Ok((&s[3..], 0)),
-                    _ => Err(INVALID),
-                }
-            } else {
-                Err(INVALID)
-            }
-        }
-        _ => timezone_offset(s, colon),
-    }
-}
-
-/// Same as `timezone_offset` but also allows for `z`/`Z` which is the same as
-/// `+00:00`, and allows missing minutes entirely.
-pub(super) fn timezone_offset_permissive<F>(s: &str, colon: F) -> ParseResult<(&str, i32)>
-where
-    F: FnMut(&str) -> ParseResult<&str>,
-{
-    match s.as_bytes().first() {
-        Some(&b'z') | Some(&b'Z') => Ok((&s[1..], 0)),
-        _ => timezone_offset_internal(s, colon, true),
-    }
-}
-
 /// Same as `timezone_offset` but also allows for RFC 2822 legacy timezones.
 /// May return `None` which indicates an insufficient offset data (i.e. `-0000`).
 /// See [RFC 2822 Section 4.3].
@@ -318,17 +294,17 @@ pub(super) fn timezone_offset_2822(s: &str) -> ParseResult<(&str, Option<i32>)> 
         let name = &s.as_bytes()[..upto];
         let s = &s[upto..];
         let offset_hours = |o| Ok((s, Some(o * 3600)));
-        if equals(name, "gmt") || equals(name, "ut") {
+        if name.eq_ignore_ascii_case(b"gmt") || name.eq_ignore_ascii_case(b"ut") {
             offset_hours(0)
-        } else if equals(name, "edt") {
+        } else if name.eq_ignore_ascii_case(b"edt") {
             offset_hours(-4)
-        } else if equals(name, "est") || equals(name, "cdt") {
+        } else if name.eq_ignore_ascii_case(b"est") || name.eq_ignore_ascii_case(b"cdt") {
             offset_hours(-5)
-        } else if equals(name, "cst") || equals(name, "mdt") {
+        } else if name.eq_ignore_ascii_case(b"cst") || name.eq_ignore_ascii_case(b"mdt") {
             offset_hours(-6)
-        } else if equals(name, "mst") || equals(name, "pdt") {
+        } else if name.eq_ignore_ascii_case(b"mst") || name.eq_ignore_ascii_case(b"pdt") {
             offset_hours(-7)
-        } else if equals(name, "pst") {
+        } else if name.eq_ignore_ascii_case(b"pst") {
             offset_hours(-8)
         } else if name.len() == 1 {
             match name[0] {
@@ -340,15 +316,9 @@ pub(super) fn timezone_offset_2822(s: &str) -> ParseResult<(&str, Option<i32>)> 
             Ok((s, None))
         }
     } else {
-        let (s_, offset) = timezone_offset(s, |s| Ok(s))?;
+        let (s_, offset) = timezone_offset(s, |s| Ok(s), false, false, false)?;
         Ok((s_, Some(offset)))
     }
-}
-
-/// Tries to consume everything until next whitespace-like symbol.
-/// Does not provide any offset information from the consumed data.
-pub(super) fn timezone_name_skip(s: &str) -> ParseResult<(&str, ())> {
-    Ok((s.trim_left_matches(|c: char| !c.is_whitespace()), ()))
 }
 
 /// Tries to consume an RFC2822 comment including preceding ` `.
@@ -382,36 +352,83 @@ enum CommentState {
 }
 
 #[cfg(test)]
-#[test]
-fn test_rfc2822_comments() {
-    let testdata = [
-        ("", Err(TOO_SHORT)),
-        (" ", Err(TOO_SHORT)),
-        ("x", Err(INVALID)),
-        ("(", Err(TOO_SHORT)),
-        ("()", Ok("")),
-        (" \r\n\t()", Ok("")),
-        ("() ", Ok(" ")),
-        ("()z", Ok("z")),
-        ("(x)", Ok("")),
-        ("(())", Ok("")),
-        ("((()))", Ok("")),
-        ("(x(x(x)x)x)", Ok("")),
-        ("( x ( x ( x ) x ) x )", Ok("")),
-        (r"(\)", Err(TOO_SHORT)),
-        (r"(\()", Ok("")),
-        (r"(\))", Ok("")),
-        (r"(\\)", Ok("")),
-        ("(()())", Ok("")),
-        ("( x ( x ) x ( x ) x )", Ok("")),
-    ];
+mod tests {
+    use super::{
+        comment_2822, nanosecond, nanosecond_fixed, short_or_long_month0, short_or_long_weekday,
+        timezone_offset_2822,
+    };
+    use crate::format::{INVALID, TOO_SHORT};
+    use crate::Weekday;
 
-    for (test_in, expected) in testdata.iter() {
-        let actual = comment_2822(test_in).map(|(s, _)| s);
-        assert_eq!(
-            *expected, actual,
-            "{:?} expected to produce {:?}, but produced {:?}.",
-            test_in, expected, actual
-        );
+    #[test]
+    fn test_rfc2822_comments() {
+        let testdata = [
+            ("", Err(TOO_SHORT)),
+            (" ", Err(TOO_SHORT)),
+            ("x", Err(INVALID)),
+            ("(", Err(TOO_SHORT)),
+            ("()", Ok("")),
+            (" \r\n\t()", Ok("")),
+            ("() ", Ok(" ")),
+            ("()z", Ok("z")),
+            ("(x)", Ok("")),
+            ("(())", Ok("")),
+            ("((()))", Ok("")),
+            ("(x(x(x)x)x)", Ok("")),
+            ("( x ( x ( x ) x ) x )", Ok("")),
+            (r"(\)", Err(TOO_SHORT)),
+            (r"(\()", Ok("")),
+            (r"(\))", Ok("")),
+            (r"(\\)", Ok("")),
+            ("(()())", Ok("")),
+            ("( x ( x ) x ( x ) x )", Ok("")),
+        ];
+
+        for (test_in, expected) in testdata.iter() {
+            let actual = comment_2822(test_in).map(|(s, _)| s);
+            assert_eq!(
+                *expected, actual,
+                "{:?} expected to produce {:?}, but produced {:?}.",
+                test_in, expected, actual
+            );
+        }
+    }
+
+    #[test]
+    fn test_timezone_offset_2822() {
+        assert_eq!(timezone_offset_2822("cSt").unwrap(), ("", Some(-21600)));
+        assert_eq!(timezone_offset_2822("pSt").unwrap(), ("", Some(-28800)));
+        assert_eq!(timezone_offset_2822("mSt").unwrap(), ("", Some(-25200)));
+        assert_eq!(timezone_offset_2822("-1551").unwrap(), ("", Some(-57060)));
+        assert_eq!(timezone_offset_2822("Gp").unwrap(), ("", None));
+    }
+
+    #[test]
+    fn test_short_or_long_month0() {
+        assert_eq!(short_or_long_month0("JUn").unwrap(), ("", 5));
+        assert_eq!(short_or_long_month0("mAy").unwrap(), ("", 4));
+        assert_eq!(short_or_long_month0("AuG").unwrap(), ("", 7));
+        assert_eq!(short_or_long_month0("Aprâ").unwrap(), ("â", 3));
+        assert_eq!(short_or_long_month0("JUl").unwrap(), ("", 6));
+        assert_eq!(short_or_long_month0("mAr").unwrap(), ("", 2));
+        assert_eq!(short_or_long_month0("Jan").unwrap(), ("", 0));
+    }
+
+    #[test]
+    fn test_short_or_long_weekday() {
+        assert_eq!(short_or_long_weekday("sAtu").unwrap(), ("u", Weekday::Sat));
+        assert_eq!(short_or_long_weekday("thu").unwrap(), ("", Weekday::Thu));
+    }
+
+    #[test]
+    fn test_nanosecond_fixed() {
+        assert_eq!(nanosecond_fixed("", 0usize).unwrap(), ("", 0));
+        assert!(nanosecond_fixed("", 1usize).is_err());
+    }
+
+    #[test]
+    fn test_nanosecond() {
+        assert_eq!(nanosecond("2Ù").unwrap(), ("Ù", 200000000));
+        assert_eq!(nanosecond("8").unwrap(), ("", 800000000));
     }
 }

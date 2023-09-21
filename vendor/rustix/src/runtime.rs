@@ -1,9 +1,12 @@
-//! Low-level implementation details for libc-like runtime libraries such as
-//! [origin].
+//! Experimental low-level implementation details for libc-like runtime
+//! libraries such as [Origin].
 //!
 //! Do not use the functions in this module unless you've read all of their
-//! code, *and* you know all the relevant internal implementation details of
-//! any libc in the process they'll be used.
+//! code. They don't always behave the same way as functions with similar names
+//! in `libc`. Sometimes information about the differences is included in the
+//! Linux documentation under "C library/kernel differences" sections. And, if
+//! there is a libc in the process, these functions may have surprising
+//! interactions with it.
 //!
 //! These functions are for implementing thread-local storage (TLS), managing
 //! threads, loaded libraries, and other process-wide resources. Most of
@@ -14,7 +17,7 @@
 //! The API for these functions is not stable, and this module is
 //! `doc(hidden)`.
 //!
-//! [origin]: https://github.com/sunfishcode/mustang/tree/main/origin
+//! [Origin]: https://github.com/sunfishcode/origin#readme
 //!
 //! # Safety
 //!
@@ -34,12 +37,13 @@ use crate::io;
 #[cfg(linux_raw)]
 use crate::pid::Pid;
 #[cfg(linux_raw)]
-use crate::signal::Signal;
-#[cfg(linux_raw)]
 #[cfg(feature = "fs")]
 use backend::fd::AsFd;
 #[cfg(linux_raw)]
 use core::ffi::c_void;
+
+#[cfg(linux_raw)]
+pub use crate::signal::Signal;
 
 /// `sigaction`
 #[cfg(linux_raw)]
@@ -142,7 +146,7 @@ pub unsafe fn exit_thread(status: i32) -> ! {
 ///
 /// This is equivalent to `_exit` and `_Exit` in libc.
 ///
-/// This does not all any `__cxa_atexit`, `atexit`, or any other destructors.
+/// This does not call any `__cxa_atexit`, `atexit`, or any other destructors.
 /// Most programs should use [`std::process::exit`] instead of calling this
 /// directly.
 ///
@@ -161,23 +165,68 @@ pub fn exit_group(status: i32) -> ! {
     backend::runtime::syscalls::exit_group(status)
 }
 
+/// `EXIT_SUCCESS` for use with [`exit_group`].
+///
+/// # References
+///  - [POSIX]
+///  - [Linux]
+///
+/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/stdlib.h.html
+/// [Linux]: https://man7.org/linux/man-pages/man3/exit.3.html
+pub const EXIT_SUCCESS: i32 = backend::c::EXIT_SUCCESS;
+
+/// `EXIT_FAILURE` for use with [`exit_group`].
+///
+/// # References
+///  - [POSIX]
+///  - [Linux]
+///
+/// [POSIX]: https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/stdlib.h.html
+/// [Linux]: https://man7.org/linux/man-pages/man3/exit.3.html
+pub const EXIT_FAILURE: i32 = backend::c::EXIT_FAILURE;
+
 /// Return fields from the main executable segment headers ("phdrs") relevant
 /// to initializing TLS provided to the program at startup.
+///
+/// `addr` will always be non-null, even when the TLS data is absent, ao that
+/// the `addr` and `file_size` parameters are suitable for creating a slice
+/// with `slice::from_raw_parts`.
 #[inline]
 pub fn startup_tls_info() -> StartupTlsInfo {
     backend::runtime::tls::startup_tls_info()
 }
 
-/// `(getauxval(AT_PHDR), getauxval(AT_PHNUM))`—Returns the address and
-/// number of ELF segment headers for the main executable.
+/// `(getauxval(AT_PHDR), getauxval(AT_PHENT), getauxval(AT_PHNUM))`—Returns
+/// the address, ELF segment header size, and number of ELF segment headers for
+/// the main executable.
 ///
 /// # References
 ///  - [Linux]
 ///
 /// [Linux]: https://man7.org/linux/man-pages/man3/getauxval.3.html
 #[inline]
-pub fn exe_phdrs() -> (*const c_void, usize) {
+pub fn exe_phdrs() -> (*const c_void, usize, usize) {
     backend::param::auxv::exe_phdrs()
+}
+
+/// `getauxval(AT_ENTRY)`—Returns the address of the program entrypoint.
+///
+/// Most code interested in the program entrypoint address should instead use a
+/// symbol reference to `_start`. That will be properly PC-relative or
+/// relocated if needed, and will come with appropriate pointer type and
+/// pointer provenance.
+///
+/// This function is intended only for use in code that implements those
+/// relocations, to compute the ASLR offset. It has type `usize`, so it doesn't
+/// carry any provenance, and it shouldn't be used to dereference memory.
+///
+/// # References
+///  - [Linux]
+///
+/// [Linux]: https://man7.org/linux/man-pages/man3/getauxval.3.html
+#[inline]
+pub fn entry() -> usize {
+    backend::param::auxv::entry()
 }
 
 #[cfg(linux_raw)]
@@ -224,13 +273,19 @@ pub use backend::runtime::tls::StartupTlsInfo;
 ///    that could cause undefined behavior. The extent to which this also
 ///    applies to Rust functions is unclear at this time.
 ///
+///  - And more.
+///
 /// # Safety
 ///
 /// The child must avoid accessing any memory shared with the parent in a
 /// way that invokes undefined behavior. It must avoid accessing any threading
 /// runtime functions in a way that invokes undefined behavior. And it must
 /// avoid invoking any undefined behavior through any function that is not
-/// guaranteed to be async-signal-safe.
+/// guaranteed to be async-signal-safe. But, what does async-signal-safe even
+/// mean in a Rust program? This documentation does not have all the answers.
+///
+/// So you're on your own. And on top of all the troubles with `fork` in
+/// general, this wrapper implementation is highly experimental.
 ///
 /// # References
 ///  - [POSIX]

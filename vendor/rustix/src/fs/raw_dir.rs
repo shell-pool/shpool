@@ -136,7 +136,7 @@ impl<'buf, Fd: AsFd> RawDir<'buf, Fd> {
     }
 }
 
-/// A raw directory entry, similar to `std::fs::DirEntry`.
+/// A raw directory entry, similar to [`std::fs::DirEntry`].
 ///
 /// Unlike the std version, this may represent the `.` or `..` entries.
 pub struct RawDirEntry<'a> {
@@ -193,10 +193,10 @@ impl<'buf, Fd: AsFd> RawDir<'buf, Fd> {
     /// with GAT support once one becomes available.
     #[allow(unsafe_code)]
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Option<io::Result<RawDirEntry>> {
+    pub fn next(&mut self) -> Option<io::Result<RawDirEntry<'_>>> {
         if self.is_buffer_empty() {
             match getdents_uninit(self.fd.as_fd(), self.buf) {
-                Ok(bytes_read) if bytes_read == 0 => return None,
+                Ok(0) => return None,
                 Ok(bytes_read) => {
                     self.initialized = bytes_read;
                     self.offset = 0;

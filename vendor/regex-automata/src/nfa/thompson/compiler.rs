@@ -30,7 +30,7 @@ pub struct Config {
     reverse: Option<bool>,
     nfa_size_limit: Option<Option<usize>>,
     shrink: Option<bool>,
-    captures: Option<bool>,
+    which_captures: Option<WhichCaptures>,
     look_matcher: Option<LookMatcher>,
     #[cfg(test)]
     unanchored_prefix: Option<bool>,
@@ -178,12 +178,15 @@ impl Config {
     /// ```
     /// use regex_automata::{
     ///     dfa::{self, Automaton},
-    ///     nfa::thompson::NFA,
+    ///     nfa::thompson::{NFA, WhichCaptures},
     ///     HalfMatch, Input,
     /// };
     ///
     /// let dfa = dfa::dense::Builder::new()
-    ///     .thompson(NFA::config().captures(false).reverse(true))
+    ///     .thompson(NFA::config()
+    ///         .which_captures(WhichCaptures::None)
+    ///         .reverse(true)
+    ///     )
     ///     .build("baz[0-9]+")?;
     /// let expected = Some(HalfMatch::must(0, 3));
     /// assert_eq!(
@@ -277,10 +280,12 @@ impl Config {
     ///
     /// ```
     /// # if cfg!(miri) { return Ok(()); } // miri takes too long
-    /// use regex_automata::nfa::thompson::NFA;
+    /// use regex_automata::nfa::thompson::{NFA, WhichCaptures};
     ///
     /// // Currently we have to disable captures when enabling reverse NFA.
-    /// let config = NFA::config().captures(false).reverse(true);
+    /// let config = NFA::config()
+    ///     .which_captures(WhichCaptures::None)
+    ///     .reverse(true);
     /// let not_shrunk = NFA::compiler()
     ///     .configure(config.clone().shrink(false))
     ///     .build(r"\w")?;
@@ -311,21 +316,99 @@ impl Config {
     /// # Example
     ///
     /// This example demonstrates that some regex engines, like the Pike VM,
-    /// require capturing groups to be present in the NFA. Building a Pike VM
-    /// with an NFA without capturing groups will result in an error.
+    /// require capturing states to be present in the NFA to report match
+    /// offsets.
+    ///
+    /// (Note that since this method is deprecated, the example below uses
+    /// [`Config::which_captures`] to disable capture states.)
     ///
     /// ```
-    /// use regex_automata::nfa::thompson::{pikevm::PikeVM, NFA};
+    /// use regex_automata::nfa::thompson::{
+    ///     pikevm::PikeVM,
+    ///     NFA,
+    ///     WhichCaptures,
+    /// };
     ///
-    /// let nfa = NFA::compiler()
-    ///     .configure(NFA::config().captures(false))
+    /// let re = PikeVM::builder()
+    ///     .thompson(NFA::config().which_captures(WhichCaptures::None))
     ///     .build(r"[a-z]+")?;
-    /// assert!(PikeVM::new_from_nfa(nfa).is_err());
+    /// let mut cache = re.create_cache();
+    ///
+    /// assert!(re.is_match(&mut cache, "abc"));
+    /// assert_eq!(None, re.find(&mut cache, "abc"));
     ///
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    pub fn captures(mut self, yes: bool) -> Config {
-        self.captures = Some(yes);
+    #[deprecated(since = "0.3.5", note = "use which_captures instead")]
+    pub fn captures(self, yes: bool) -> Config {
+        self.which_captures(if yes {
+            WhichCaptures::All
+        } else {
+            WhichCaptures::None
+        })
+    }
+
+    /// Configures what kinds of capture groups are compiled into
+    /// [`State::Capture`](crate::nfa::thompson::State::Capture) states in a
+    /// Thompson NFA.
+    ///
+    /// Currently, using any option except for [`WhichCaptures::None`] requires
+    /// disabling the [`reverse`](Config::reverse) setting. If both are
+    /// enabled, then the compiler will return an error. It is expected that
+    /// this limitation will be lifted in the future.
+    ///
+    /// This is set to [`WhichCaptures::All`] by default. Callers may wish to
+    /// use [`WhichCaptures::Implicit`] in cases where one wants avoid the
+    /// overhead of capture states for explicit groups. Usually this occurs
+    /// when one wants to use the `PikeVM` only for determining the overall
+    /// match. Otherwise, the `PikeVM` could use much more memory than is
+    /// necessary.
+    ///
+    /// # Example
+    ///
+    /// This example demonstrates that some regex engines, like the Pike VM,
+    /// require capturing states to be present in the NFA to report match
+    /// offsets.
+    ///
+    /// ```
+    /// use regex_automata::nfa::thompson::{
+    ///     pikevm::PikeVM,
+    ///     NFA,
+    ///     WhichCaptures,
+    /// };
+    ///
+    /// let re = PikeVM::builder()
+    ///     .thompson(NFA::config().which_captures(WhichCaptures::None))
+    ///     .build(r"[a-z]+")?;
+    /// let mut cache = re.create_cache();
+    ///
+    /// assert!(re.is_match(&mut cache, "abc"));
+    /// assert_eq!(None, re.find(&mut cache, "abc"));
+    ///
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    ///
+    /// The same applies to the bounded backtracker:
+    ///
+    /// ```
+    /// use regex_automata::nfa::thompson::{
+    ///     backtrack::BoundedBacktracker,
+    ///     NFA,
+    ///     WhichCaptures,
+    /// };
+    ///
+    /// let re = BoundedBacktracker::builder()
+    ///     .thompson(NFA::config().which_captures(WhichCaptures::None))
+    ///     .build(r"[a-z]+")?;
+    /// let mut cache = re.create_cache();
+    ///
+    /// assert!(re.try_is_match(&mut cache, "abc")?);
+    /// assert_eq!(None, re.try_find(&mut cache, "abc")?);
+    ///
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn which_captures(mut self, which_captures: WhichCaptures) -> Config {
+        self.which_captures = Some(which_captures);
         self
     }
 
@@ -405,8 +488,14 @@ impl Config {
     }
 
     /// Return whether NFA compilation is configured to produce capture states.
+    #[deprecated(since = "0.3.5", note = "use get_which_captures instead")]
     pub fn get_captures(&self) -> bool {
-        self.captures.unwrap_or(true)
+        self.get_which_captures().is_any()
+    }
+
+    /// Return what kinds of capture states will be compiled into an NFA.
+    pub fn get_which_captures(&self) -> WhichCaptures {
+        self.which_captures.unwrap_or(WhichCaptures::All)
     }
 
     /// Return the look-around matcher for this NFA.
@@ -439,11 +528,62 @@ impl Config {
             reverse: o.reverse.or(self.reverse),
             nfa_size_limit: o.nfa_size_limit.or(self.nfa_size_limit),
             shrink: o.shrink.or(self.shrink),
-            captures: o.captures.or(self.captures),
+            which_captures: o.which_captures.or(self.which_captures),
             look_matcher: o.look_matcher.or_else(|| self.look_matcher.clone()),
             #[cfg(test)]
             unanchored_prefix: o.unanchored_prefix.or(self.unanchored_prefix),
         }
+    }
+}
+
+/// A configuration indicating which kinds of
+/// [`State::Capture`](crate::nfa::thompson::State::Capture) states to include.
+///
+/// This configuration can be used with [`Config::which_captures`] to control
+/// which capture states are compiled into a Thompson NFA.
+///
+/// The default configuration is [`WhichCaptures::All`].
+#[derive(Clone, Copy, Debug)]
+pub enum WhichCaptures {
+    /// All capture states, including those corresponding to both implicit and
+    /// explicit capture groups, are included in the Thompson NFA.
+    All,
+    /// Only capture states corresponding to implicit capture groups are
+    /// included. Implicit capture groups appear in every pattern implicitly
+    /// and correspond to the overall match of a pattern.
+    ///
+    /// This is useful when one only cares about the overall match of a
+    /// pattern. By excluding capture states from explicit capture groups,
+    /// one might be able to reduce the memory usage of a multi-pattern regex
+    /// substantially if it was otherwise written to have many explicit capture
+    /// groups.
+    Implicit,
+    /// No capture states are compiled into the Thompson NFA.
+    ///
+    /// This is useful when capture states are either not needed (for example,
+    /// if one is only trying to build a DFA) or if they aren't supported (for
+    /// example, a reverse NFA).
+    None,
+}
+
+impl Default for WhichCaptures {
+    fn default() -> WhichCaptures {
+        WhichCaptures::All
+    }
+}
+
+impl WhichCaptures {
+    /// Returns true if this configuration indicates that no capture states
+    /// should be produced in an NFA.
+    pub fn is_none(&self) -> bool {
+        matches!(*self, WhichCaptures::None)
+    }
+
+    /// Returns true if this configuration indicates that some capture states
+    /// should be added to an NFA. Note that this might only include capture
+    /// states for implicit capture groups.
+    pub fn is_any(&self) -> bool {
+        !self.is_none()
     }
 }
 
@@ -800,7 +940,9 @@ impl Compiler {
         if exprs.len() > PatternID::LIMIT {
             return Err(BuildError::too_many_patterns(exprs.len()));
         }
-        if self.config.get_reverse() && self.config.get_captures() {
+        if self.config.get_reverse()
+            && self.config.get_which_captures().is_any()
+        {
             return Err(BuildError::unsupported_captures());
         }
 
@@ -978,8 +1120,13 @@ impl Compiler {
         name: Option<&str>,
         expr: &Hir,
     ) -> Result<ThompsonRef, BuildError> {
-        if !self.config.get_captures() {
-            return self.c(expr);
+        match self.config.get_which_captures() {
+            // No capture states means we always skip them.
+            WhichCaptures::None => return self.c(expr),
+            // Implicit captures states means we only add when index==0 since
+            // index==0 implies the group is implicit.
+            WhichCaptures::Implicit if index > 0 => return self.c(expr),
+            _ => {}
         }
 
         let start = self.add_capture_start(index, name)?;
@@ -1319,7 +1466,7 @@ impl Compiler {
         // compare and contrast performance of the Pike VM when the code below
         // is active vs the code above. Here's an example to try:
         //
-        //   regex-cli find nfa thompson pikevm -b @$smallishru '(?m)^\w{20}'
+        //   regex-cli find match pikevm -b -p '(?m)^\w{20}' -y '@$smallishru'
         //
         // With Unicode classes generated below, this search takes about 45s on
         // my machine. But with the compressed version above, the search takes
@@ -1338,7 +1485,7 @@ impl Compiler {
                     .map(|rng| self.c_range(rng.start, rng.end));
                 self.c_concat(it)
             });
-        self.c_alt(it)
+        self.c_alt_iter(it)
         */
     }
 
@@ -1725,12 +1872,18 @@ mod tests {
 
     use crate::{
         nfa::thompson::{SparseTransitions, State, Transition, NFA},
-        util::primitives::{PatternID, StateID},
+        util::primitives::{PatternID, SmallIndex, StateID},
     };
+
+    use super::*;
 
     fn build(pattern: &str) -> NFA {
         NFA::compiler()
-            .configure(NFA::config().captures(false).unanchored_prefix(false))
+            .configure(
+                NFA::config()
+                    .which_captures(WhichCaptures::None)
+                    .unanchored_prefix(false),
+            )
             .build(pattern)
             .unwrap()
     }
@@ -1781,6 +1934,15 @@ mod tests {
         }
     }
 
+    fn s_cap(next: usize, pattern: usize, index: usize, slot: usize) -> State {
+        State::Capture {
+            next: sid(next),
+            pattern_id: pid(pattern),
+            group_index: SmallIndex::new(index).unwrap(),
+            slot: SmallIndex::new(slot).unwrap(),
+        }
+    }
+
     fn s_fail() -> State {
         State::Fail
     }
@@ -1794,7 +1956,7 @@ mod tests {
     #[test]
     fn compile_unanchored_prefix() {
         let nfa = NFA::compiler()
-            .configure(NFA::config().captures(false))
+            .configure(NFA::config().which_captures(WhichCaptures::None))
             .build(r"a")
             .unwrap();
         assert_eq!(
@@ -1827,7 +1989,11 @@ mod tests {
 
         // Check that non-UTF-8 literals work.
         let nfa = NFA::compiler()
-            .configure(NFA::config().captures(false).unanchored_prefix(false))
+            .configure(
+                NFA::config()
+                    .which_captures(WhichCaptures::None)
+                    .unanchored_prefix(false),
+            )
             .syntax(crate::util::syntax::Config::new().utf8(false))
             .build(r"(?-u)\xFF")
             .unwrap();
@@ -1937,7 +2103,7 @@ mod tests {
         let nfa = NFA::compiler()
             .configure(
                 NFA::config()
-                    .captures(false)
+                    .which_captures(WhichCaptures::None)
                     .reverse(true)
                     .shrink(false)
                     .unanchored_prefix(false),
@@ -1965,7 +2131,11 @@ mod tests {
     #[test]
     fn compile_many_start_pattern() {
         let nfa = NFA::compiler()
-            .configure(NFA::config().captures(false).unanchored_prefix(false))
+            .configure(
+                NFA::config()
+                    .which_captures(WhichCaptures::None)
+                    .unanchored_prefix(false),
+            )
             .build_many(&["a", "b"])
             .unwrap();
         assert_eq!(
@@ -1993,7 +2163,9 @@ mod tests {
         use regex_syntax::hir::{Class, ClassBytes, Hir};
 
         let hir = Hir::class(Class::Bytes(ClassBytes::new(vec![])));
-        let config = NFA::config().captures(false).unanchored_prefix(false);
+        let config = NFA::config()
+            .which_captures(WhichCaptures::None)
+            .unanchored_prefix(false);
         let nfa =
             NFA::compiler().configure(config).build_from_hir(&hir).unwrap();
         assert_eq!(nfa.states(), &[s_fail(), s_match(0)]);
@@ -2005,9 +2177,81 @@ mod tests {
         use regex_syntax::hir::{Class, ClassUnicode, Hir};
 
         let hir = Hir::class(Class::Unicode(ClassUnicode::new(vec![])));
-        let config = NFA::config().captures(false).unanchored_prefix(false);
+        let config = NFA::config()
+            .which_captures(WhichCaptures::None)
+            .unanchored_prefix(false);
         let nfa =
             NFA::compiler().configure(config).build_from_hir(&hir).unwrap();
         assert_eq!(nfa.states(), &[s_fail(), s_match(0)]);
+    }
+
+    #[test]
+    fn compile_captures_all() {
+        let nfa = NFA::compiler()
+            .configure(
+                NFA::config()
+                    .unanchored_prefix(false)
+                    .which_captures(WhichCaptures::All),
+            )
+            .build("a(b)c")
+            .unwrap();
+        assert_eq!(
+            nfa.states(),
+            &[
+                s_cap(1, 0, 0, 0),
+                s_byte(b'a', 2),
+                s_cap(3, 0, 1, 2),
+                s_byte(b'b', 4),
+                s_cap(5, 0, 1, 3),
+                s_byte(b'c', 6),
+                s_cap(7, 0, 0, 1),
+                s_match(0)
+            ]
+        );
+        let ginfo = nfa.group_info();
+        assert_eq!(2, ginfo.all_group_len());
+    }
+
+    #[test]
+    fn compile_captures_implicit() {
+        let nfa = NFA::compiler()
+            .configure(
+                NFA::config()
+                    .unanchored_prefix(false)
+                    .which_captures(WhichCaptures::Implicit),
+            )
+            .build("a(b)c")
+            .unwrap();
+        assert_eq!(
+            nfa.states(),
+            &[
+                s_cap(1, 0, 0, 0),
+                s_byte(b'a', 2),
+                s_byte(b'b', 3),
+                s_byte(b'c', 4),
+                s_cap(5, 0, 0, 1),
+                s_match(0)
+            ]
+        );
+        let ginfo = nfa.group_info();
+        assert_eq!(1, ginfo.all_group_len());
+    }
+
+    #[test]
+    fn compile_captures_none() {
+        let nfa = NFA::compiler()
+            .configure(
+                NFA::config()
+                    .unanchored_prefix(false)
+                    .which_captures(WhichCaptures::None),
+            )
+            .build("a(b)c")
+            .unwrap();
+        assert_eq!(
+            nfa.states(),
+            &[s_byte(b'a', 1), s_byte(b'b', 2), s_byte(b'c', 3), s_match(0)]
+        );
+        let ginfo = nfa.group_info();
+        assert_eq!(0, ginfo.all_group_len());
     }
 }

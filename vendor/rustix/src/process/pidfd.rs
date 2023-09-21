@@ -11,11 +11,14 @@ bitflags::bitflags! {
     pub struct PidfdFlags: backend::c::c_uint {
         /// `PIDFD_NONBLOCK`.
         const NONBLOCK = backend::c::PIDFD_NONBLOCK;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
-/// `syscall(SYS_pidfd_open, pid, flags)`—Creates a file descriptor for
-/// a process.
+/// `syscall(SYS_pidfd_open, pid, flags)`—Creates a file descriptor for a
+/// process.
 ///
 /// # References
 ///  - [Linux]

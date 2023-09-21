@@ -1,43 +1,6 @@
-[package]
-name = "shpool"
-version = "0.2.5"
-edition = "2021"
-authors = ["Ethan Pailes <pailes@google.com>", "Cloudtop Connectivity Team"]
-description = '''
-shpool is a mechanism for establishing lightweight persistant shell
-sessions to gracefully handle network disconnects.
-'''
+[workspace]
 
-[features]
-test_hooks = [] # for internal testing only, don't enable this feature
-
-[dependencies]
-clap = { version = "3", features = ["derive"] } # cli parsing
-anyhow = "1" # dynamic, unstructured errors
-chrono = "0.4" # getting current time and formatting it
-serde = "1" # config parsing, connection header formatting
-serde_derive = "1" # config parsing, connection header formatting
-toml = "0.5" # config parsing
-byteorder = "1" # endianness
-signal-hook = "0.3" # signal handling
-nix = { version = "0.25", features = ["poll", "ioctl"] } # rusty wrapper for unix apis
-pty = { git = "https://github.com/ethanpailes/pty-rs", version = "0.2.6" } # spawning shells in ptys
-lazy_static = "1" # globals
-crossbeam-channel = "0.5" # channels
-libc = "0.2" # basic libc types
-log = "0.4" # logging facade (not used directly, but required if we have tracing-log enabled)
-tracing = "0.1" # logging and performance monitoring facade
-bincode = "1" # serialization for the control protocol
-vt100 = { git = "https://github.com/ethanpailes/vt100-rust", branch = "main" } # terminal emulation for the scrollback buffer
-
-[dependencies.tracing-subscriber]
-version = "0.3"
-default-features = false
-features = ["std", "fmt", "tracing-log", "smallvec"]
-
-[dev-dependencies]
-tempfile = "3" # keeping tests hermetic
-regex = "1" # test assertions
-serde_json = "1" # json parsing
-rand = "0.8" # generating tmp dirs
-ntest = "0.9" # test timeouts
+members = [
+    "libshpool",
+    "shpool",
+]

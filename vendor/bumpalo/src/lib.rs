@@ -1,7 +1,7 @@
 #![doc = include_str!("../README.md")]
 #![deny(missing_debug_implementations)]
 #![deny(missing_docs)]
-#![no_std]
+#![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(feature = "allocator_api", feature(allocator_api))]
 
 #[doc(hidden)]
@@ -1430,7 +1430,7 @@ impl Bump {
             let aligned_ptr = ptr.wrapping_sub(rem);
 
             if aligned_ptr >= start {
-                let aligned_ptr = NonNull::new_unchecked(aligned_ptr as *mut u8);
+                let aligned_ptr = NonNull::new_unchecked(aligned_ptr);
                 footer.ptr.set(aligned_ptr);
                 Some(aligned_ptr)
             } else {
@@ -1455,7 +1455,7 @@ impl Bump {
         let current_footer = self.current_chunk_footer.get();
         let current_footer = unsafe { current_footer.as_ref() };
 
-        current_footer as *const _ as usize - current_footer.data.as_ptr() as usize
+        current_footer.ptr.get().as_ptr() as usize - current_footer.data.as_ptr() as usize
     }
 
     /// Slow path allocation for when we need to allocate a new chunk from the
@@ -1529,7 +1529,7 @@ impl Bump {
                 ptr,
                 new_footer
             );
-            let ptr = NonNull::new_unchecked(ptr as *mut u8);
+            let ptr = NonNull::new_unchecked(ptr);
             new_footer.ptr.set(ptr);
 
             // Return a pointer to the freshly allocated region in this chunk.

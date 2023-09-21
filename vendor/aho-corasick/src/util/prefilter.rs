@@ -162,6 +162,7 @@ impl Builder {
     /// builder before attempting to construct the prefilter.
     pub(crate) fn build(&self) -> Option<Prefilter> {
         if !self.enabled {
+            debug!("prefilter not enabled, skipping");
             return None;
         }
         // If we only have one pattern, then deferring to memmem is always
@@ -173,15 +174,55 @@ impl Builder {
         // them.
         if !self.ascii_case_insensitive {
             if let Some(pre) = self.memmem.build() {
+                debug!("using memmem prefilter");
                 return Some(pre);
             }
         }
+        let (packed, patlen, minlen) = if self.ascii_case_insensitive {
+            (None, usize::MAX, 0)
+        } else {
+            let patlen = self.packed.as_ref().map_or(usize::MAX, |p| p.len());
+            let minlen = self.packed.as_ref().map_or(0, |p| p.minimum_len());
+            let packed =
+                self.packed.as_ref().and_then(|b| b.build()).map(|s| {
+                    let memory_usage = s.memory_usage();
+                    debug!(
+                        "built packed prefilter (len: {}, \
+                         minimum pattern len: {}, memory usage: {}) \
+                         for consideration",
+                        patlen, minlen, memory_usage,
+                    );
+                    Prefilter { finder: Arc::new(Packed(s)), memory_usage }
+                });
+            (packed, patlen, minlen)
+        };
         match (self.start_bytes.build(), self.rare_bytes.build()) {
             // If we could build both start and rare prefilters, then there are
             // a few cases in which we'd want to use the start-byte prefilter
             // over the rare-byte prefilter, since the former has lower
             // overhead.
             (prestart @ Some(_), prerare @ Some(_)) => {
+                debug!(
+                    "both start (len={}, rank={}) and \
+                     rare (len={}, rank={}) byte prefilters \
+                     are available",
+                    self.start_bytes.count,
+                    self.start_bytes.rank_sum,
+                    self.rare_bytes.count,
+                    self.rare_bytes.rank_sum,
+                );
+                if patlen <= 16
+                    && minlen >= 2
+                    && self.start_bytes.count >= 3
+                    && self.rare_bytes.count >= 3
+                {
+                    debug!(
+                        "start and rare byte prefilters available, but \
+                             they're probably slower than packed so using \
+                             packed"
+                    );
+                    return packed;
+                }
                 // If the start-byte prefilter can scan for a smaller number
                 // of bytes than the rare-byte prefilter, then it's probably
                 // faster.
@@ -196,20 +237,69 @@ impl Builder {
                 // prefer the start-byte prefilter when we can.
                 let has_rarer_bytes =
                     self.start_bytes.rank_sum <= self.rare_bytes.rank_sum + 50;
-                if has_fewer_bytes || has_rarer_bytes {
+                if has_fewer_bytes {
+                    debug!(
+                        "using start byte prefilter because it has fewer
+                         bytes to search for than the rare byte prefilter",
+                    );
+                    prestart
+                } else if has_rarer_bytes {
+                    debug!(
+                        "using start byte prefilter because its byte \
+                         frequency rank was determined to be \
+                         \"good enough\" relative to the rare byte prefilter \
+                         byte frequency rank",
+                    );
                     prestart
                 } else {
+                    debug!("using rare byte prefilter");
                     prerare
                 }
             }
-            (prestart @ Some(_), None) => prestart,
-            (None, prerare @ Some(_)) => prerare,
-            (None, None) if self.ascii_case_insensitive => None,
+            (prestart @ Some(_), None) => {
+                if patlen <= 16 && minlen >= 2 && self.start_bytes.count >= 3 {
+                    debug!(
+                        "start byte prefilter available, but \
+                         it's probably slower than packed so using \
+                         packed"
+                    );
+                    return packed;
+                }
+                debug!(
+                    "have start byte prefilter but not rare byte prefilter, \
+                     so using start byte prefilter",
+                );
+                prestart
+            }
+            (None, prerare @ Some(_)) => {
+                if patlen <= 16 && minlen >= 2 && self.rare_bytes.count >= 3 {
+                    debug!(
+                        "rare byte prefilter available, but \
+                         it's probably slower than packed so using \
+                         packed"
+                    );
+                    return packed;
+                }
+                debug!(
+                    "have rare byte prefilter but not start byte prefilter, \
+                     so using rare byte prefilter",
+                );
+                prerare
+            }
+            (None, None) if self.ascii_case_insensitive => {
+                debug!(
+                    "no start or rare byte prefilter and ASCII case \
+                     insensitivity was enabled, so skipping prefilter",
+                );
+                None
+            }
             (None, None) => {
-                self.packed.as_ref().and_then(|b| b.build()).map(|s| {
-                    let memory_usage = s.memory_usage();
-                    Prefilter { finder: Arc::new(Packed(s)), memory_usage }
-                })
+                if packed.is_some() {
+                    debug!("falling back to packed prefilter");
+                } else {
+                    debug!("no prefilter available");
+                }
+                packed
             }
         }
     }

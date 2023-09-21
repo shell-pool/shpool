@@ -2,29 +2,19 @@ use std::env::var;
 use std::io::Write;
 
 /// The directory for inline asm.
-const ASM_PATH: &str = "src/backend/linux_raw/arch/asm";
+const ASM_PATH: &str = "src/backend/linux_raw/arch";
 
 fn main() {
     // Don't rerun this on changes other than build.rs, as we only depend on
     // the rustc version.
     println!("cargo:rerun-if-changed=build.rs");
 
-    use_feature_or_nothing("rustc_attrs");
-
-    // Features only used in no-std configurations.
-    #[cfg(not(feature = "std"))]
-    {
-        use_feature_or_nothing("core_c_str");
-        use_feature_or_nothing("core_ffi_c");
-        use_feature_or_nothing("alloc_c_string");
-        use_feature_or_nothing("alloc_ffi");
-    }
-
     // Gather target information.
     let arch = var("CARGO_CFG_TARGET_ARCH").unwrap();
+    let env = var("CARGO_CFG_TARGET_ENV").unwrap();
     let inline_asm_name = format!("{}/{}.rs", ASM_PATH, arch);
     let inline_asm_name_present = std::fs::metadata(inline_asm_name).is_ok();
-    let target_os = var("CARGO_CFG_TARGET_OS").unwrap();
+    let os = var("CARGO_CFG_TARGET_OS").unwrap();
     let pointer_width = var("CARGO_CFG_TARGET_POINTER_WIDTH").unwrap();
     let endian = var("CARGO_CFG_TARGET_ENDIAN").unwrap();
 
@@ -32,8 +22,8 @@ fn main() {
     let is_x32 = arch == "x86_64" && pointer_width == "32";
     let is_arm64_ilp32 = arch == "aarch64" && pointer_width == "32";
     let is_powerpc64be = arch == "powerpc64" && endian == "big";
-    let is_mipseb = arch == "mips" && endian == "big";
-    let is_mips64eb = arch == "mips64" && endian == "big";
+    let is_mipseb = (arch == "mips" || arch == "mips32r6") && endian == "big";
+    let is_mips64eb = arch.contains("mips64") && endian == "big";
     let is_unsupported_abi = is_x32 || is_arm64_ilp32 || is_powerpc64be || is_mipseb || is_mips64eb;
 
     // Check for `--features=use-libc`. This allows crate users to enable the
@@ -44,6 +34,16 @@ fn main() {
     // enable the libc backend even if rustix is depended on transitively.
     let cfg_use_libc = var("CARGO_CFG_RUSTIX_USE_LIBC").is_ok();
 
+    // Check for `--features=rustc-dep-of-std`.
+    let rustc_dep_of_std = var("CARGO_FEATURE_RUSTC_DEP_OF_STD").is_ok();
+
+    // Check for eg. `RUSTFLAGS=--cfg=rustix_use_experimental_features`. This
+    // is a rustc flag rather than a cargo feature flag because it's
+    // experimental and not something we want accidentally enabled via
+    // `--all-features`.
+    let rustix_use_experimental_features =
+        var("CARGO_CFG_RUSTIX_USE_EXPERIMENTAL_FEATURES").is_ok();
+
     // Check for eg. `RUSTFLAGS=--cfg=rustix_use_experimental_asm`. This is a
     // rustc flag rather than a cargo feature flag because it's experimental
     // and not something we want accidentally enabled via `--all-features`.
@@ -53,27 +53,55 @@ fn main() {
     // libc FFI calls, so if we're running under miri, use the libc backend.
     let miri = var("CARGO_CFG_MIRI").is_ok();
 
+    // If experimental features are enabled, auto-detect and use available
+    // features.
+    if rustc_dep_of_std {
+        use_feature("rustc_attrs");
+        use_feature("core_intrinsics");
+    } else if rustix_use_experimental_features {
+        use_feature_or_nothing("rustc_attrs");
+        use_feature_or_nothing("core_intrinsics");
+    }
+
+    // Features needed only in no-std configurations.
+    #[cfg(not(feature = "std"))]
+    {
+        use_feature_or_nothing("core_c_str");
+        use_feature_or_nothing("core_ffi_c");
+        use_feature_or_nothing("alloc_c_string");
+        use_feature_or_nothing("alloc_ffi");
+    }
+
+    // Feature needed for testing.
+    if use_static_assertions() {
+        use_feature("static_assertions");
+    }
+
+    // WASI support can utilize wasi_ext if present.
+    if os == "wasi" {
+        use_feature_or_nothing("wasi_ext");
+    }
+
     // If the libc backend is requested, or if we're not on a platform for
     // which we have linux_raw support, use the libc backend.
     //
     // For now Android uses the libc backend; in theory it could use the
     // linux_raw backend, but to do that we'll need to figure out how to
     // install the toolchain for it.
-    if feature_use_libc
+    let libc = feature_use_libc
         || cfg_use_libc
-        || target_os != "linux"
+        || os != "linux"
         || !inline_asm_name_present
         || is_unsupported_abi
         || miri
-        || ((arch == "powerpc64" || arch == "mips" || arch == "mips64")
-            && !rustix_use_experimental_asm)
-    {
+        || ((arch == "powerpc64" || arch == "mips" || arch == "mips64" || arch == "mips64r6")
+            && !rustix_use_experimental_asm);
+    if libc {
         // Use the libc backend.
         use_feature("libc");
     } else {
         // Use the linux_raw backend.
         use_feature("linux_raw");
-        use_feature_or_nothing("core_intrinsics");
         if rustix_use_experimental_asm {
             use_feature("asm_experimental_arch");
         }
@@ -86,44 +114,50 @@ fn main() {
 
     // Rust's libc crate groups some OS's together which have similar APIs;
     // create similarly-named features to make `cfg` tests more concise.
-    if target_os == "freebsd" || target_os == "dragonfly" {
+    let freebsdlike = os == "freebsd" || os == "dragonfly";
+    if freebsdlike {
         use_feature("freebsdlike");
     }
-    if target_os == "openbsd" || target_os == "netbsd" {
+    let netbsdlike = os == "openbsd" || os == "netbsd";
+    if netbsdlike {
         use_feature("netbsdlike");
     }
-    if target_os == "macos" || target_os == "ios" || target_os == "tvos" || target_os == "watchos" {
+    let apple = os == "macos" || os == "ios" || os == "tvos" || os == "watchos";
+    if apple {
         use_feature("apple");
     }
-    if target_os == "linux"
-        || target_os == "l4re"
-        || target_os == "android"
-        || target_os == "emscripten"
-    {
+    if os == "linux" || os == "l4re" || os == "android" || os == "emscripten" {
         use_feature("linux_like");
     }
-    if target_os == "solaris" || target_os == "illumos" {
+    if os == "solaris" || os == "illumos" {
         use_feature("solarish");
     }
-    if target_os == "macos"
-        || target_os == "ios"
-        || target_os == "tvos"
-        || target_os == "watchos"
-        || target_os == "freebsd"
-        || target_os == "dragonfly"
-        || target_os == "openbsd"
-        || target_os == "netbsd"
-    {
+    if apple || freebsdlike || netbsdlike {
         use_feature("bsd");
     }
 
     // Add some additional common target combinations.
-    if target_os == "android" || target_os == "linux" {
+
+    // Android and "regular" Linux both use the Linux kernel.
+    if os == "android" || os == "linux" {
         use_feature("linux_kernel");
     }
 
-    if target_os == "wasi" {
-        use_feature_or_nothing("wasi_ext");
+    // These platforms have a 32-bit `time_t`.
+    if libc
+        && (arch == "arm"
+            || arch == "mips"
+            || arch == "sparc"
+            || arch == "x86"
+            || (arch == "wasm32" && os == "emscripten"))
+        && (apple
+            || os == "android"
+            || os == "emscripten"
+            || os == "haiku"
+            || env == "gnu"
+            || (env == "musl" && arch == "x86"))
+    {
+        use_feature("fix_y2038");
     }
 
     println!("cargo:rerun-if-env-changed=CARGO_CFG_RUSTIX_USE_EXPERIMENTAL_ASM");
@@ -134,6 +168,11 @@ fn main() {
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_USE_LIBC");
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_RUSTC_DEP_OF_STD");
     println!("cargo:rerun-if-env-changed=CARGO_CFG_MIRI");
+}
+
+fn use_static_assertions() -> bool {
+    // `offset_from` was made const in Rust 1.65.
+    can_compile("const unsafe fn foo(p: *const u8) -> isize { p.offset_from(p) }")
 }
 
 fn use_thumb_mode() -> bool {

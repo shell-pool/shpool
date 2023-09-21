@@ -13,15 +13,16 @@ use std::path::{Path, PathBuf};
 use tar::Archive;
 use walkdir::{DirEntry, WalkDir};
 
-const REVISION: &str = "85bf07972a1041b9e25393b803d0e006bec3eaaf";
+const REVISION: &str = "9f5fc1bd443f59583e7af0d94d289f95fe1e20c4";
 
 #[rustfmt::skip]
 static EXCLUDE_FILES: &[&str] = &[
-    // CStr literals (c"…") are not yet supported by rustc's lexer
-    // https://github.com/rust-lang/rust/issues/113333
-    "src/tools/clippy/tests/ui/needless_raw_string_hashes.rs",
+    // TODO: CStr literals: c"…", cr"…"
+    // https://github.com/dtolnay/syn/issues/1502
     "src/tools/rust-analyzer/crates/parser/test_data/parser/inline/ok/0085_expr_literals.rs",
-    "src/tools/rust-analyzer/crates/parser/test_data/parser/inline/ok/0085_expr_literals.rs",
+
+    // TODO: explicit tail calls: `become _g()`
+    // https://github.com/dtolnay/syn/issues/1501
     "tests/ui/explicit-tail-calls/return-lifetime-sub.rs",
 
     // TODO: non-lifetime binders: `where for<'a, T> &'a Struct<T>: Trait`
@@ -115,7 +116,6 @@ static EXCLUDE_FILES: &[&str] = &[
 
     // Various extensions to Rust syntax made up by rust-analyzer
     "src/tools/rust-analyzer/crates/parser/test_data/parser/inline/ok/0012_type_item_where_clause.rs",
-    "src/tools/rust-analyzer/crates/parser/test_data/parser/inline/ok/0040_crate_keyword_vis.rs",
     "src/tools/rust-analyzer/crates/parser/test_data/parser/inline/ok/0058_range_pat.rs",
     "src/tools/rust-analyzer/crates/parser/test_data/parser/inline/ok/0123_param_list_vararg.rs",
     "src/tools/rust-analyzer/crates/parser/test_data/parser/inline/ok/0131_existential_type.rs",
@@ -288,21 +288,38 @@ pub fn clone_rust() {
     if needs_clone {
         download_and_unpack().unwrap();
     }
+
     let mut missing = String::new();
     let test_src = Path::new("tests/rust");
+
+    let mut exclude_files_set = BTreeSet::new();
     for exclude in EXCLUDE_FILES {
+        if !exclude_files_set.insert(exclude) {
+            panic!("duplicate path in EXCLUDE_FILES: {}", exclude);
+        }
+        for dir in EXCLUDE_DIRS {
+            if Path::new(exclude).starts_with(dir) {
+                panic!("excluded file {} is inside an excluded dir", exclude);
+            }
+        }
         if !test_src.join(exclude).is_file() {
             missing += "\ntests/rust/";
             missing += exclude;
         }
     }
+
+    let mut exclude_dirs_set = BTreeSet::new();
     for exclude in EXCLUDE_DIRS {
+        if !exclude_dirs_set.insert(exclude) {
+            panic!("duplicate path in EXCLUDE_DIRS: {}", exclude);
+        }
         if !test_src.join(exclude).is_dir() {
             missing += "\ntests/rust/";
             missing += exclude;
             missing += "/";
         }
     }
+
     if !missing.is_empty() {
         panic!("excluded test file does not exist:{}\n", missing);
     }

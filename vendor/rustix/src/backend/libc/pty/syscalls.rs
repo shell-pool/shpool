@@ -4,9 +4,10 @@ use crate::backend::c;
 use crate::backend::conv::{borrowed_fd, ret};
 use crate::fd::BorrowedFd;
 use crate::io;
-#[cfg(not(target_os = "android"))]
-use {crate::backend::conv::ret_owned_fd, crate::fd::OwnedFd, crate::pty::OpenptFlags};
-#[cfg(any(apple, linux_like, target_os = "freebsd", target_os = "fuchsia"))]
+#[cfg(all(
+    feature = "alloc",
+    any(apple, linux_like, target_os = "freebsd", target_os = "fuchsia")
+))]
 use {
     crate::ffi::{CStr, CString},
     crate::path::SMALL_PATH_BUFFER_SIZE,
@@ -15,14 +16,20 @@ use {
 };
 
 #[cfg(not(linux_kernel))]
+use crate::{backend::conv::ret_owned_fd, fd::OwnedFd, pty::OpenptFlags};
+
+#[cfg(not(linux_kernel))]
 #[inline]
 pub(crate) fn openpt(flags: OpenptFlags) -> io::Result<OwnedFd> {
     unsafe { ret_owned_fd(c::posix_openpt(flags.bits() as _)) }
 }
 
-#[cfg(any(apple, linux_like, target_os = "freebsd", target_os = "fuchsia"))]
+#[cfg(all(
+    feature = "alloc",
+    any(apple, linux_like, target_os = "freebsd", target_os = "fuchsia")
+))]
 #[inline]
-pub(crate) fn ptsname(fd: BorrowedFd, mut buffer: Vec<u8>) -> io::Result<CString> {
+pub(crate) fn ptsname(fd: BorrowedFd<'_>, mut buffer: Vec<u8>) -> io::Result<CString> {
     // This code would benefit from having a better way to read into
     // uninitialized memory, but that requires `unsafe`.
     buffer.clear();
@@ -86,18 +93,12 @@ pub(crate) fn ptsname(fd: BorrowedFd, mut buffer: Vec<u8>) -> io::Result<CString
 }
 
 #[inline]
-pub(crate) fn unlockpt(fd: BorrowedFd) -> io::Result<()> {
+pub(crate) fn unlockpt(fd: BorrowedFd<'_>) -> io::Result<()> {
     unsafe { ret(c::unlockpt(borrowed_fd(fd))) }
 }
 
 #[cfg(not(linux_kernel))]
 #[inline]
-pub(crate) fn grantpt(fd: BorrowedFd) -> io::Result<()> {
+pub(crate) fn grantpt(fd: BorrowedFd<'_>) -> io::Result<()> {
     unsafe { ret(c::grantpt(borrowed_fd(fd))) }
-}
-
-#[cfg(target_os = "linux")]
-#[inline]
-pub(crate) fn ioctl_tiocgptpeer(fd: BorrowedFd, flags: OpenptFlags) -> io::Result<OwnedFd> {
-    unsafe { ret_owned_fd(c::ioctl(borrowed_fd(fd), c::TIOCGPTPEER, flags.bits())) }
 }

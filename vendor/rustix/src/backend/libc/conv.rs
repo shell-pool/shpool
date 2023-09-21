@@ -3,7 +3,7 @@
 //! for converting between rustix's types and libc types.
 
 use super::c;
-#[cfg(not(any(windows, target_os = "espidf")))]
+#[cfg(all(feature = "alloc", not(any(windows, target_os = "espidf"))))]
 use super::fd::IntoRawFd;
 use super::fd::{AsRawFd, BorrowedFd, FromRawFd, LibcFd, OwnedFd, RawFd};
 #[cfg(not(windows))]
@@ -27,7 +27,10 @@ pub(super) fn borrowed_fd(fd: BorrowedFd<'_>) -> LibcFd {
     fd.as_raw_fd() as LibcFd
 }
 
-#[cfg(not(any(windows, target_os = "espidf", target_os = "redox")))]
+#[cfg(all(
+    feature = "alloc",
+    not(any(windows, target_os = "espidf", target_os = "redox"))
+))]
 #[inline]
 pub(super) fn owned_fd(fd: OwnedFd) -> LibcFd {
     fd.into_raw_fd() as LibcFd
@@ -133,7 +136,7 @@ pub(super) fn ret_discarded_fd(raw: LibcFd) -> io::Result<()> {
     }
 }
 
-#[cfg(not(any(windows, target_os = "wasi")))]
+#[cfg(all(feature = "alloc", not(any(windows, target_os = "wasi"))))]
 #[inline]
 pub(super) fn ret_discarded_char_ptr(raw: *mut c::c_char) -> io::Result<()> {
     if raw.is_null() {
@@ -205,6 +208,7 @@ pub(crate) fn msg_iov_len(len: usize) -> c::c_int {
     bsd,
     solarish,
     target_env = "musl",
+    target_os = "aix",
     target_os = "emscripten",
     target_os = "fuchsia",
     target_os = "haiku",
@@ -221,6 +225,7 @@ pub(crate) fn msg_control_len(len: usize) -> c::socklen_t {
     solarish,
     windows,
     target_env = "musl",
+    target_os = "aix",
     target_os = "emscripten",
     target_os = "espidf",
     target_os = "fuchsia",

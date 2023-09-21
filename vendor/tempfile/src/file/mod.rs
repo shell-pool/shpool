@@ -608,11 +608,44 @@ impl NamedTempFile<File> {
 
     /// Create a new named temporary file in the specified directory.
     ///
+    /// This is equivalent to:
+    ///
+    /// ```ignore
+    /// Builder::new().prefix(&prefix).tempfile()
+    /// ```
+    ///
     /// See [`NamedTempFile::new()`] for details.
     ///
     /// [`NamedTempFile::new()`]: #method.new
     pub fn new_in<P: AsRef<Path>>(dir: P) -> io::Result<NamedTempFile> {
         Builder::new().tempfile_in(dir)
+    }
+
+    /// Create a new named temporary file with the specified filename prefix.
+    ///
+    /// See [`NamedTempFile::new()`] for details.
+    ///
+    /// [`NamedTempFile::new()`]: #method.new
+    pub fn with_prefix<S: AsRef<OsStr>>(prefix: S) -> io::Result<NamedTempFile> {
+        Builder::new().prefix(&prefix).tempfile()
+    }
+    /// Create a new named temporary file with the specified filename prefix,
+    /// in the specified directory.
+    ///
+    /// This is equivalent to:
+    ///
+    /// ```ignore
+    /// Builder::new().prefix(&prefix).tempfile_in(directory)
+    /// ```
+    ///
+    /// See [`NamedTempFile::new()`] for details.
+    ///
+    /// [`NamedTempFile::new()`]: #method.new
+    pub fn with_prefix_in<S: AsRef<OsStr>, P: AsRef<Path>>(
+        prefix: S,
+        dir: P,
+    ) -> io::Result<NamedTempFile> {
+        Builder::new().prefix(&prefix).tempfile_in(dir)
     }
 }
 

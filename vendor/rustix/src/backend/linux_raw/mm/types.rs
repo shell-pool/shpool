@@ -16,6 +16,9 @@ bitflags! {
         const WRITE = linux_raw_sys::general::PROT_WRITE;
         /// `PROT_EXEC`
         const EXEC = linux_raw_sys::general::PROT_EXEC;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -38,6 +41,23 @@ bitflags! {
         const GROWSUP = linux_raw_sys::general::PROT_GROWSUP;
         /// `PROT_GROWSDOWN`
         const GROWSDOWN = linux_raw_sys::general::PROT_GROWSDOWN;
+        /// `PROT_SEM`
+        const SEM = linux_raw_sys::general::PROT_SEM;
+        /// `PROT_BTI`
+        #[cfg(target_arch = "aarch64")]
+        const BTI = linux_raw_sys::general::PROT_BTI;
+        /// `PROT_MTE`
+        #[cfg(target_arch = "aarch64")]
+        const MTE = linux_raw_sys::general::PROT_MTE;
+        /// `PROT_SAO`
+        #[cfg(any(target_arch = "powerpc", target_arch = "powerpc64"))]
+        const SAO = linux_raw_sys::general::PROT_SAO;
+        /// `PROT_ADI`
+        #[cfg(any(target_arch = "sparc", target_arch = "sparc64"))]
+        const ADI = linux_raw_sys::general::PROT_ADI;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -80,11 +100,14 @@ bitflags! {
         /// `MAP_STACK`
         const STACK = linux_raw_sys::general::MAP_STACK;
         /// `MAP_SYNC` (since Linux 4.15)
-        #[cfg(not(any(target_arch = "mips", target_arch = "mips64")))]
+        #[cfg(not(any(target_arch = "mips", target_arch = "mips32r6", target_arch = "mips64", target_arch = "mips64r6")))]
         const SYNC = linux_raw_sys::general::MAP_SYNC;
         /// `MAP_UNINITIALIZED`
-        #[cfg(not(any(target_arch = "mips", target_arch = "mips64")))]
+        #[cfg(not(any(target_arch = "mips", target_arch = "mips32r6", target_arch = "mips64", target_arch = "mips64r6")))]
         const UNINITIALIZED = linux_raw_sys::general::MAP_UNINITIALIZED;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -102,18 +125,9 @@ bitflags! {
         const MAYMOVE = linux_raw_sys::general::MREMAP_MAYMOVE;
         /// `MREMAP_DONTUNMAP` (since Linux 5.7)
         const DONTUNMAP = linux_raw_sys::general::MREMAP_DONTUNMAP;
-    }
-}
 
-bitflags! {
-    /// `MLOCK_*` flags for use with [`mlock_with`].
-    ///
-    /// [`mlock_with`]: crate::io::mlock_with
-    #[repr(transparent)]
-    #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-    pub struct MlockFlags: u32 {
-        /// `MLOCK_ONFAULT`
-        const ONFAULT = linux_raw_sys::general::MLOCK_ONFAULT;
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -133,20 +147,24 @@ bitflags! {
         /// file (so that they can be updated with the fresh values just
         /// written).
         const INVALIDATE = linux_raw_sys::general::MS_INVALIDATE;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
 bitflags! {
-    /// `O_*` flags for use with [`userfaultfd`].
+    /// `MLOCK_*` flags for use with [`mlock_with`].
     ///
-    /// [`userfaultfd`]: crate::io::userfaultfd
+    /// [`mlock_with`]: crate::io::mlock_with
     #[repr(transparent)]
     #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-    pub struct UserfaultfdFlags: c::c_uint {
-        /// `O_CLOEXEC`
-        const CLOEXEC = linux_raw_sys::general::O_CLOEXEC;
-        /// `O_NONBLOCK`
-        const NONBLOCK = linux_raw_sys::general::O_NONBLOCK;
+    pub struct MlockFlags: u32 {
+        /// `MLOCK_ONFAULT`
+        const ONFAULT = linux_raw_sys::general::MLOCK_ONFAULT;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -183,7 +201,12 @@ pub enum Advice {
     /// `MADV_HWPOISON`
     LinuxHwPoison = linux_raw_sys::general::MADV_HWPOISON,
     /// `MADV_SOFT_OFFLINE`
-    #[cfg(not(any(target_arch = "mips", target_arch = "mips64")))]
+    #[cfg(not(any(
+        target_arch = "mips",
+        target_arch = "mips32r6",
+        target_arch = "mips64",
+        target_arch = "mips64r6"
+    )))]
     LinuxSoftOffline = linux_raw_sys::general::MADV_SOFT_OFFLINE,
     /// `MADV_MERGEABLE`
     LinuxMergeable = linux_raw_sys::general::MADV_MERGEABLE,
@@ -221,4 +244,21 @@ impl Advice {
     /// Linux's `MADV_DONTNEED` differs from `POSIX_MADV_DONTNEED`. See
     /// `LinuxDontNeed` for the Linux behavior.
     pub const DontNeed: Self = Self::Normal;
+}
+
+bitflags! {
+    /// `O_*` flags for use with [`userfaultfd`].
+    ///
+    /// [`userfaultfd`]: crate::io::userfaultfd
+    #[repr(transparent)]
+    #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+    pub struct UserfaultfdFlags: c::c_uint {
+        /// `O_CLOEXEC`
+        const CLOEXEC = linux_raw_sys::general::O_CLOEXEC;
+        /// `O_NONBLOCK`
+        const NONBLOCK = linux_raw_sys::general::O_NONBLOCK;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
+    }
 }

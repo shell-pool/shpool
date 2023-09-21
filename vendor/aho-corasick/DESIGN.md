@@ -470,12 +470,12 @@ If all of that fails, then a packed multiple substring algorithm will be
 attempted. Currently, the only algorithm available for this is Teddy, but more
 may be added in the future. Teddy is unlike the above prefilters in that it
 confirms its own matches, so when Teddy is active, it might not be necessary
-for Aho-Corasick to run at all. However, the current Teddy implementation only
-works in `x86_64` and when SSSE3 or AVX2 are available, and moreover, only
-works _well_ when there are a small number of patterns (say, less than 100).
-Teddy also requires the haystack to be of a certain length (more than 16-34
-bytes). When the haystack is shorter than that, Rabin-Karp is used instead.
-(See `src/packed/rabinkarp.rs`.)
+for Aho-Corasick to run at all. However, the current Teddy implementation
+only works in `x86_64` when SSSE3 or AVX2 are available or in `aarch64`
+(using NEON), and moreover, only works _well_ when there are a small number
+of patterns (say, less than 100). Teddy also requires the haystack to be of a
+certain length (more than 16-34 bytes). When the haystack is shorter than that,
+Rabin-Karp is used instead. (See `src/packed/rabinkarp.rs`.)
 
 There is a more thorough description of Teddy at
 [`src/packed/teddy/README.md`](src/packed/teddy/README.md).

@@ -21,6 +21,10 @@ mod inner;
 #[path = "windows.rs"]
 mod inner;
 
+#[cfg(all(windows, feature = "clock"))]
+#[allow(unreachable_pub)]
+mod win_bindings;
+
 #[cfg(all(
     not(unix),
     not(windows),
@@ -50,15 +54,34 @@ mod inner {
     not(any(target_os = "emscripten", target_os = "wasi"))
 ))]
 mod inner {
-    use crate::{FixedOffset, LocalResult, NaiveDateTime};
+    use crate::{Datelike, FixedOffset, LocalResult, NaiveDateTime, Timelike};
 
-    pub(super) fn offset_from_utc_datetime(_utc: &NaiveDateTime) -> LocalResult<FixedOffset> {
-        let offset = js_sys::Date::new_0().get_timezone_offset();
+    pub(super) fn offset_from_utc_datetime(utc: &NaiveDateTime) -> LocalResult<FixedOffset> {
+        let offset = js_sys::Date::from(utc.and_utc()).get_timezone_offset();
         LocalResult::Single(FixedOffset::west_opt((offset as i32) * 60).unwrap())
     }
 
     pub(super) fn offset_from_local_datetime(local: &NaiveDateTime) -> LocalResult<FixedOffset> {
-        offset_from_utc_datetime(local)
+        let mut year = local.year();
+        if year < 100 {
+            // The API in `js_sys` does not let us create a `Date` with negative years.
+            // And values for years from `0` to `99` map to the years `1900` to `1999`.
+            // Shift the value by a multiple of 400 years until it is `>= 100`.
+            let shift_cycles = (year - 100).div_euclid(400);
+            year -= shift_cycles * 400;
+        }
+        let js_date = js_sys::Date::new_with_year_month_day_hr_min_sec(
+            year as u32,
+            local.month0() as i32,
+            local.day() as i32,
+            local.hour() as i32,
+            local.minute() as i32,
+            local.second() as i32,
+            // ignore milliseconds, our representation of leap seconds may be problematic
+        );
+        let offset = js_date.get_timezone_offset();
+        // We always get a result, even if this time does not exist or is ambiguous.
+        LocalResult::Single(FixedOffset::west_opt((offset as i32) * 60).unwrap())
     }
 }
 
@@ -94,33 +117,35 @@ impl Local {
         Local::now().date()
     }
 
-    /// Returns a `DateTime` which corresponds to the current date and time.
-    #[cfg(not(all(
-        target_arch = "wasm32",
-        feature = "wasmbind",
-        not(any(target_os = "emscripten", target_os = "wasi"))
-    )))]
-    #[must_use]
+    /// Returns a `DateTime<Local>` which corresponds to the current date, time and offset from
+    /// UTC.
+    ///
+    /// See also the similar [`Utc::now()`] which returns `DateTime<Utc>`, i.e. without the local
+    /// offset.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #![allow(unused_variables)]
+    /// # use chrono::{DateTime, FixedOffset, Local};
+    /// // Current local time
+    /// let now = Local::now();
+    ///
+    /// // Current local date
+    /// let today = now.date_naive();
+    ///
+    /// // Current local time, converted to `DateTime<FixedOffset>`
+    /// let now_fixed_offset = Local::now().fixed_offset();
+    /// // or
+    /// let now_fixed_offset: DateTime<FixedOffset> = Local::now().into();
+    ///
+    /// // Current time in some timezone (let's use +05:00)
+    /// // Note that it is usually more efficient to use `Utc::now` for this use case.
+    /// let offset = FixedOffset::east_opt(5 * 60 * 60).unwrap();
+    /// let now_with_offset = Local::now().with_timezone(&offset);
+    /// ```
     pub fn now() -> DateTime<Local> {
         Utc::now().with_timezone(&Local)
-    }
-
-    /// Returns a `DateTime` which corresponds to the current date and time.
-    #[cfg(all(
-        target_arch = "wasm32",
-        feature = "wasmbind",
-        not(any(target_os = "emscripten", target_os = "wasi"))
-    ))]
-    #[must_use]
-    pub fn now() -> DateTime<Local> {
-        use super::Utc;
-        let now: DateTime<Utc> = super::Utc::now();
-
-        // Workaround missing timezone logic in `time` crate
-        let offset =
-            FixedOffset::west_opt((js_sys::Date::new_0().get_timezone_offset() as i32) * 60)
-                .unwrap();
-        DateTime::from_utc(now.naive_utc(), offset)
     }
 }
 
@@ -231,13 +256,5 @@ mod tests {
                 timestr
             );
         }
-    }
-
-    /// Test Issue #866
-    #[test]
-    fn test_issue_866() {
-        #[allow(deprecated)]
-        let local_20221106 = Local.ymd(2022, 11, 6);
-        let _dt_20221106 = local_20221106.and_hms_milli_opt(1, 2, 59, 1000).unwrap();
     }
 }

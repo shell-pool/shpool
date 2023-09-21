@@ -48,3 +48,37 @@ error[E0119]: conflicting implementations of trait `Unpin` for type `Baz<_, _>`
    |   -------------------------------------------- first implementation here
    |
    = note: this error originates in the macro `$crate::__pin_project_make_unpin_impl` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `Unpin` for type `Qux<_, _>`
+  --> tests/ui/pin_project/conflict-unpin.rs:40:1
+   |
+40 | / pin_project! { //~ ERROR E0119
+41 | |     #[project(!Unpin)]
+42 | |     struct Qux<T, U> {
+43 | |         #[pin]
+...  |
+46 | |     }
+47 | | }
+   | |_^ conflicting implementation for `Qux<_, _>`
+...
+50 |   impl<T, U> Unpin for Qux<T, U> {} // Non-conditional Unpin impl
+   |   ------------------------------ first implementation here
+   |
+   = note: this error originates in the macro `$crate::__pin_project_make_unpin_impl` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `Unpin` for type `Fred<_, _>`
+  --> tests/ui/pin_project/conflict-unpin.rs:52:1
+   |
+52 | / pin_project! { //~ ERROR E0119
+53 | |     #[project(!Unpin)]
+54 | |     struct Fred<T, U> {
+55 | |         #[pin]
+...  |
+58 | |     }
+59 | | }
+   | |_^ conflicting implementation for `Fred<_, _>`
+...
+62 |   impl<T: Unpin, U: Unpin> Unpin for Fred<T, U> {} // Conditional Unpin impl
+   |   --------------------------------------------- first implementation here
+   |
+   = note: this error originates in the macro `$crate::__pin_project_make_unpin_impl` which comes from the expansion of the macro `pin_project` (in Nightly builds, run with -Z macro-backtrace for more info)

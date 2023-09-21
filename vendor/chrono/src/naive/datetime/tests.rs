@@ -1,8 +1,7 @@
 use super::NaiveDateTime;
-use crate::oldtime::Duration;
+use crate::duration::Duration as OldDuration;
 use crate::NaiveDate;
 use crate::{Datelike, FixedOffset, Utc};
-use std::i64;
 
 #[test]
 fn test_datetime_from_timestamp_millis() {
@@ -17,10 +16,11 @@ fn test_datetime_from_timestamp_millis() {
         (2034061609000, "2034-06-16 09:06:49.000000000"),
     ];
 
-    for (timestamp_millis, formatted) in valid_map.iter().copied() {
+    for (timestamp_millis, _formatted) in valid_map.iter().copied() {
         let naive_datetime = NaiveDateTime::from_timestamp_millis(timestamp_millis);
         assert_eq!(timestamp_millis, naive_datetime.unwrap().timestamp_millis());
-        assert_eq!(naive_datetime.unwrap().format("%F %T%.9f").to_string(), formatted);
+        #[cfg(any(feature = "alloc", feature = "std"))]
+        assert_eq!(naive_datetime.unwrap().format("%F %T%.9f").to_string(), _formatted);
     }
 
     let invalid = [i64::MAX, i64::MIN];
@@ -54,10 +54,11 @@ fn test_datetime_from_timestamp_micros() {
         (2034061609000000, "2034-06-16 09:06:49.000000000"),
     ];
 
-    for (timestamp_micros, formatted) in valid_map.iter().copied() {
+    for (timestamp_micros, _formatted) in valid_map.iter().copied() {
         let naive_datetime = NaiveDateTime::from_timestamp_micros(timestamp_micros);
         assert_eq!(timestamp_micros, naive_datetime.unwrap().timestamp_micros());
-        assert_eq!(naive_datetime.unwrap().format("%F %T%.9f").to_string(), formatted);
+        #[cfg(any(feature = "alloc", feature = "std"))]
+        assert_eq!(naive_datetime.unwrap().format("%F %T%.9f").to_string(), _formatted);
     }
 
     let invalid = [i64::MAX, i64::MIN];
@@ -96,7 +97,7 @@ fn test_datetime_from_timestamp() {
 fn test_datetime_add() {
     fn check(
         (y, m, d, h, n, s): (i32, u32, u32, u32, u32, u32),
-        rhs: Duration,
+        rhs: OldDuration,
         result: Option<(i32, u32, u32, u32, u32, u32)>,
     ) {
         let lhs = NaiveDate::from_ymd_opt(y, m, d).unwrap().and_hms_opt(h, n, s).unwrap();
@@ -107,12 +108,16 @@ fn test_datetime_add() {
         assert_eq!(lhs.checked_sub_signed(-rhs), sum);
     }
 
-    check((2014, 5, 6, 7, 8, 9), Duration::seconds(3600 + 60 + 1), Some((2014, 5, 6, 8, 9, 10)));
-    check((2014, 5, 6, 7, 8, 9), Duration::seconds(-(3600 + 60 + 1)), Some((2014, 5, 6, 6, 7, 8)));
-    check((2014, 5, 6, 7, 8, 9), Duration::seconds(86399), Some((2014, 5, 7, 7, 8, 8)));
-    check((2014, 5, 6, 7, 8, 9), Duration::seconds(86_400 * 10), Some((2014, 5, 16, 7, 8, 9)));
-    check((2014, 5, 6, 7, 8, 9), Duration::seconds(-86_400 * 10), Some((2014, 4, 26, 7, 8, 9)));
-    check((2014, 5, 6, 7, 8, 9), Duration::seconds(86_400 * 10), Some((2014, 5, 16, 7, 8, 9)));
+    check((2014, 5, 6, 7, 8, 9), OldDuration::seconds(3600 + 60 + 1), Some((2014, 5, 6, 8, 9, 10)));
+    check(
+        (2014, 5, 6, 7, 8, 9),
+        OldDuration::seconds(-(3600 + 60 + 1)),
+        Some((2014, 5, 6, 6, 7, 8)),
+    );
+    check((2014, 5, 6, 7, 8, 9), OldDuration::seconds(86399), Some((2014, 5, 7, 7, 8, 8)));
+    check((2014, 5, 6, 7, 8, 9), OldDuration::seconds(86_400 * 10), Some((2014, 5, 16, 7, 8, 9)));
+    check((2014, 5, 6, 7, 8, 9), OldDuration::seconds(-86_400 * 10), Some((2014, 4, 26, 7, 8, 9)));
+    check((2014, 5, 6, 7, 8, 9), OldDuration::seconds(86_400 * 10), Some((2014, 5, 16, 7, 8, 9)));
 
     // overflow check
     // assumes that we have correct values for MAX/MIN_DAYS_FROM_YEAR_0 from `naive::date`.
@@ -122,17 +127,17 @@ fn test_datetime_add() {
     check((0, 1, 1, 0, 0, 0), max_days_from_year_0, Some((NaiveDate::MAX.year(), 12, 31, 0, 0, 0)));
     check(
         (0, 1, 1, 0, 0, 0),
-        max_days_from_year_0 + Duration::seconds(86399),
+        max_days_from_year_0 + OldDuration::seconds(86399),
         Some((NaiveDate::MAX.year(), 12, 31, 23, 59, 59)),
     );
-    check((0, 1, 1, 0, 0, 0), max_days_from_year_0 + Duration::seconds(86_400), None);
-    check((0, 1, 1, 0, 0, 0), Duration::max_value(), None);
+    check((0, 1, 1, 0, 0, 0), max_days_from_year_0 + OldDuration::seconds(86_400), None);
+    check((0, 1, 1, 0, 0, 0), OldDuration::max_value(), None);
 
     let min_days_from_year_0 =
         NaiveDate::MIN.signed_duration_since(NaiveDate::from_ymd_opt(0, 1, 1).unwrap());
     check((0, 1, 1, 0, 0, 0), min_days_from_year_0, Some((NaiveDate::MIN.year(), 1, 1, 0, 0, 0)));
-    check((0, 1, 1, 0, 0, 0), min_days_from_year_0 - Duration::seconds(1), None);
-    check((0, 1, 1, 0, 0, 0), Duration::min_value(), None);
+    check((0, 1, 1, 0, 0, 0), min_days_from_year_0 - OldDuration::seconds(1), None);
+    check((0, 1, 1, 0, 0, 0), OldDuration::min_value(), None);
 }
 
 #[test]
@@ -140,22 +145,25 @@ fn test_datetime_sub() {
     let ymdhms =
         |y, m, d, h, n, s| NaiveDate::from_ymd_opt(y, m, d).unwrap().and_hms_opt(h, n, s).unwrap();
     let since = NaiveDateTime::signed_duration_since;
-    assert_eq!(since(ymdhms(2014, 5, 6, 7, 8, 9), ymdhms(2014, 5, 6, 7, 8, 9)), Duration::zero());
+    assert_eq!(
+        since(ymdhms(2014, 5, 6, 7, 8, 9), ymdhms(2014, 5, 6, 7, 8, 9)),
+        OldDuration::zero()
+    );
     assert_eq!(
         since(ymdhms(2014, 5, 6, 7, 8, 10), ymdhms(2014, 5, 6, 7, 8, 9)),
-        Duration::seconds(1)
+        OldDuration::seconds(1)
     );
     assert_eq!(
         since(ymdhms(2014, 5, 6, 7, 8, 9), ymdhms(2014, 5, 6, 7, 8, 10)),
-        Duration::seconds(-1)
+        OldDuration::seconds(-1)
     );
     assert_eq!(
         since(ymdhms(2014, 5, 7, 7, 8, 9), ymdhms(2014, 5, 6, 7, 8, 10)),
-        Duration::seconds(86399)
+        OldDuration::seconds(86399)
     );
     assert_eq!(
         since(ymdhms(2001, 9, 9, 1, 46, 39), ymdhms(1970, 1, 1, 0, 0, 0)),
-        Duration::seconds(999_999_999)
+        OldDuration::seconds(999_999_999)
     );
 }
 
@@ -164,9 +172,9 @@ fn test_datetime_addassignment() {
     let ymdhms =
         |y, m, d, h, n, s| NaiveDate::from_ymd_opt(y, m, d).unwrap().and_hms_opt(h, n, s).unwrap();
     let mut date = ymdhms(2016, 10, 1, 10, 10, 10);
-    date += Duration::minutes(10_000_000);
+    date += OldDuration::minutes(10_000_000);
     assert_eq!(date, ymdhms(2035, 10, 6, 20, 50, 10));
-    date += Duration::days(10);
+    date += OldDuration::days(10);
     assert_eq!(date, ymdhms(2035, 10, 16, 20, 50, 10));
 }
 
@@ -175,10 +183,31 @@ fn test_datetime_subassignment() {
     let ymdhms =
         |y, m, d, h, n, s| NaiveDate::from_ymd_opt(y, m, d).unwrap().and_hms_opt(h, n, s).unwrap();
     let mut date = ymdhms(2016, 10, 1, 10, 10, 10);
-    date -= Duration::minutes(10_000_000);
+    date -= OldDuration::minutes(10_000_000);
     assert_eq!(date, ymdhms(1997, 9, 26, 23, 30, 10));
-    date -= Duration::days(10);
+    date -= OldDuration::days(10);
     assert_eq!(date, ymdhms(1997, 9, 16, 23, 30, 10));
+}
+
+#[test]
+fn test_core_duration_ops() {
+    use core::time::Duration;
+
+    let mut dt = NaiveDate::from_ymd_opt(2023, 8, 29).unwrap().and_hms_opt(11, 34, 12).unwrap();
+    let same = dt + Duration::ZERO;
+    assert_eq!(dt, same);
+
+    dt += Duration::new(3600, 0);
+    assert_eq!(dt, NaiveDate::from_ymd_opt(2023, 8, 29).unwrap().and_hms_opt(12, 34, 12).unwrap());
+}
+
+#[test]
+#[should_panic]
+fn test_core_duration_max() {
+    use core::time::Duration;
+
+    let mut utc_dt = NaiveDate::from_ymd_opt(2023, 8, 29).unwrap().and_hms_opt(11, 34, 12).unwrap();
+    utc_dt += Duration::MAX;
 }
 
 #[test]
@@ -197,11 +226,16 @@ fn test_datetime_timestamp() {
 fn test_datetime_from_str() {
     // valid cases
     let valid = [
-        "2015-2-18T23:16:9.15",
+        "2001-02-03T04:05:06",
+        "2012-12-12T12:12:12",
+        "2015-02-18T23:16:09.153",
+        "2015-2-18T23:16:09.153",
         "-77-02-18T23:16:09",
+        "+82701-05-6T15:9:60.898989898989",
         "  +82701  -  05  -  6  T  15  :  9  : 60.898989898989   ",
     ];
     for &s in &valid {
+        eprintln!("test_parse_naivedatetime valid {:?}", s);
         let d = match s.parse::<NaiveDateTime>() {
             Ok(d) => d,
             Err(e) => panic!("parsing `{}` has failed: {}", s, e),
@@ -226,16 +260,34 @@ fn test_datetime_from_str() {
 
     // some invalid cases
     // since `ParseErrorKind` is private, all we can do is to check if there was an error
-    assert!("".parse::<NaiveDateTime>().is_err());
-    assert!("x".parse::<NaiveDateTime>().is_err());
-    assert!("15".parse::<NaiveDateTime>().is_err());
-    assert!("15:8:9".parse::<NaiveDateTime>().is_err());
-    assert!("15-8-9".parse::<NaiveDateTime>().is_err());
-    assert!("2015-15-15T15:15:15".parse::<NaiveDateTime>().is_err());
-    assert!("2012-12-12T12:12:12x".parse::<NaiveDateTime>().is_err());
-    assert!("2012-123-12T12:12:12".parse::<NaiveDateTime>().is_err());
-    assert!("+ 82701-123-12T12:12:12".parse::<NaiveDateTime>().is_err());
-    assert!("+802701-123-12T12:12:12".parse::<NaiveDateTime>().is_err()); // out-of-bound
+    let invalid = [
+        "",                              // empty
+        "x",                             // invalid / missing data
+        "15",                            // missing data
+        "15:8:9",                        // looks like a time (invalid date)
+        "15-8-9",                        // looks like a date (invalid)
+        "Fri, 09 Aug 2013 23:54:35 GMT", // valid date, wrong format
+        "Sat Jun 30 23:59:60 2012",      // valid date, wrong format
+        "1441497364.649",                // valid date, wrong format
+        "+1441497364.649",               // valid date, wrong format
+        "+1441497364",                   // valid date, wrong format
+        "2014/02/03 04:05:06",           // valid date, wrong format
+        "2015-15-15T15:15:15",           // invalid date
+        "2012-12-12T12:12:12x",          // bad timezone / trailing literal
+        "2012-12-12T12:12:12+00:00",     // unexpected timezone / trailing literal
+        "2012-12-12T12:12:12 +00:00",    // unexpected timezone / trailing literal
+        "2012-12-12T12:12:12 GMT",       // unexpected timezone / trailing literal
+        "2012-123-12T12:12:12",          // invalid month
+        "2012-12-12t12:12:12",           // bad divider 't'
+        "2012-12-12 12:12:12",           // missing divider 'T'
+        "2012-12-12T12:12:12Z",          // trailing char 'Z'
+        "+ 82701-123-12T12:12:12",       // strange year, invalid month
+        "+802701-123-12T12:12:12",       // out-of-bound year, invalid month
+    ];
+    for &s in &invalid {
+        eprintln!("test_datetime_from_str invalid {:?}", s);
+        assert!(s.parse::<NaiveDateTime>().is_err());
+    }
 }
 
 #[test]
@@ -287,17 +339,37 @@ fn test_datetime_parse_from_str() {
 }
 
 #[test]
-fn test_datetime_format() {
-    let dt = NaiveDate::from_ymd_opt(2010, 9, 8).unwrap().and_hms_milli_opt(7, 6, 54, 321).unwrap();
-    assert_eq!(dt.format("%c").to_string(), "Wed Sep  8 07:06:54 2010");
-    assert_eq!(dt.format("%s").to_string(), "1283929614");
-    assert_eq!(dt.format("%t%n%%%n%t").to_string(), "\t\n%\n\t");
-
-    // a horror of leap second: coming near to you.
-    let dt =
-        NaiveDate::from_ymd_opt(2012, 6, 30).unwrap().and_hms_milli_opt(23, 59, 59, 1_000).unwrap();
-    assert_eq!(dt.format("%c").to_string(), "Sat Jun 30 23:59:60 2012");
-    assert_eq!(dt.format("%s").to_string(), "1341100799"); // not 1341100800, it's intentional.
+fn test_datetime_parse_from_str_with_spaces() {
+    let parse_from_str = NaiveDateTime::parse_from_str;
+    let dt = NaiveDate::from_ymd_opt(2013, 8, 9).unwrap().and_hms_opt(23, 54, 35).unwrap();
+    // with varying spaces - should succeed
+    assert_eq!(parse_from_str(" Aug 09 2013 23:54:35", " %b %d %Y %H:%M:%S"), Ok(dt));
+    assert_eq!(parse_from_str("Aug 09 2013 23:54:35 ", "%b %d %Y %H:%M:%S "), Ok(dt));
+    assert_eq!(parse_from_str(" Aug 09 2013  23:54:35 ", " %b %d %Y  %H:%M:%S "), Ok(dt));
+    assert_eq!(parse_from_str("  Aug 09 2013 23:54:35", "  %b %d %Y %H:%M:%S"), Ok(dt));
+    assert_eq!(parse_from_str("   Aug 09 2013 23:54:35", "   %b %d %Y %H:%M:%S"), Ok(dt));
+    assert_eq!(parse_from_str("\n\tAug 09 2013 23:54:35  ", "\n\t%b %d %Y %H:%M:%S  "), Ok(dt));
+    assert_eq!(parse_from_str("\tAug 09 2013 23:54:35\t", "\t%b %d %Y %H:%M:%S\t"), Ok(dt));
+    assert_eq!(parse_from_str("Aug  09 2013 23:54:35", "%b  %d %Y %H:%M:%S"), Ok(dt));
+    assert_eq!(parse_from_str("Aug    09 2013 23:54:35", "%b    %d %Y %H:%M:%S"), Ok(dt));
+    assert_eq!(parse_from_str("Aug  09 2013\t23:54:35", "%b  %d %Y\t%H:%M:%S"), Ok(dt));
+    assert_eq!(parse_from_str("Aug  09 2013\t\t23:54:35", "%b  %d %Y\t\t%H:%M:%S"), Ok(dt));
+    assert_eq!(parse_from_str("Aug 09 2013 23:54:35 ", "%b %d %Y %H:%M:%S\n"), Ok(dt));
+    assert_eq!(parse_from_str("Aug 09 2013 23:54:35", "%b %d %Y\t%H:%M:%S"), Ok(dt));
+    assert_eq!(parse_from_str("Aug 09 2013 23:54:35", "%b %d %Y %H:%M:%S "), Ok(dt));
+    assert_eq!(parse_from_str("Aug 09 2013 23:54:35", " %b %d %Y %H:%M:%S"), Ok(dt));
+    assert_eq!(parse_from_str("Aug 09 2013 23:54:35", "%b %d %Y %H:%M:%S\n"), Ok(dt));
+    // with varying spaces - should fail
+    // leading space in data
+    assert!(parse_from_str(" Aug 09 2013 23:54:35", "%b %d %Y %H:%M:%S").is_err());
+    // trailing space in data
+    assert!(parse_from_str("Aug 09 2013 23:54:35 ", "%b %d %Y %H:%M:%S").is_err());
+    // trailing tab in data
+    assert!(parse_from_str("Aug 09 2013 23:54:35\t", "%b %d %Y %H:%M:%S").is_err());
+    // mismatched newlines
+    assert!(parse_from_str("\nAug 09 2013 23:54:35", "%b %d %Y %H:%M:%S\n").is_err());
+    // trailing literal in data
+    assert!(parse_from_str("Aug 09 2013 23:54:35 !!!", "%b %d %Y %H:%M:%S ").is_err());
 }
 
 #[test]
@@ -305,7 +377,7 @@ fn test_datetime_add_sub_invariant() {
     // issue #37
     let base = NaiveDate::from_ymd_opt(2000, 1, 1).unwrap().and_hms_opt(0, 0, 0).unwrap();
     let t = -946684799990000;
-    let time = base + Duration::microseconds(t);
+    let time = base + OldDuration::microseconds(t);
     assert_eq!(t, time.signed_duration_since(base).num_microseconds().unwrap());
 }
 
@@ -314,7 +386,7 @@ fn test_nanosecond_range() {
     const A_BILLION: i64 = 1_000_000_000;
     let maximum = "2262-04-11T23:47:16.854775804";
     let parsed: NaiveDateTime = maximum.parse().unwrap();
-    let nanos = parsed.timestamp_nanos();
+    let nanos = parsed.timestamp_nanos_opt().unwrap();
     assert_eq!(
         parsed,
         NaiveDateTime::from_timestamp_opt(nanos / A_BILLION, (nanos % A_BILLION) as u32).unwrap()
@@ -322,11 +394,23 @@ fn test_nanosecond_range() {
 
     let minimum = "1677-09-21T00:12:44.000000000";
     let parsed: NaiveDateTime = minimum.parse().unwrap();
-    let nanos = parsed.timestamp_nanos();
+    let nanos = parsed.timestamp_nanos_opt().unwrap();
     assert_eq!(
         parsed,
         NaiveDateTime::from_timestamp_opt(nanos / A_BILLION, (nanos % A_BILLION) as u32).unwrap()
     );
+
+    // Just beyond range
+    let maximum = "2262-04-11T23:47:16.854775804";
+    let parsed: NaiveDateTime = maximum.parse().unwrap();
+    let beyond_max = parsed + OldDuration::milliseconds(300);
+    assert!(beyond_max.timestamp_nanos_opt().is_none());
+
+    // Far beyond range
+    let maximum = "2262-04-11T23:47:16.854775804";
+    let parsed: NaiveDateTime = maximum.parse().unwrap();
+    let beyond_max = parsed + OldDuration::days(365);
+    assert!(beyond_max.timestamp_nanos_opt().is_none());
 }
 
 #[test]

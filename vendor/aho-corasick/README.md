@@ -170,3 +170,5 @@ supported version of Rust.
 
 * [G-Research/ahocorasick_rs](https://github.com/G-Research/ahocorasick_rs/)
 is a Python wrapper for this library.
+* [tmikus/ahocorasick_rs](https://github.com/tmikus/ahocorasick_rs) is a Go
+    wrapper for this library.

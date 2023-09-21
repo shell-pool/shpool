@@ -5,12 +5,20 @@
 //!
 //! [rustix-openpty crate]: https://crates.io/crates/rustix-openpty
 
+#![allow(unsafe_code)]
+
 use crate::backend::c;
 use crate::fd::{AsFd, OwnedFd};
 use crate::fs::OFlags;
 use crate::{backend, io};
-#[cfg(any(apple, linux_like, target_os = "freebsd", target_os = "fuchsia"))]
+#[cfg(all(
+    feature = "alloc",
+    any(apple, linux_like, target_os = "freebsd", target_os = "fuchsia")
+))]
 use {crate::ffi::CString, alloc::vec::Vec};
+
+#[cfg(target_os = "linux")]
+use crate::{fd::FromRawFd, ioctl};
 
 bitflags::bitflags! {
     /// `O_*` flags for use with [`openpt`] and [`ioctl_tiocgptpeer`].
@@ -32,6 +40,9 @@ bitflags::bitflags! {
         /// rustix supports it on Linux, and FreeBSD and NetBSD support it.
         #[cfg(any(linux_kernel, target_os = "freebsd", target_os = "netbsd"))]
         const CLOEXEC = c::O_CLOEXEC as c::c_uint;
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -102,9 +113,12 @@ pub fn openpt(flags: OpenptFlags) -> io::Result<OwnedFd> {
 /// [POSIX]: https://pubs.opengroup.org/onlinepubs/9699919799/functions/ptsname.html
 /// [Linux]: https://man7.org/linux/man-pages/man3/ptsname.3.html
 /// [glibc]: https://www.gnu.org/software/libc/manual/html_node/Allocation.html#index-ptsname
+#[cfg(all(
+    feature = "alloc",
+    any(apple, linux_like, target_os = "freebsd", target_os = "fuchsia")
+))]
 #[inline]
 #[doc(alias = "ptsname_r")]
-#[cfg(any(apple, linux_like, target_os = "freebsd", target_os = "fuchsia"))]
 pub fn ptsname<Fd: AsFd, B: Into<Vec<u8>>>(fd: Fd, reuse: B) -> io::Result<CString> {
     backend::pty::syscalls::ptsname(fd.as_fd(), reuse.into())
 }
@@ -166,5 +180,27 @@ pub fn grantpt<Fd: AsFd>(fd: Fd) -> io::Result<()> {
 #[cfg(target_os = "linux")]
 #[inline]
 pub fn ioctl_tiocgptpeer<Fd: AsFd>(fd: Fd, flags: OpenptFlags) -> io::Result<OwnedFd> {
-    backend::pty::syscalls::ioctl_tiocgptpeer(fd.as_fd(), flags)
+    unsafe { ioctl::ioctl(fd, Tiocgptpeer(flags)) }
+}
+
+#[cfg(target_os = "linux")]
+struct Tiocgptpeer(OpenptFlags);
+
+#[cfg(target_os = "linux")]
+unsafe impl ioctl::Ioctl for Tiocgptpeer {
+    type Output = OwnedFd;
+
+    const IS_MUTATING: bool = false;
+    const OPCODE: ioctl::Opcode = ioctl::Opcode::old(c::TIOCGPTPEER as ioctl::RawOpcode);
+
+    fn as_ptr(&mut self) -> *mut c::c_void {
+        self.0.bits() as *mut c::c_void
+    }
+
+    unsafe fn output_from_ptr(
+        ret: ioctl::IoctlOutput,
+        _arg: *mut c::c_void,
+    ) -> io::Result<Self::Output> {
+        Ok(OwnedFd::from_raw_fd(ret))
+    }
 }

@@ -9,7 +9,7 @@ mod copy_file_range;
 #[cfg(not(any(target_os = "espidf", target_os = "redox")))]
 #[cfg(not(target_os = "haiku"))] // Haiku needs <https://github.com/rust-lang/rust/pull/112371>
 mod cwd;
-#[cfg(not(any(target_os = "espidf", target_os = "redox")))]
+#[cfg(all(feature = "alloc", not(any(target_os = "espidf", target_os = "redox"))))]
 mod dir;
 #[cfg(not(any(
     apple,
@@ -44,6 +44,7 @@ mod makedev;
 #[cfg(any(linux_kernel, target_os = "freebsd"))]
 mod memfd_create;
 #[cfg(linux_kernel)]
+#[cfg(feature = "fs")]
 mod mount;
 #[cfg(linux_kernel)]
 mod openat2;
@@ -70,7 +71,7 @@ pub use copy_file_range::copy_file_range;
 #[cfg(not(any(target_os = "espidf", target_os = "redox")))]
 #[cfg(not(target_os = "haiku"))] // Haiku needs <https://github.com/rust-lang/rust/pull/112371>
 pub use cwd::*;
-#[cfg(not(any(target_os = "espidf", target_os = "redox")))]
+#[cfg(all(feature = "alloc", not(any(target_os = "espidf", target_os = "redox"))))]
 pub use dir::{Dir, DirEntry};
 #[cfg(not(any(
     apple,
@@ -84,7 +85,7 @@ pub use dir::{Dir, DirEntry};
 pub use fadvise::{fadvise, Advice};
 pub use fcntl::*;
 #[cfg(apple)]
-pub use fcntl_apple::{fcntl_fullfsync, fcntl_rdadvise};
+pub use fcntl_apple::*;
 #[cfg(apple)]
 pub use fcopyfile::*;
 pub use fd::*;
@@ -105,6 +106,7 @@ pub use makedev::*;
 #[cfg(any(linux_kernel, target_os = "freebsd"))]
 pub use memfd_create::{memfd_create, MemfdFlags};
 #[cfg(linux_kernel)]
+#[cfg(feature = "fs")]
 pub use mount::*;
 #[cfg(linux_kernel)]
 pub use openat2::openat2;

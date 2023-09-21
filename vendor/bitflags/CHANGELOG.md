@@ -1,3 +1,17 @@
+# 2.4.0
+
+## What's Changed
+* Remove html_root_url by @eldruin in https://github.com/bitflags/bitflags/pull/368
+* Support unnamed flags by @KodrAus in https://github.com/bitflags/bitflags/pull/371
+* Update smoke test to verify all Clippy and rustc lints by @MitMaro in https://github.com/bitflags/bitflags/pull/374
+* Specify the behavior of bitflags by @KodrAus in https://github.com/bitflags/bitflags/pull/369
+
+## New Contributors
+* @eldruin made their first contribution in https://github.com/bitflags/bitflags/pull/368
+* @MitMaro made their first contribution in https://github.com/bitflags/bitflags/pull/374
+
+**Full Changelog**: https://github.com/bitflags/bitflags/compare/2.3.3...2.4.0
+
 # 2.3.3
 
 ## Changes to `-=`

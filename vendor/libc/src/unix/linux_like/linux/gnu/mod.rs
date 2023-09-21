@@ -116,13 +116,17 @@ s! {
             target_arch = "sparc",
             target_arch = "sparc64",
             target_arch = "mips",
-            target_arch = "mips64")))]
+            target_arch = "mips32r6",
+            target_arch = "mips64",
+            target_arch = "mips64r6")))]
         pub c_ispeed: ::speed_t,
         #[cfg(not(any(
             target_arch = "sparc",
             target_arch = "sparc64",
             target_arch = "mips",
-            target_arch = "mips64")))]
+            target_arch = "mips32r6",
+            target_arch = "mips64",
+            target_arch = "mips64r6")))]
         pub c_ospeed: ::speed_t,
     }
 
@@ -954,7 +958,10 @@ pub const KEYCTL_SUPPORTS_DECRYPT: u32 = 0x02;
 pub const KEYCTL_SUPPORTS_SIGN: u32 = 0x04;
 pub const KEYCTL_SUPPORTS_VERIFY: u32 = 0x08;
 cfg_if! {
-    if #[cfg(not(any(target_arch="mips", target_arch="mips64")))] {
+    if #[cfg(not(any(target_arch = "mips",
+                     target_arch = "mips32r6",
+                     target_arch = "mips64",
+                     target_arch = "mips64r6")))] {
         pub const KEYCTL_MOVE: u32 = 30;
         pub const KEYCTL_CAPABILITIES: u32 = 31;
 
@@ -1075,6 +1082,16 @@ pub const TIME_WAIT: ::c_int = 4;
 pub const TIME_ERROR: ::c_int = 5;
 pub const TIME_BAD: ::c_int = TIME_ERROR;
 pub const MAXTC: ::c_long = 6;
+
+// Portable GLOB_* flags are defined at the `linux_like` level.
+// The following are GNU extensions.
+pub const GLOB_PERIOD: ::c_int = 1 << 7;
+pub const GLOB_ALTDIRFUNC: ::c_int = 1 << 9;
+pub const GLOB_BRACE: ::c_int = 1 << 10;
+pub const GLOB_NOMAGIC: ::c_int = 1 << 11;
+pub const GLOB_TILDE: ::c_int = 1 << 12;
+pub const GLOB_ONLYDIR: ::c_int = 1 << 13;
+pub const GLOB_TILDE_CHECK: ::c_int = 1 << 14;
 
 cfg_if! {
     if #[cfg(any(
@@ -1378,7 +1395,9 @@ cfg_if! {
     if #[cfg(any(target_arch = "x86",
                  target_arch = "arm",
                  target_arch = "m68k",
+                 target_arch = "csky",
                  target_arch = "mips",
+                 target_arch = "mips32r6",
                  target_arch = "powerpc",
                  target_arch = "sparc",
                  target_arch = "riscv32"))] {
@@ -1388,6 +1407,7 @@ cfg_if! {
                         target_arch = "aarch64",
                         target_arch = "powerpc64",
                         target_arch = "mips64",
+                        target_arch = "mips64r6",
                         target_arch = "s390x",
                         target_arch = "sparc64",
                         target_arch = "riscv64",

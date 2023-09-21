@@ -53,7 +53,9 @@ pub enum Signal {
             linux_kernel,
             any(
                 target_arch = "mips",
+                target_arch = "mips32r6",
                 target_arch = "mips64",
+                target_arch = "mips64r6",
                 target_arch = "sparc",
                 target_arch = "sparc64"
             ),
@@ -107,7 +109,9 @@ pub enum Signal {
             linux_kernel,
             any(
                 target_arch = "mips",
+                target_arch = "mips32r6",
                 target_arch = "mips64",
+                target_arch = "mips64r6",
                 target_arch = "sparc",
                 target_arch = "sparc64"
             )
@@ -155,7 +159,9 @@ impl Signal {
                     linux_kernel,
                     any(
                         target_arch = "mips",
+                        target_arch = "mips32r6",
                         target_arch = "mips64",
+                        target_arch = "mips64r6",
                         target_arch = "sparc",
                         target_arch = "sparc64"
                     ),
@@ -188,7 +194,9 @@ impl Signal {
                     linux_kernel,
                     any(
                         target_arch = "mips",
+                        target_arch = "mips32r6",
                         target_arch = "mips64",
+                        target_arch = "mips64r6",
                         target_arch = "sparc",
                         target_arch = "sparc64"
                     )
@@ -208,7 +216,5 @@ impl Signal {
 
 #[test]
 fn test_sizes() {
-    use core::mem::size_of;
-
-    assert_eq!(size_of::<Signal>(), size_of::<c::c_int>());
+    assert_eq_size!(Signal, c::c_int);
 }

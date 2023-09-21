@@ -28,7 +28,7 @@ use crate::OutOfRange;
 /// Allows mapping from and to month, from 1-January to 12-December.
 /// Can be Serialized/Deserialized with serde
 // Actual implementation is zero-indexed, API intended as 1-indexed for more intuitive behavior.
-#[derive(PartialEq, Eq, Copy, Clone, Debug, Hash, PartialOrd)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "rustc-serialize", derive(RustcEncodable, RustcDecodable))]
 #[cfg_attr(feature = "rkyv", derive(Archive, Deserialize, Serialize))]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -218,7 +218,7 @@ impl num_traits::FromPrimitive for Month {
 }
 
 /// A duration in calendar months
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Months(pub(crate) u32);
 
@@ -233,6 +233,16 @@ impl Months {
 #[derive(Clone, PartialEq, Eq)]
 pub struct ParseMonthError {
     pub(crate) _dummy: (),
+}
+
+#[cfg(feature = "std")]
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
+impl std::error::Error for ParseMonthError {}
+
+impl fmt::Display for ParseMonthError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "ParseMonthError {{ .. }}")
+    }
 }
 
 impl fmt::Debug for ParseMonthError {
@@ -281,67 +291,6 @@ mod month_serde {
             D: de::Deserializer<'de>,
         {
             deserializer.deserialize_str(MonthVisitor)
-        }
-    }
-
-    #[test]
-    fn test_serde_serialize() {
-        use serde_json::to_string;
-        use Month::*;
-
-        let cases: Vec<(Month, &str)> = vec![
-            (January, "\"January\""),
-            (February, "\"February\""),
-            (March, "\"March\""),
-            (April, "\"April\""),
-            (May, "\"May\""),
-            (June, "\"June\""),
-            (July, "\"July\""),
-            (August, "\"August\""),
-            (September, "\"September\""),
-            (October, "\"October\""),
-            (November, "\"November\""),
-            (December, "\"December\""),
-        ];
-
-        for (month, expected_str) in cases {
-            let string = to_string(&month).unwrap();
-            assert_eq!(string, expected_str);
-        }
-    }
-
-    #[test]
-    fn test_serde_deserialize() {
-        use serde_json::from_str;
-        use Month::*;
-
-        let cases: Vec<(&str, Month)> = vec![
-            ("\"january\"", January),
-            ("\"jan\"", January),
-            ("\"FeB\"", February),
-            ("\"MAR\"", March),
-            ("\"mar\"", March),
-            ("\"april\"", April),
-            ("\"may\"", May),
-            ("\"june\"", June),
-            ("\"JULY\"", July),
-            ("\"august\"", August),
-            ("\"september\"", September),
-            ("\"October\"", October),
-            ("\"November\"", November),
-            ("\"DECEmbEr\"", December),
-        ];
-
-        for (string, expected_month) in cases {
-            let month = from_str::<Month>(string).unwrap();
-            assert_eq!(month, expected_month);
-        }
-
-        let errors: Vec<&str> =
-            vec!["\"not a month\"", "\"ja\"", "\"Dece\"", "Dec", "\"Augustin\""];
-
-        for string in errors {
-            from_str::<Month>(string).unwrap_err();
         }
     }
 }
@@ -402,5 +351,68 @@ mod tests {
         assert!(Month::January < Month::December);
         assert!(Month::July >= Month::May);
         assert!(Month::September > Month::March);
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn test_serde_serialize() {
+        use serde_json::to_string;
+        use Month::*;
+
+        let cases: Vec<(Month, &str)> = vec![
+            (January, "\"January\""),
+            (February, "\"February\""),
+            (March, "\"March\""),
+            (April, "\"April\""),
+            (May, "\"May\""),
+            (June, "\"June\""),
+            (July, "\"July\""),
+            (August, "\"August\""),
+            (September, "\"September\""),
+            (October, "\"October\""),
+            (November, "\"November\""),
+            (December, "\"December\""),
+        ];
+
+        for (month, expected_str) in cases {
+            let string = to_string(&month).unwrap();
+            assert_eq!(string, expected_str);
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "serde")]
+    fn test_serde_deserialize() {
+        use serde_json::from_str;
+        use Month::*;
+
+        let cases: Vec<(&str, Month)> = vec![
+            ("\"january\"", January),
+            ("\"jan\"", January),
+            ("\"FeB\"", February),
+            ("\"MAR\"", March),
+            ("\"mar\"", March),
+            ("\"april\"", April),
+            ("\"may\"", May),
+            ("\"june\"", June),
+            ("\"JULY\"", July),
+            ("\"august\"", August),
+            ("\"september\"", September),
+            ("\"October\"", October),
+            ("\"November\"", November),
+            ("\"DECEmbEr\"", December),
+        ];
+
+        for (string, expected_month) in cases {
+            let month = from_str::<Month>(string).unwrap();
+            assert_eq!(month, expected_month);
+        }
+
+        let errors: Vec<&str> =
+            vec!["\"not a month\"", "\"ja\"", "\"Dece\"", "Dec", "\"Augustin\""];
+
+        for string in errors {
+            from_str::<Month>(string).unwrap_err();
+        }
     }
 }

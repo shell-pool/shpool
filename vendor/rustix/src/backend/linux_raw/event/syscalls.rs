@@ -3,17 +3,20 @@
 //! # Safety
 //!
 //! See the `rustix::backend` module documentation for details.
-#![allow(unsafe_code)]
-#![allow(clippy::undocumented_unsafe_blocks)]
+#![allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
 
 use crate::backend::c;
-use crate::backend::conv::{
-    by_ref, c_int, c_uint, pass_usize, raw_fd, ret, ret_owned_fd, ret_usize, slice_mut, zero,
-};
-use crate::event::{epoll, EventfdFlags, PollFd};
-use crate::fd::{BorrowedFd, OwnedFd};
+use crate::backend::conv::{c_int, c_uint, ret_owned_fd, ret_usize, slice_mut};
+use crate::event::{EventfdFlags, PollFd};
+use crate::fd::OwnedFd;
 use crate::io;
-use linux_raw_sys::general::{EPOLL_CTL_ADD, EPOLL_CTL_DEL, EPOLL_CTL_MOD};
+#[cfg(feature = "alloc")]
+use {
+    crate::backend::conv::{by_ref, pass_usize, raw_fd, ret, zero},
+    crate::event::epoll,
+    crate::fd::BorrowedFd,
+    linux_raw_sys::general::{EPOLL_CTL_ADD, EPOLL_CTL_DEL, EPOLL_CTL_MOD},
+};
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use {
     crate::backend::conv::{opt_ref, size_of},
@@ -49,11 +52,13 @@ pub(crate) fn poll(fds: &mut [PollFd<'_>], timeout: c::c_int) -> io::Result<usiz
     }
 }
 
+#[cfg(feature = "alloc")]
 #[inline]
 pub(crate) fn epoll_create(flags: epoll::CreateFlags) -> io::Result<OwnedFd> {
     unsafe { ret_owned_fd(syscall_readonly!(__NR_epoll_create1, flags)) }
 }
 
+#[cfg(feature = "alloc")]
 #[inline]
 pub(crate) unsafe fn epoll_add(
     epfd: BorrowedFd<'_>,
@@ -69,6 +74,7 @@ pub(crate) unsafe fn epoll_add(
     ))
 }
 
+#[cfg(feature = "alloc")]
 #[inline]
 pub(crate) unsafe fn epoll_mod(
     epfd: BorrowedFd<'_>,
@@ -84,6 +90,7 @@ pub(crate) unsafe fn epoll_mod(
     ))
 }
 
+#[cfg(feature = "alloc")]
 #[inline]
 pub(crate) unsafe fn epoll_del(epfd: BorrowedFd<'_>, fd: c::c_int) -> io::Result<()> {
     ret(syscall_readonly!(
@@ -95,6 +102,7 @@ pub(crate) unsafe fn epoll_del(epfd: BorrowedFd<'_>, fd: c::c_int) -> io::Result
     ))
 }
 
+#[cfg(feature = "alloc")]
 #[inline]
 pub(crate) fn epoll_wait(
     epfd: BorrowedFd<'_>,

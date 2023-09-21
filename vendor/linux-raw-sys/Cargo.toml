@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.63"
 name = "linux-raw-sys"
-version = "0.4.3"
+version = "0.4.7"
 authors = ["Dan Gohman <dev@sunfishcode.online>"]
 exclude = [
     "/gen",
@@ -63,6 +63,7 @@ default = [
     "general",
     "errno",
 ]
+elf = []
 errno = []
 general = []
 if_ether = []

@@ -13,7 +13,7 @@
 edition = "2018"
 rust-version = "1.56"
 name = "quote"
-version = "1.0.32"
+version = "1.0.33"
 authors = ["David Tolnay <dtolnay@gmail.com>"]
 autobenches = false
 description = "Quasi-quoting macro quote!(...)"

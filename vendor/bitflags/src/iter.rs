@@ -1,18 +1,21 @@
-//! Iterating over set flag values.
+/*!
+Yield the bits of a source flags value in a set of contained flags values.
+*/
 
 use crate::{Flag, Flags};
 
-/// An iterator over a set of flags.
-///
-/// Any bits that don't correspond to a valid flag will be yielded
-/// as a final item from the iterator.
+/**
+An iterator over flags values.
+
+This iterator will yield flags values for contained, defined flags first, with any remaining bits yielded
+as a final flags value.
+*/
 pub struct Iter<B: 'static> {
     inner: IterNames<B>,
     done: bool,
 }
 
 impl<B: Flags> Iter<B> {
-    /// Create a new iterator over the given set of flags.
     pub(crate) fn new(flags: &B) -> Self {
         Iter {
             inner: IterNames::new(flags),
@@ -22,6 +25,7 @@ impl<B: Flags> Iter<B> {
 }
 
 impl<B: 'static> Iter<B> {
+    // Used by the `bitflags` macro
     #[doc(hidden)]
     pub const fn __private_const_new(flags: &'static [Flag<B>], source: B, remaining: B) -> Self {
         Iter {
@@ -54,9 +58,12 @@ impl<B: Flags> Iterator for Iter<B> {
     }
 }
 
-/// An iterator over a set of flags and their names.
-///
-/// Any bits that don't correspond to a valid flag will be ignored.
+/**
+An iterator over flags values.
+
+This iterator only yields flags values for contained, defined, named flags. Any remaining bits
+won't be yielded, but can be found with the [`IterNames::remaining`] method.
+*/
 pub struct IterNames<B: 'static> {
     flags: &'static [Flag<B>],
     idx: usize,
@@ -65,7 +72,6 @@ pub struct IterNames<B: 'static> {
 }
 
 impl<B: Flags> IterNames<B> {
-    /// Create a new iterator over the given set of flags.
     pub(crate) fn new(flags: &B) -> Self {
         IterNames {
             flags: B::FLAGS,
@@ -77,6 +83,7 @@ impl<B: Flags> IterNames<B> {
 }
 
 impl<B: 'static> IterNames<B> {
+    // Used by the bitflags macro
     #[doc(hidden)]
     pub const fn __private_const_new(flags: &'static [Flag<B>], source: B, remaining: B) -> Self {
         IterNames {
@@ -87,11 +94,11 @@ impl<B: 'static> IterNames<B> {
         }
     }
 
-    /// Get the remaining (unyielded) flags.
+    /// Get a flags value of any remaining bits that haven't been yielded yet.
     ///
     /// Once the iterator has finished, this method can be used to
     /// check whether or not there are any bits that didn't correspond
-    /// to a valid flag remaining.
+    /// to a contained, defined, named flag remaining.
     pub fn remaining(&self) -> &B {
         &self.remaining
     }
@@ -108,6 +115,11 @@ impl<B: Flags> Iterator for IterNames<B> {
             }
 
             self.idx += 1;
+
+            // Skip unnamed flags
+            if flag.name().is_empty() {
+                continue;
+            }
 
             let bits = flag.value().bits();
 

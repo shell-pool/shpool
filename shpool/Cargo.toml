@@ -1,0 +1,21 @@
+[package]
+name = "shpool"
+version = "0.2.5"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = { version = "3", features = ["derive"] } # cli parsing
+anyhow = "1" # dynamic, unstructured errors
+libshpool = { version = "0.2.5", path = "../libshpool" }
+
+[dev-dependencies]
+lazy_static = "1" # globals
+crossbeam-channel = "0.5" # channels
+nix = { version = "0.25", features = ["poll", "ioctl"] } # rusty wrapper for unix apis
+tempfile = "3" # keeping tests hermetic
+regex = "1" # test assertions
+serde_json = "1" # json parsing
+rand = "0.8" # generating tmp dirs
+ntest = "0.9" # test timeouts

@@ -3,23 +3,24 @@
 
 //! ISO 8601 date and time without timezone.
 
-#[cfg(any(feature = "alloc", feature = "std", test))]
+#[cfg(any(feature = "alloc", feature = "std"))]
 use core::borrow::Borrow;
 use core::fmt::Write;
 use core::ops::{Add, AddAssign, Sub, SubAssign};
+use core::time::Duration;
 use core::{fmt, str};
 
 #[cfg(feature = "rkyv")]
 use rkyv::{Archive, Deserialize, Serialize};
 
-#[cfg(any(feature = "alloc", feature = "std", test))]
+use crate::duration::Duration as OldDuration;
+#[cfg(any(feature = "alloc", feature = "std"))]
 use crate::format::DelayedFormat;
 use crate::format::{parse, parse_and_remainder, ParseError, ParseResult, Parsed, StrftimeItems};
 use crate::format::{Fixed, Item, Numeric, Pad};
 use crate::naive::{Days, IsoWeek, NaiveDate, NaiveTime};
 use crate::offset::Utc;
-use crate::oldtime::Duration as OldDuration;
-use crate::{DateTime, Datelike, LocalResult, Months, TimeZone, Timelike, Weekday};
+use crate::{expect, DateTime, Datelike, LocalResult, Months, TimeZone, Timelike, Weekday};
 
 #[cfg(feature = "rustc-serialize")]
 pub(super) mod rustc_serialize;
@@ -109,11 +110,15 @@ impl NaiveDateTime {
     /// For a non-naive version of this function see
     /// [`TimeZone::timestamp`](../offset/trait.TimeZone.html#method.timestamp).
     ///
-    /// The nanosecond part can exceed 1,000,000,000 in order to represent the
-    /// [leap second](./struct.NaiveTime.html#leap-second-handling). (The true "UNIX
-    /// timestamp" cannot represent a leap second unambiguously.)
+    /// The nanosecond part can exceed 1,000,000,000 in order to represent a
+    /// [leap second](NaiveTime#leap-second-handling), but only when `secs % 60 == 59`.
+    /// (The true "UNIX timestamp" cannot represent a leap second unambiguously.)
     ///
-    /// Panics on the out-of-range number of seconds and/or invalid nanosecond.
+    /// # Panics
+    ///
+    /// Panics if the number of seconds would be out of range for a `NaiveDateTime` (more than
+    /// ca. 262,000 years away from common era), and panics on an invalid nanosecond (2 seconds or
+    /// more).
     #[deprecated(since = "0.4.23", note = "use `from_timestamp_opt()` instead")]
     #[inline]
     #[must_use]
@@ -126,7 +131,10 @@ impl NaiveDateTime {
     ///
     /// The UNIX epoch starts on midnight, January 1, 1970, UTC.
     ///
-    /// Returns `None` on an out-of-range number of milliseconds.
+    /// # Errors
+    ///
+    /// Returns `None` if the number of milliseconds would be out of range for a `NaiveDateTime`
+    /// (more than ca. 262,000 years away from common era)
     ///
     /// # Example
     ///
@@ -155,7 +163,10 @@ impl NaiveDateTime {
     ///
     /// The UNIX epoch starts on midnight, January 1, 1970, UTC.
     ///
-    /// Returns `None` on an out-of-range number of microseconds.
+    /// # Errors
+    ///
+    /// Returns `None` if the number of microseconds would be out of range for a `NaiveDateTime`
+    /// (more than ca. 262,000 years away from common era)
     ///
     /// # Example
     ///
@@ -185,12 +196,15 @@ impl NaiveDateTime {
     /// since the midnight UTC on January 1, 1970 (aka "UNIX timestamp")
     /// and the number of nanoseconds since the last whole non-leap second.
     ///
-    /// The nanosecond part can exceed 1,000,000,000
-    /// in order to represent the [leap second](./struct.NaiveTime.html#leap-second-handling).
+    /// The nanosecond part can exceed 1,000,000,000 in order to represent a
+    /// [leap second](NaiveTime#leap-second-handling), but only when `secs % 60 == 59`.
     /// (The true "UNIX timestamp" cannot represent a leap second unambiguously.)
     ///
-    /// Returns `None` on the out-of-range number of seconds (more than 262 000 years away
-    /// from common era) and/or invalid nanosecond (2 seconds or more).
+    /// # Errors
+    ///
+    /// Returns `None` if the number of seconds would be out of range for a `NaiveDateTime` (more
+    /// than ca. 262,000 years away from common era), and panics on an invalid nanosecond
+    /// (2 seconds or more).
     ///
     /// # Example
     ///
@@ -202,8 +216,9 @@ impl NaiveDateTime {
     ///
     /// assert!(from_timestamp_opt(0, 0).is_some());
     /// assert!(from_timestamp_opt(0, 999_999_999).is_some());
-    /// assert!(from_timestamp_opt(0, 1_500_000_000).is_some()); // leap second
-    /// assert!(from_timestamp_opt(0, 2_000_000_000).is_none());
+    /// assert!(from_timestamp_opt(0, 1_500_000_000).is_none()); // invalid leap second
+    /// assert!(from_timestamp_opt(59, 1_500_000_000).is_some()); // leap second
+    /// assert!(from_timestamp_opt(59, 2_000_000_000).is_none());
     /// assert!(from_timestamp_opt(i64::MAX, 0).is_none());
     /// ```
     #[inline]
@@ -390,11 +405,6 @@ impl NaiveDateTime {
     /// Note that this does *not* account for the timezone!
     /// The true "UNIX timestamp" would count seconds since the midnight *UTC* on the epoch.
     ///
-    /// Note also that this does reduce the number of years that can be
-    /// represented from ~584 Billion to ~584 Million. (If this is a problem,
-    /// please file an issue to let me know what domain needs millisecond
-    /// precision over billions of years, I'm curious.)
-    ///
     /// # Example
     ///
     /// ```
@@ -421,11 +431,6 @@ impl NaiveDateTime {
     /// Note that this does *not* account for the timezone!
     /// The true "UNIX timestamp" would count seconds since the midnight *UTC* on the epoch.
     ///
-    /// Note also that this does reduce the number of years that can be
-    /// represented from ~584 Billion to ~584 Thousand. (If this is a problem,
-    /// please file an issue to let me know what domain needs microsecond
-    /// precision over millennia, I'm curious.)
-    ///
     /// # Example
     ///
     /// ```
@@ -451,13 +456,31 @@ impl NaiveDateTime {
     ///
     /// # Panics
     ///
-    /// Note also that this does reduce the number of years that can be
-    /// represented from ~584 Billion to ~584 years. The dates that can be
-    /// represented as nanoseconds are between 1677-09-21T00:12:44.0 and
-    /// 2262-04-11T23:47:16.854775804.
+    /// An `i64` with nanosecond precision can span a range of ~584 years. This function panics on
+    /// an out of range `NaiveDateTime`.
     ///
-    /// (If this is a problem, please file an issue to let me know what domain
-    /// needs nanosecond precision over millennia, I'm curious.)
+    /// The dates that can be represented as nanoseconds are between 1677-09-21T00:12:44.0 and
+    /// 2262-04-11T23:47:16.854775804.
+    #[deprecated(since = "0.4.31", note = "use `timestamp_nanos_opt()` instead")]
+    #[inline]
+    #[must_use]
+    pub fn timestamp_nanos(&self) -> i64 {
+        self.timestamp_nanos_opt()
+            .expect("value can not be represented in a timestamp with nanosecond precision.")
+    }
+
+    /// Returns the number of non-leap *nanoseconds* since midnight on January 1, 1970.
+    ///
+    /// Note that this does *not* account for the timezone!
+    /// The true "UNIX timestamp" would count seconds since the midnight *UTC* on the epoch.
+    ///
+    /// # Errors
+    ///
+    /// An `i64` with nanosecond precision can span a range of ~584 years. This function returns
+    /// `None` on an out of range `NaiveDateTime`.
+    ///
+    /// The dates that can be represented as nanoseconds are between 1677-09-21T00:12:44.0 and
+    /// 2262-04-11T23:47:16.854775804.
     ///
     /// # Example
     ///
@@ -465,12 +488,12 @@ impl NaiveDateTime {
     /// use chrono::{NaiveDate, NaiveDateTime};
     ///
     /// let dt = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap().and_hms_nano_opt(0, 0, 1, 444).unwrap();
-    /// assert_eq!(dt.timestamp_nanos(), 1_000_000_444);
+    /// assert_eq!(dt.timestamp_nanos_opt(), Some(1_000_000_444));
     ///
     /// let dt = NaiveDate::from_ymd_opt(2001, 9, 9).unwrap().and_hms_nano_opt(1, 46, 40, 555).unwrap();
     ///
     /// const A_BILLION: i64 = 1_000_000_000;
-    /// let nanos = dt.timestamp_nanos();
+    /// let nanos = dt.timestamp_nanos_opt().unwrap();
     /// assert_eq!(nanos, 1_000_000_000_000_000_555);
     /// assert_eq!(
     ///     Some(dt),
@@ -479,9 +502,27 @@ impl NaiveDateTime {
     /// ```
     #[inline]
     #[must_use]
-    pub fn timestamp_nanos(&self) -> i64 {
-        let as_ns = self.timestamp() * 1_000_000_000;
-        as_ns + i64::from(self.timestamp_subsec_nanos())
+    pub fn timestamp_nanos_opt(&self) -> Option<i64> {
+        let mut timestamp = self.timestamp();
+        let mut timestamp_subsec_nanos = i64::from(self.timestamp_subsec_nanos());
+
+        // subsec nanos are always non-negative, however the timestamp itself (both in seconds and in nanos) can be
+        // negative. Now i64::MIN is NOT dividable by 1_000_000_000, so
+        //
+        //   (timestamp * 1_000_000_000) + nanos
+        //
+        // may underflow (even when in theory we COULD represent the datetime as i64) because we add the non-negative
+        // nanos AFTER the multiplication. This is fixed by converting the negative case to
+        //
+        //   ((timestamp + 1) * 1_000_000_000) + (ns - 1_000_000_000)
+        //
+        // Also see <https://github.com/chronotope/chrono/issues/1289>.
+        if timestamp < 0 && timestamp_subsec_nanos > 0 {
+            timestamp_subsec_nanos -= 1_000_000_000;
+            timestamp += 1;
+        }
+
+        timestamp.checked_mul(1_000_000_000).and_then(|ns| ns.checked_add(timestamp_subsec_nanos))
     }
 
     /// Returns the number of milliseconds since the last whole non-leap second.
@@ -557,7 +598,9 @@ impl NaiveDateTime {
     /// except when the `NaiveDateTime` itself represents a leap second
     /// in which case the assumption becomes that **there is exactly a single leap second ever**.
     ///
-    /// Returns `None` when it will result in overflow.
+    /// # Errors
+    ///
+    /// Returns `None` if the resulting date would be out of range.
     ///
     /// # Example
     ///
@@ -630,9 +673,11 @@ impl NaiveDateTime {
 
     /// Adds given `Months` to the current date and time.
     ///
-    /// Returns `None` when it will result in overflow.
+    /// Uses the last day of the month if the day does not exist in the resulting month.
     ///
-    /// Overflow returns `None`.
+    /// # Errors
+    ///
+    /// Returns `None` if the resulting date would be out of range.
     ///
     /// # Example
     ///
@@ -663,7 +708,9 @@ impl NaiveDateTime {
     /// except when the `NaiveDateTime` itself represents a leap second
     /// in which case the assumption becomes that **there is exactly a single leap second ever**.
     ///
-    /// Returns `None` when it will result in overflow.
+    /// # Errors
+    ///
+    /// Returns `None` if the resulting date would be out of range.
     ///
     /// # Example
     ///
@@ -732,9 +779,11 @@ impl NaiveDateTime {
 
     /// Subtracts given `Months` from the current date and time.
     ///
-    /// Returns `None` when it will result in overflow.
+    /// Uses the last day of the month if the day does not exist in the resulting month.
     ///
-    /// Overflow returns `None`.
+    /// # Errors
+    ///
+    /// Returns `None` if the resulting date would be out of range.
     ///
     /// # Example
     ///
@@ -844,7 +893,7 @@ impl NaiveDateTime {
     /// # let dt = NaiveDate::from_ymd_opt(2015, 9, 5).unwrap().and_hms_opt(23, 56, 4).unwrap();
     /// assert_eq!(format!("{}", dt.format_with_items(fmt)), "2015-09-05 23:56:04");
     /// ```
-    #[cfg(any(feature = "alloc", feature = "std", test))]
+    #[cfg(any(feature = "alloc", feature = "std"))]
     #[cfg_attr(docsrs, doc(cfg(any(feature = "alloc", feature = "std"))))]
     #[inline]
     #[must_use]
@@ -888,7 +937,7 @@ impl NaiveDateTime {
     /// assert_eq!(format!("{}", dt.format("%Y-%m-%d %H:%M:%S")), "2015-09-05 23:56:04");
     /// assert_eq!(format!("{}", dt.format("around %l %p on %b %-d")), "around 11 PM on Sep 5");
     /// ```
-    #[cfg(any(feature = "alloc", feature = "std", test))]
+    #[cfg(any(feature = "alloc", feature = "std"))]
     #[cfg_attr(docsrs, doc(cfg(any(feature = "alloc", feature = "std"))))]
     #[inline]
     #[must_use]
@@ -937,14 +986,19 @@ impl NaiveDateTime {
 
     /// The minimum possible `NaiveDateTime`.
     pub const MIN: Self = Self { date: NaiveDate::MIN, time: NaiveTime::MIN };
+
     /// The maximum possible `NaiveDateTime`.
     pub const MAX: Self = Self { date: NaiveDate::MAX, time: NaiveTime::MAX };
+
+    /// The Unix Epoch, 1970-01-01 00:00:00.
+    pub const UNIX_EPOCH: Self =
+        expect!(NaiveDate::from_ymd_opt(1970, 1, 1), "").and_time(NaiveTime::MIN);
 }
 
 impl Datelike for NaiveDateTime {
     /// Returns the year number in the [calendar date](./struct.NaiveDate.html#calendar-date).
     ///
-    /// See also the [`NaiveDate::year`] method.
+    /// See also the [`NaiveDate::year`](./struct.NaiveDate.html#method.year) method.
     ///
     /// # Example
     ///
@@ -1095,11 +1149,15 @@ impl Datelike for NaiveDateTime {
         self.date.iso_week()
     }
 
-    /// Makes a new `NaiveDateTime` with the year number changed.
-    ///
-    /// Returns `None` when the resulting `NaiveDateTime` would be invalid.
+    /// Makes a new `NaiveDateTime` with the year number changed, while keeping the same month and
+    /// day.
     ///
     /// See also the [`NaiveDate::with_year`] method.
+    ///
+    /// # Errors
+    ///
+    /// Returns `None` if the resulting date does not exist, or when the `NaiveDateTime` would be
+    /// out of range.
     ///
     /// # Example
     ///
@@ -1117,9 +1175,11 @@ impl Datelike for NaiveDateTime {
 
     /// Makes a new `NaiveDateTime` with the month number (starting from 1) changed.
     ///
-    /// Returns `None` when the resulting `NaiveDateTime` would be invalid.
-    ///
     /// See also the [`NaiveDate::with_month`] method.
+    ///
+    /// # Errors
+    ///
+    /// Returns `None` if the resulting date does not exist, or if the value for `month` is invalid.
     ///
     /// # Example
     ///
@@ -1138,9 +1198,12 @@ impl Datelike for NaiveDateTime {
 
     /// Makes a new `NaiveDateTime` with the month number (starting from 0) changed.
     ///
-    /// Returns `None` when the resulting `NaiveDateTime` would be invalid.
-    ///
     /// See also the [`NaiveDate::with_month0`] method.
+    ///
+    /// # Errors
+    ///
+    /// Returns `None` if the resulting date does not exist, or if the value for `month0` is
+    /// invalid.
     ///
     /// # Example
     ///
@@ -1159,9 +1222,11 @@ impl Datelike for NaiveDateTime {
 
     /// Makes a new `NaiveDateTime` with the day of month (starting from 1) changed.
     ///
-    /// Returns `None` when the resulting `NaiveDateTime` would be invalid.
-    ///
     /// See also the [`NaiveDate::with_day`] method.
+    ///
+    /// # Errors
+    ///
+    /// Returns `None` if the resulting date does not exist, or if the value for `day` is invalid.
     ///
     /// # Example
     ///
@@ -1179,9 +1244,11 @@ impl Datelike for NaiveDateTime {
 
     /// Makes a new `NaiveDateTime` with the day of month (starting from 0) changed.
     ///
-    /// Returns `None` when the resulting `NaiveDateTime` would be invalid.
-    ///
     /// See also the [`NaiveDate::with_day0`] method.
+    ///
+    /// # Errors
+    ///
+    /// Returns `None` if the resulting date does not exist, or if the value for `day0` is invalid.
     ///
     /// # Example
     ///
@@ -1199,9 +1266,12 @@ impl Datelike for NaiveDateTime {
 
     /// Makes a new `NaiveDateTime` with the day of year (starting from 1) changed.
     ///
-    /// Returns `None` when the resulting `NaiveDateTime` would be invalid.
-    ///
     /// See also the [`NaiveDate::with_ordinal`] method.
+    ///
+    /// # Errors
+    ///
+    /// Returns `None` if the resulting date does not exist, or if the value for `ordinal` is
+    /// invalid.
     ///
     /// # Example
     ///
@@ -1226,9 +1296,12 @@ impl Datelike for NaiveDateTime {
 
     /// Makes a new `NaiveDateTime` with the day of year (starting from 0) changed.
     ///
-    /// Returns `None` when the resulting `NaiveDateTime` would be invalid.
-    ///
     /// See also the [`NaiveDate::with_ordinal0`] method.
+    ///
+    /// # Errors
+    ///
+    /// Returns `None` if the resulting date does not exist, or if the value for `ordinal0` is
+    /// invalid.
     ///
     /// # Example
     ///
@@ -1325,9 +1398,11 @@ impl Timelike for NaiveDateTime {
 
     /// Makes a new `NaiveDateTime` with the hour number changed.
     ///
-    /// Returns `None` when the resulting `NaiveDateTime` would be invalid.
-    ///
     /// See also the [`NaiveTime::with_hour`] method.
+    ///
+    /// # Errors
+    ///
+    /// Returns `None` if the value for `hour` is invalid.
     ///
     /// # Example
     ///
@@ -1346,10 +1421,11 @@ impl Timelike for NaiveDateTime {
 
     /// Makes a new `NaiveDateTime` with the minute number changed.
     ///
-    /// Returns `None` when the resulting `NaiveDateTime` would be invalid.
+    /// See also the [`NaiveTime::with_minute`] method.
     ///
-    /// See also the
-    /// [`NaiveTime::with_minute`] method.
+    /// # Errors
+    ///
+    /// Returns `None` if the value for `minute` is invalid.
     ///
     /// # Example
     ///
@@ -1368,11 +1444,14 @@ impl Timelike for NaiveDateTime {
 
     /// Makes a new `NaiveDateTime` with the second number changed.
     ///
-    /// Returns `None` when the resulting `NaiveDateTime` would be invalid. As
-    /// with the [`NaiveDateTime::second`] method, the input range is
-    /// restricted to 0 through 59.
+    /// As with the [`second`](#method.second) method,
+    /// the input range is restricted to 0 through 59.
     ///
     /// See also the [`NaiveTime::with_second`] method.
+    ///
+    /// # Errors
+    ///
+    /// Returns `None` if the value for `second` is invalid.
     ///
     /// # Example
     ///
@@ -1397,16 +1476,20 @@ impl Timelike for NaiveDateTime {
     ///
     /// See also the [`NaiveTime::with_nanosecond`] method.
     ///
+    /// # Errors
+    ///
+    /// Returns `None` if `nanosecond >= 2,000,000,000`.
+    ///
     /// # Example
     ///
     /// ```
     /// use chrono::{NaiveDate, NaiveDateTime, Timelike};
     ///
-    /// let dt: NaiveDateTime = NaiveDate::from_ymd_opt(2015, 9, 8).unwrap().and_hms_milli_opt(12, 34, 56, 789).unwrap();
+    /// let dt: NaiveDateTime = NaiveDate::from_ymd_opt(2015, 9, 8).unwrap().and_hms_milli_opt(12, 34, 59, 789).unwrap();
     /// assert_eq!(dt.with_nanosecond(333_333_333),
-    ///            Some(NaiveDate::from_ymd_opt(2015, 9, 8).unwrap().and_hms_nano_opt(12, 34, 56, 333_333_333).unwrap()));
+    ///            Some(NaiveDate::from_ymd_opt(2015, 9, 8).unwrap().and_hms_nano_opt(12, 34, 59, 333_333_333).unwrap()));
     /// assert_eq!(dt.with_nanosecond(1_333_333_333), // leap second
-    ///            Some(NaiveDate::from_ymd_opt(2015, 9, 8).unwrap().and_hms_nano_opt(12, 34, 56, 1_333_333_333).unwrap()));
+    ///            Some(NaiveDate::from_ymd_opt(2015, 9, 8).unwrap().and_hms_nano_opt(12, 34, 59, 1_333_333_333).unwrap()));
     /// assert_eq!(dt.with_nanosecond(2_000_000_000), None);
     /// ```
     #[inline]
@@ -1421,7 +1504,9 @@ impl Timelike for NaiveDateTime {
 /// second ever**, except when the `NaiveDateTime` itself represents a leap  second in which case
 /// the assumption becomes that **there is exactly a single leap second ever**.
 ///
-/// Panics on underflow or overflow. Use [`NaiveDateTime::checked_add_signed`]
+/// # Panics
+///
+/// Panics if the resulting date would be out of range. Use [`NaiveDateTime::checked_add_signed`]
 /// to detect that.
 ///
 /// # Example
@@ -1474,9 +1559,27 @@ impl Add<OldDuration> for NaiveDateTime {
     }
 }
 
+impl Add<Duration> for NaiveDateTime {
+    type Output = NaiveDateTime;
+
+    #[inline]
+    fn add(self, rhs: Duration) -> NaiveDateTime {
+        let rhs = OldDuration::from_std(rhs)
+            .expect("overflow converting from core::time::Duration to chrono::Duration");
+        self.checked_add_signed(rhs).expect("`NaiveDateTime + Duration` overflowed")
+    }
+}
+
 impl AddAssign<OldDuration> for NaiveDateTime {
     #[inline]
     fn add_assign(&mut self, rhs: OldDuration) {
+        *self = self.add(rhs);
+    }
+}
+
+impl AddAssign<Duration> for NaiveDateTime {
+    #[inline]
+    fn add_assign(&mut self, rhs: Duration) {
         *self = self.add(rhs);
     }
 }
@@ -1583,9 +1686,27 @@ impl Sub<OldDuration> for NaiveDateTime {
     }
 }
 
+impl Sub<Duration> for NaiveDateTime {
+    type Output = NaiveDateTime;
+
+    #[inline]
+    fn sub(self, rhs: Duration) -> NaiveDateTime {
+        let rhs = OldDuration::from_std(rhs)
+            .expect("overflow converting from core::time::Duration to chrono::Duration");
+        self.checked_sub_signed(rhs).expect("`NaiveDateTime - Duration` overflowed")
+    }
+}
+
 impl SubAssign<OldDuration> for NaiveDateTime {
     #[inline]
     fn sub_assign(&mut self, rhs: OldDuration) {
+        *self = self.sub(rhs);
+    }
+}
+
+impl SubAssign<Duration> for NaiveDateTime {
+    #[inline]
+    fn sub_assign(&mut self, rhs: Duration) {
         *self = self.sub(rhs);
     }
 }

@@ -12,6 +12,13 @@ fn exists<P: AsRef<Path>>(path: P) -> bool {
 }
 
 #[test]
+fn test_prefix() {
+    let tmpfile = NamedTempFile::with_prefix("prefix").unwrap();
+    let name = tmpfile.path().file_name().unwrap().to_str().unwrap();
+    assert!(name.starts_with("prefix"));
+}
+
+#[test]
 fn test_basic() {
     let mut tmpfile = NamedTempFile::new().unwrap();
     write!(tmpfile, "abcde").unwrap();

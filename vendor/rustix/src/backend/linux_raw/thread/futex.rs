@@ -9,6 +9,10 @@ bitflags::bitflags! {
         const PRIVATE = linux_raw_sys::general::FUTEX_PRIVATE_FLAG;
         /// `FUTEX_CLOCK_REALTIME`
         const CLOCK_REALTIME = linux_raw_sys::general::FUTEX_CLOCK_REALTIME;
+
+        // This deliberately lacks a `const _ = !0`, so that users can use
+        // `from_bits_truncate` to extract the `SocketFlags` from a flags
+        // value that also includes a `SocketType`.
     }
 }
 

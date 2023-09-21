@@ -4,7 +4,7 @@
 //! ISO 8601 calendar date with time zone.
 #![allow(deprecated)]
 
-#[cfg(any(feature = "alloc", feature = "std", test))]
+#[cfg(any(feature = "alloc", feature = "std"))]
 use core::borrow::Borrow;
 use core::cmp::Ordering;
 use core::ops::{Add, AddAssign, Sub, SubAssign};
@@ -13,13 +13,13 @@ use core::{fmt, hash};
 #[cfg(feature = "rkyv")]
 use rkyv::{Archive, Deserialize, Serialize};
 
+use crate::duration::Duration as OldDuration;
 #[cfg(feature = "unstable-locales")]
 use crate::format::Locale;
-#[cfg(any(feature = "alloc", feature = "std", test))]
+#[cfg(any(feature = "alloc", feature = "std"))]
 use crate::format::{DelayedFormat, Item, StrftimeItems};
 use crate::naive::{IsoWeek, NaiveDate, NaiveTime};
 use crate::offset::{TimeZone, Utc};
-use crate::oldtime::Duration as OldDuration;
 use crate::DateTime;
 use crate::{Datelike, Weekday};
 
@@ -74,8 +74,6 @@ pub const MAX_DATE: Date<Utc> = Date::<Utc>::MAX_UTC;
 impl<Tz: TimeZone> Date<Tz> {
     /// Makes a new `Date` with given *UTC* date and offset.
     /// The local date should be constructed via the `TimeZone` trait.
-    //
-    // note: this constructor is purposely not named to `new` to discourage the direct usage.
     #[inline]
     #[must_use]
     pub fn from_utc(date: NaiveDate, offset: Tz::Offset) -> Date<Tz> {
@@ -85,7 +83,7 @@ impl<Tz: TimeZone> Date<Tz> {
     /// Makes a new `DateTime` from the current date and given `NaiveTime`.
     /// The offset in the current date is preserved.
     ///
-    /// Panics on invalid datetime.
+    /// Returns `None` on invalid datetime.
     #[inline]
     #[must_use]
     pub fn and_time(&self, time: NaiveTime) -> Option<DateTime<Tz>> {
@@ -335,7 +333,7 @@ where
     Tz::Offset: fmt::Display,
 {
     /// Formats the date with the specified formatting items.
-    #[cfg(any(feature = "alloc", feature = "std", test))]
+    #[cfg(any(feature = "alloc", feature = "std"))]
     #[cfg_attr(docsrs, doc(cfg(any(feature = "alloc", feature = "std"))))]
     #[inline]
     #[must_use]
@@ -350,7 +348,7 @@ where
     /// Formats the date with the specified format string.
     /// See the [`crate::format::strftime`] module
     /// on the supported escape sequences.
-    #[cfg(any(feature = "alloc", feature = "std", test))]
+    #[cfg(any(feature = "alloc", feature = "std"))]
     #[cfg_attr(docsrs, doc(cfg(any(feature = "alloc", feature = "std"))))]
     #[inline]
     #[must_use]
@@ -578,7 +576,7 @@ where
 mod tests {
     use super::Date;
 
-    use crate::oldtime::Duration;
+    use crate::duration::Duration;
     use crate::{FixedOffset, NaiveDate, Utc};
 
     #[cfg(feature = "clock")]

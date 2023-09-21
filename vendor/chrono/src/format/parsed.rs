@@ -5,12 +5,10 @@
 //! They can be constructed incrementally while being checked for consistency.
 
 use super::{ParseResult, IMPOSSIBLE, NOT_ENOUGH, OUT_OF_RANGE};
+use crate::duration::Duration as OldDuration;
 use crate::naive::{NaiveDate, NaiveDateTime, NaiveTime};
 use crate::offset::{FixedOffset, LocalResult, Offset, TimeZone};
-use crate::oldtime::Duration as OldDuration;
-use crate::DateTime;
-use crate::Weekday;
-use crate::{Datelike, Timelike};
+use crate::{DateTime, Datelike, Timelike, Weekday};
 
 /// Parsed parts of date and time. There are two classes of methods:
 ///
@@ -627,7 +625,12 @@ impl Parsed {
     /// plus a time zone offset.
     /// Either way those fields have to be consistent to each other.
     pub fn to_datetime(&self) -> ParseResult<DateTime<FixedOffset>> {
-        let offset = self.offset.ok_or(NOT_ENOUGH)?;
+        // If there is no explicit offset, consider a timestamp value as indication of a UTC value.
+        let offset = match (self.offset, self.timestamp) {
+            (Some(off), _) => off,
+            (None, Some(_)) => 0, // UNIX timestamp may assume 0 offset
+            (None, None) => return Err(NOT_ENOUGH),
+        };
         let datetime = self.to_naive_datetime_with_offset(offset)?;
         let offset = FixedOffset::east_opt(offset).ok_or(OUT_OF_RANGE)?;
 

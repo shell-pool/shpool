@@ -1,15 +1,10 @@
 #[cfg(any(linux_kernel, target_os = "fuchsia"))]
 use crate::backend::c;
-#[cfg(all(
-    any(target_arch = "arm", target_arch = "mips", target_arch = "x86"),
-    target_env = "gnu",
-))]
+#[cfg(any(linux_kernel, target_os = "fuchsia"))]
+#[cfg(fix_y2038)]
 use crate::timespec::LibcTimespec;
 #[cfg(any(linux_kernel, target_os = "fuchsia"))]
-#[cfg(all(
-    any(target_arch = "arm", target_arch = "mips", target_arch = "x86"),
-    target_env = "gnu",
-))]
+#[cfg(fix_y2038)]
 use crate::timespec::Timespec;
 #[cfg(any(linux_kernel, target_os = "fuchsia"))]
 use bitflags::bitflags;
@@ -20,10 +15,7 @@ use bitflags::bitflags;
 /// [`timerfd_gettime`]: crate::time::timerfd_gettime
 /// [`timerfd_settime`]: crate::time::timerfd_settime
 #[cfg(any(linux_kernel, target_os = "fuchsia"))]
-#[cfg(not(all(
-    any(target_arch = "arm", target_arch = "mips", target_arch = "x86"),
-    target_env = "gnu",
-)))]
+#[cfg(not(fix_y2038))]
 pub type Itimerspec = c::itimerspec;
 
 /// `struct itimerspec` for use with [`timerfd_gettime`] and
@@ -32,33 +24,25 @@ pub type Itimerspec = c::itimerspec;
 /// [`timerfd_gettime`]: crate::time::timerfd_gettime
 /// [`timerfd_settime`]: crate::time::timerfd_settime
 #[cfg(any(linux_kernel, target_os = "fuchsia"))]
-#[cfg(all(
-    any(target_arch = "arm", target_arch = "mips", target_arch = "x86"),
-    target_env = "gnu",
-))]
-#[allow(missing_docs)]
+#[cfg(fix_y2038)]
 #[repr(C)]
 #[derive(Debug, Clone)]
 pub struct Itimerspec {
+    /// The interval of an interval timer.
     pub it_interval: Timespec,
+    /// Time remaining in the current interval.
     pub it_value: Timespec,
 }
 
 /// On most platforms, `LibcItimerspec` is just `Itimerspec`.
 #[cfg(any(linux_kernel, target_os = "fuchsia"))]
-#[cfg(not(all(
-    any(target_arch = "arm", target_arch = "mips", target_arch = "x86"),
-    target_env = "gnu",
-)))]
+#[cfg(not(fix_y2038))]
 pub(crate) type LibcItimerspec = Itimerspec;
 
 /// On 32-bit glibc platforms, `LibcTimespec` differs from `Timespec`, so we
 /// define our own struct, with bidirectional `From` impls.
 #[cfg(any(linux_kernel, target_os = "fuchsia"))]
-#[cfg(all(
-    any(target_arch = "arm", target_arch = "mips", target_arch = "x86"),
-    target_env = "gnu",
-))]
+#[cfg(fix_y2038)]
 #[repr(C)]
 #[derive(Debug, Clone)]
 pub(crate) struct LibcItimerspec {
@@ -67,10 +51,7 @@ pub(crate) struct LibcItimerspec {
 }
 
 #[cfg(any(linux_kernel, target_os = "fuchsia"))]
-#[cfg(all(
-    any(target_arch = "arm", target_arch = "mips", target_arch = "x86"),
-    target_env = "gnu",
-))]
+#[cfg(fix_y2038)]
 impl From<LibcItimerspec> for Itimerspec {
     #[inline]
     fn from(t: LibcItimerspec) -> Self {
@@ -82,10 +63,7 @@ impl From<LibcItimerspec> for Itimerspec {
 }
 
 #[cfg(any(linux_kernel, target_os = "fuchsia"))]
-#[cfg(all(
-    any(target_arch = "arm", target_arch = "mips", target_arch = "x86"),
-    target_env = "gnu",
-))]
+#[cfg(fix_y2038)]
 impl From<Itimerspec> for LibcItimerspec {
     #[inline]
     fn from(t: Itimerspec) -> Self {
@@ -109,6 +87,9 @@ bitflags! {
 
         /// `TFD_CLOEXEC`
         const CLOEXEC = bitcast!(c::TFD_CLOEXEC);
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -126,6 +107,9 @@ bitflags! {
         /// `TFD_TIMER_CANCEL_ON_SET`
         #[cfg(linux_kernel)]
         const CANCEL_ON_SET = bitcast!(c::TFD_TIMER_CANCEL_ON_SET);
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -139,10 +123,10 @@ bitflags! {
 pub enum TimerfdClockId {
     /// `CLOCK_REALTIME`—A clock that tells the “real” time.
     ///
-    /// This is a clock that tells the amount of time elapsed since the
-    /// Unix epoch, 1970-01-01T00:00:00Z. The clock is externally settable, so
-    /// it is not monotonic. Successive reads may see decreasing times, so it
-    /// isn't reliable for measuring durations.
+    /// This is a clock that tells the amount of time elapsed since the Unix
+    /// epoch, 1970-01-01T00:00:00Z. The clock is externally settable, so it is
+    /// not monotonic. Successive reads may see decreasing times, so it isn't
+    /// reliable for measuring durations.
     Realtime = bitcast!(c::CLOCK_REALTIME),
 
     /// `CLOCK_MONOTONIC`—A clock that tells an abstract time.
@@ -179,7 +163,6 @@ pub enum TimerfdClockId {
 #[cfg(any(linux_kernel, target_os = "fuchsia"))]
 #[test]
 fn test_types() {
-    use core::mem::size_of;
-    assert_eq!(size_of::<TimerfdFlags>(), size_of::<c::c_int>());
-    assert_eq!(size_of::<TimerfdTimerFlags>(), size_of::<c::c_int>());
+    assert_eq_size!(TimerfdFlags, c::c_int);
+    assert_eq_size!(TimerfdTimerFlags, c::c_int);
 }

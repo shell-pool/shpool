@@ -10,17 +10,21 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2018"
+edition = "2021"
+rust-version = "1.61"
 name = "memchr"
-version = "2.5.0"
+version = "2.6.3"
 authors = [
     "Andrew Gallant <jamslam@gmail.com>",
     "bluss",
 ]
 exclude = [
     "/bench",
+    "/benchmarks",
     "/.github",
     "/fuzz",
+    "/scripts",
+    "/tmp",
 ]
 description = "Safe interface to memchr."
 homepage = "https://github.com/BurntSushi/memchr"
@@ -33,18 +37,21 @@ keywords = [
     "strchr",
     "string",
 ]
-license = "Unlicense/MIT"
+license = "Unlicense OR MIT"
 repository = "https://github.com/BurntSushi/memchr"
 
+[package.metadata.docs.rs]
+rustdoc-args = ["--generate-link-to-definition"]
+
 [profile.bench]
-debug = true
+debug = 2
 
 [profile.release]
-debug = true
+debug = 2
 
 [profile.test]
 opt-level = 3
-debug = true
+debug = 2
 
 [lib]
 name = "memchr"
@@ -59,20 +66,22 @@ version = "1.0.0"
 optional = true
 package = "rustc-std-workspace-core"
 
-[dependencies.libc]
-version = "0.2.18"
+[dependencies.log]
+version = "0.4.20"
 optional = true
-default-features = false
 
 [dev-dependencies.quickcheck]
 version = "1.0.3"
 default-features = false
 
 [features]
+alloc = []
 default = ["std"]
+libc = []
+logging = ["dep:log"]
 rustc-dep-of-std = [
     "core",
     "compiler_builtins",
 ]
-std = []
+std = ["alloc"]
 use_std = ["std"]

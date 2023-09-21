@@ -21,12 +21,11 @@
 //! }
 //! ```
 
-use lib::*;
+use crate::lib::*;
 
 use self::private::{First, Second};
-use __private::size_hint;
-use de::{self, Deserializer, Expected, IntoDeserializer, SeqAccess, Visitor};
-use ser;
+use crate::de::{self, size_hint, Deserializer, Expected, IntoDeserializer, SeqAccess, Visitor};
+use crate::ser;
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -293,19 +292,16 @@ primitive_deserializer!(i8, "an `i8`.", I8Deserializer, visit_i8);
 primitive_deserializer!(i16, "an `i16`.", I16Deserializer, visit_i16);
 primitive_deserializer!(i32, "an `i32`.", I32Deserializer, visit_i32);
 primitive_deserializer!(i64, "an `i64`.", I64Deserializer, visit_i64);
+primitive_deserializer!(i128, "an `i128`.", I128Deserializer, visit_i128);
 primitive_deserializer!(isize, "an `isize`.", IsizeDeserializer, visit_i64 as i64);
 primitive_deserializer!(u8, "a `u8`.", U8Deserializer, visit_u8);
 primitive_deserializer!(u16, "a `u16`.", U16Deserializer, visit_u16);
 primitive_deserializer!(u64, "a `u64`.", U64Deserializer, visit_u64);
+primitive_deserializer!(u128, "a `u128`.", U128Deserializer, visit_u128);
 primitive_deserializer!(usize, "a `usize`.", UsizeDeserializer, visit_u64 as u64);
 primitive_deserializer!(f32, "an `f32`.", F32Deserializer, visit_f32);
 primitive_deserializer!(f64, "an `f64`.", F64Deserializer, visit_f64);
 primitive_deserializer!(char, "a `char`.", CharDeserializer, visit_char);
-
-serde_if_integer128! {
-    primitive_deserializer!(i128, "an `i128`.", I128Deserializer, visit_i128);
-    primitive_deserializer!(u128, "a `u128`.", U128Deserializer, visit_u128);
-}
 
 /// A deserializer holding a `u32`.
 pub struct U32Deserializer<E> {
@@ -937,8 +933,8 @@ where
     where
         V: de::Visitor<'de>,
     {
-        let v = try!(visitor.visit_seq(&mut self));
-        try!(self.end());
+        let v = tri!(visitor.visit_seq(&mut self));
+        tri!(self.end());
         Ok(v)
     }
 
@@ -1162,8 +1158,8 @@ where
     where
         V: de::Visitor<'de>,
     {
-        let value = try!(visitor.visit_map(&mut self));
-        try!(self.end());
+        let value = tri!(visitor.visit_map(&mut self));
+        tri!(self.end());
         Ok(value)
     }
 
@@ -1171,8 +1167,8 @@ where
     where
         V: de::Visitor<'de>,
     {
-        let value = try!(visitor.visit_seq(&mut self));
-        try!(self.end());
+        let value = tri!(visitor.visit_seq(&mut self));
+        tri!(self.end());
         Ok(value)
     }
 
@@ -1236,8 +1232,8 @@ where
     {
         match self.next_pair() {
             Some((key, value)) => {
-                let key = try!(kseed.deserialize(key.into_deserializer()));
-                let value = try!(vseed.deserialize(value.into_deserializer()));
+                let key = tri!(kseed.deserialize(key.into_deserializer()));
+                let value = tri!(vseed.deserialize(value.into_deserializer()));
                 Ok(Some((key, value)))
             }
             None => Ok(None),
@@ -1341,7 +1337,7 @@ where
         V: de::Visitor<'de>,
     {
         let mut pair_visitor = PairVisitor(Some(self.0), Some(self.1), PhantomData);
-        let pair = try!(visitor.visit_seq(&mut pair_visitor));
+        let pair = tri!(visitor.visit_seq(&mut pair_visitor));
         if pair_visitor.1.is_none() {
             Ok(pair)
         } else {
@@ -1501,7 +1497,7 @@ where
     where
         T: de::DeserializeSeed<'de>,
     {
-        match try!(self.map.next_key_seed(seed)) {
+        match tri!(self.map.next_key_seed(seed)) {
             Some(key) => Ok((key, private::map_as_enum(self.map))),
             None => Err(de::Error::invalid_type(de::Unexpected::Map, &"enum")),
         }
@@ -1546,9 +1542,11 @@ where
 ////////////////////////////////////////////////////////////////////////////////
 
 mod private {
-    use lib::*;
+    use crate::lib::*;
 
-    use de::{self, DeserializeSeed, Deserializer, MapAccess, Unexpected, VariantAccess, Visitor};
+    use crate::de::{
+        self, DeserializeSeed, Deserializer, MapAccess, Unexpected, VariantAccess, Visitor,
+    };
 
     pub struct UnitOnly<E> {
         marker: PhantomData<E>,

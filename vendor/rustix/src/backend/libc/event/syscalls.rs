@@ -5,7 +5,7 @@ use crate::backend::conv::ret_c_int;
 #[cfg(any(apple, netbsdlike, target_os = "dragonfly", target_os = "solaris"))]
 use crate::backend::conv::ret_owned_fd;
 use crate::event::PollFd;
-#[cfg(any(linux_kernel, bsd, solarish))]
+#[cfg(any(linux_kernel, bsd, solarish, target_os = "espidf"))]
 use crate::fd::OwnedFd;
 use crate::io;
 #[cfg(any(bsd, solarish))]
@@ -15,12 +15,22 @@ use {
     crate::backend::conv::ret, crate::event::port::Event, crate::utils::as_mut_ptr,
     core::ptr::null_mut,
 };
-#[cfg(any(linux_kernel, target_os = "freebsd", target_os = "illumos"))]
+#[cfg(any(
+    linux_kernel,
+    target_os = "freebsd",
+    target_os = "illumos",
+    target_os = "espidf"
+))]
 use {crate::backend::conv::ret_owned_fd, crate::event::EventfdFlags};
-#[cfg(bsd)]
+#[cfg(all(feature = "alloc", bsd))]
 use {crate::event::kqueue::Event, crate::utils::as_ptr, core::ptr::null};
 
-#[cfg(any(linux_kernel, target_os = "freebsd", target_os = "illumos"))]
+#[cfg(any(
+    linux_kernel,
+    target_os = "freebsd",
+    target_os = "illumos",
+    target_os = "espidf"
+))]
 pub(crate) fn eventfd(initval: u32, flags: EventfdFlags) -> io::Result<OwnedFd> {
     #[cfg(linux_kernel)]
     unsafe {
@@ -45,18 +55,18 @@ pub(crate) fn eventfd(initval: u32, flags: EventfdFlags) -> io::Result<OwnedFd> 
         ret_owned_fd(eventfd(initval, bitflags_bits!(flags)))
     }
 
-    #[cfg(target_os = "illumos")]
+    #[cfg(any(target_os = "illumos", target_os = "espidf"))]
     unsafe {
         ret_owned_fd(c::eventfd(initval, bitflags_bits!(flags)))
     }
 }
 
-#[cfg(bsd)]
+#[cfg(all(feature = "alloc", bsd))]
 pub(crate) fn kqueue() -> io::Result<OwnedFd> {
     unsafe { ret_owned_fd(c::kqueue()) }
 }
 
-#[cfg(bsd)]
+#[cfg(all(feature = "alloc", bsd))]
 pub(crate) unsafe fn kevent(
     kq: BorrowedFd<'_>,
     changelist: &[Event],
@@ -137,7 +147,7 @@ pub(crate) fn port_get(
     Ok(Event(unsafe { event.assume_init() }))
 }
 
-#[cfg(solarish)]
+#[cfg(all(feature = "alloc", solarish))]
 pub(crate) fn port_getn(
     port: BorrowedFd<'_>,
     timeout: Option<&mut c::timespec>,

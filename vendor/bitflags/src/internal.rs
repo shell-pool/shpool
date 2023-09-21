@@ -31,8 +31,8 @@ macro_rules! __impl_internal_bitflags {
     (
         $InternalBitFlags:ident: $T:ty, $PublicBitFlags:ident {
             $(
-                $(#[$attr:ident $($args:tt)*])*
-                $Flag:ident = $value:expr;
+                $(#[$inner:ident $($args:tt)*])*
+                const $Flag:tt = $value:expr;
             )*
         }
     ) => {
@@ -100,8 +100,8 @@ macro_rules! __impl_internal_bitflags {
         __impl_public_bitflags! {
             $InternalBitFlags: $T, $PublicBitFlags {
                 $(
-                    $(#[$attr $($args)*])*
-                    $Flag;
+                    $(#[$inner $($args)*])*
+                    const $Flag = $value;
                 )*
             }
         }

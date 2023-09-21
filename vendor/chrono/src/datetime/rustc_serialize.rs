@@ -1,6 +1,6 @@
 #![cfg_attr(docsrs, doc(cfg(feature = "rustc-serialize")))]
 
-use super::DateTime;
+use super::{DateTime, SecondsFormat};
 #[cfg(feature = "clock")]
 use crate::offset::Local;
 use crate::offset::{FixedOffset, LocalResult, TimeZone, Utc};
@@ -10,7 +10,7 @@ use rustc_serialize::{Decodable, Decoder, Encodable, Encoder};
 
 impl<Tz: TimeZone> Encodable for DateTime<Tz> {
     fn encode<S: Encoder>(&self, s: &mut S) -> Result<(), S::Error> {
-        format!("{:?}", self).encode(s)
+        self.to_rfc3339_opts(SecondsFormat::AutoSi, true).encode(s)
     }
 }
 
@@ -103,21 +103,25 @@ impl Decodable for TsSeconds<Local> {
 }
 
 #[cfg(test)]
-use rustc_serialize::json;
+mod tests {
+    use crate::datetime::test_encodable_json;
+    use crate::datetime::{test_decodable_json, test_decodable_json_timestamps};
+    use rustc_serialize::json;
 
-#[test]
-fn test_encodable() {
-    super::test_encodable_json(json::encode, json::encode);
-}
+    #[test]
+    fn test_encodable() {
+        test_encodable_json(json::encode, json::encode);
+    }
 
-#[cfg(feature = "clock")]
-#[test]
-fn test_decodable() {
-    super::test_decodable_json(json::decode, json::decode, json::decode);
-}
+    #[cfg(feature = "clock")]
+    #[test]
+    fn test_decodable() {
+        test_decodable_json(json::decode, json::decode, json::decode);
+    }
 
-#[cfg(feature = "clock")]
-#[test]
-fn test_decodable_timestamps() {
-    super::test_decodable_json_timestamps(json::decode, json::decode, json::decode);
+    #[cfg(feature = "clock")]
+    #[test]
+    fn test_decodable_timestamps() {
+        test_decodable_json_timestamps(json::decode, json::decode, json::decode);
+    }
 }

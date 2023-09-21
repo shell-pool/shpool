@@ -52,6 +52,8 @@ pub enum ClockId {
 /// has to fail with `INVAL` due to an unsupported clock. See
 /// [`DynamicClockId`] for a greater set of clocks, with the caveat that not
 /// all of them are always supported.
+///
+/// [`clock_gettime`]: crate::time::clock_gettime
 #[cfg(apple)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 #[repr(u32)]
@@ -96,10 +98,15 @@ pub enum DynamicClockId<'a> {
     Tai,
 
     /// `CLOCK_BOOTTIME`, available on Linux >= 2.6.39
-    #[cfg(any(linux_kernel, target_os = "openbsd"))]
+    #[cfg(any(
+        freebsdlike,
+        linux_kernel,
+        target_os = "fuchsia",
+        target_os = "openbsd"
+    ))]
     Boottime,
 
     /// `CLOCK_BOOTTIME_ALARM`, available on Linux >= 2.6.39
-    #[cfg(linux_kernel)]
+    #[cfg(any(linux_kernel, target_os = "fuchsia"))]
     BoottimeAlarm,
 }

@@ -14,6 +14,7 @@ bitflags! {
             bsd,
             solarish,
             windows,
+            target_os = "aix",
             target_os = "espidf",
             target_os = "nto",
             target_os = "haiku",
@@ -32,6 +33,7 @@ bitflags! {
             bsd,
             solarish,
             windows,
+            target_os = "aix",
             target_os = "haiku",
             target_os = "nto",
         )))]
@@ -41,6 +43,9 @@ bitflags! {
         const NOSIGNAL = bitcast!(c::MSG_NOSIGNAL);
         /// `MSG_OOB`
         const OOB = bitcast!(c::MSG_OOB);
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }
 
@@ -52,7 +57,15 @@ bitflags! {
     #[repr(transparent)]
     #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
     pub struct RecvFlags: u32 {
-        #[cfg(not(any(apple, solarish, windows, target_os = "espidf", target_os = "haiku", target_os = "nto")))]
+        #[cfg(not(any(
+            apple,
+            solarish,
+            windows,
+            target_os = "aix",
+            target_os = "espidf",
+            target_os = "haiku",
+            target_os = "nto",
+        )))]
         /// `MSG_CMSG_CLOEXEC`
         const CMSG_CLOEXEC = bitcast!(c::MSG_CMSG_CLOEXEC);
         /// `MSG_DONTWAIT`
@@ -63,6 +76,7 @@ bitflags! {
             bsd,
             solarish,
             windows,
+            target_os = "aix",
             target_os = "espidf",
             target_os = "haiku",
             target_os = "nto",
@@ -76,5 +90,8 @@ bitflags! {
         const TRUNC = bitcast!(c::MSG_TRUNC);
         /// `MSG_WAITALL`
         const WAITALL = bitcast!(c::MSG_WAITALL);
+
+        /// <https://docs.rs/bitflags/latest/bitflags/#externally-defined-flags>
+        const _ = !0;
     }
 }

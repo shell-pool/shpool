@@ -1,3 +1,5 @@
+//! The `Pid` type.
+
 #![allow(unsafe_code)]
 
 use crate::backend::c;
@@ -17,21 +19,21 @@ pub struct Pid(NonZeroI32);
 
 impl Pid {
     /// A `Pid` corresponding to the init process (pid 1).
-    pub const INIT: Self = Self(
-        // SAFETY: One is non-zero.
-        unsafe { NonZeroI32::new_unchecked(1) },
-    );
+    pub const INIT: Self = Self(match NonZeroI32::new(1) {
+        Some(n) => n,
+        None => panic!("unreachable"),
+    });
 
     /// Converts a `RawPid` into a `Pid`.
     ///
     /// Returns `Some` for strictly positive `RawPid`s. Otherwise, returns
     /// `None`.
     ///
-    /// This is always safe because a `Pid` is a number without any guarantees
-    /// for the kernel. Non-child `Pid`s are always racy for any syscalls,
-    /// but can only cause logic errors. If you want race-free access or
-    /// control to non-child processes, please consider other mechanisms
-    /// like [pidfd] on Linux.
+    /// This is safe because a `Pid` is a number without any guarantees for the
+    /// kernel. Non-child `Pid`s are always racy for any syscalls, but can only
+    /// cause logic errors. If you want race-free access to or control of
+    /// non-child processes, please consider other mechanisms like [pidfd] on
+    /// Linux.
     ///
     /// [pidfd]: https://man7.org/linux/man-pages/man2/pidfd_open.2.html
     #[inline]
@@ -86,19 +88,18 @@ impl Pid {
 
 #[test]
 fn test_sizes() {
-    use core::mem::{size_of, transmute};
+    use core::mem::transmute;
 
-    assert_eq!(size_of::<RawPid>(), size_of::<NonZeroI32>());
-    assert_eq!(size_of::<RawPid>(), size_of::<Pid>());
-    assert_eq!(size_of::<RawPid>(), size_of::<Option<Pid>>());
+    assert_eq_size!(RawPid, NonZeroI32);
+    assert_eq_size!(RawPid, Pid);
+    assert_eq_size!(RawPid, Option<Pid>);
 
     // Rustix doesn't depend on `Option<Pid>` matching the ABI of a raw integer
     // for correctness, but it should work nonetheless.
-    unsafe {
-        let t: Option<Pid> = None;
-        assert_eq!(0 as RawPid, transmute(t));
-
-        let t: Option<Pid> = Some(Pid::from_raw_unchecked(4567));
-        assert_eq!(4567 as RawPid, transmute(t));
-    }
+    const_assert_eq!(0 as RawPid, unsafe {
+        transmute::<Option<Pid>, RawPid>(None)
+    });
+    const_assert_eq!(4567 as RawPid, unsafe {
+        transmute::<Option<Pid>, RawPid>(Some(Pid::from_raw_unchecked(4567)))
+    });
 }

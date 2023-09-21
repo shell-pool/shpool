@@ -4189,6 +4189,7 @@ pub const RTLD_FIRST: ::c_int = 0x100;
 pub const RTLD_NODELETE: ::c_int = 0x80;
 pub const RTLD_NOLOAD: ::c_int = 0x10;
 pub const RTLD_GLOBAL: ::c_int = 0x8;
+pub const RTLD_MAIN_ONLY: *mut ::c_void = -5isize as *mut ::c_void;
 
 pub const _WSTOPPED: ::c_int = 0o177;
 
@@ -6058,6 +6059,15 @@ extern "C" {
 
     pub fn dirname(path: *mut ::c_char) -> *mut ::c_char;
     pub fn basename(path: *mut ::c_char) -> *mut ::c_char;
+
+    pub fn mkfifoat(dirfd: ::c_int, pathname: *const ::c_char, mode: ::mode_t) -> ::c_int;
+    pub fn mknodat(
+        dirfd: ::c_int,
+        pathname: *const ::c_char,
+        mode: ::mode_t,
+        dev: dev_t,
+    ) -> ::c_int;
+    pub fn freadlink(fd: ::c_int, buf: *mut ::c_char, size: ::size_t) -> ::c_int;
 }
 
 pub unsafe fn mach_task_self() -> ::mach_port_t {

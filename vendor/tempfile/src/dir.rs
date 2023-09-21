@@ -8,6 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::ffi::OsStr;
 use std::fs::remove_dir_all;
 use std::mem;
 use std::path::{self, Path, PathBuf};
@@ -262,6 +263,65 @@ impl TempDir {
     /// ```
     pub fn new_in<P: AsRef<Path>>(dir: P) -> io::Result<TempDir> {
         Builder::new().tempdir_in(dir)
+    }
+
+    /// Attempts to make a temporary directory with the specified prefix inside of
+    /// `env::temp_dir()`. The directory and everything inside it will be automatically
+    /// deleted once the returned `TempDir` is destroyed.
+    ///
+    /// # Errors
+    ///
+    /// If the directory can not be created, `Err` is returned.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::fs::{self, File};
+    /// use std::io::Write;
+    /// use tempfile::TempDir;
+    ///
+    /// # use std::io;
+    /// # fn run() -> Result<(), io::Error> {
+    /// // Create a directory inside of the current directory
+    /// let tmp_dir = TempDir::with_prefix("foo-")?;
+    /// let tmp_name = tmp_dir.path().file_name().unwrap().to_str().unwrap();
+    /// assert!(tmp_name.starts_with("foo-"));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_prefix<S: AsRef<OsStr>>(prefix: S) -> io::Result<TempDir> {
+        Builder::new().prefix(&prefix).tempdir()
+    }
+
+    /// Attempts to make a temporary directory with the specified prefix inside
+    /// the specified directory. The directory and everything inside it will be
+    /// automatically deleted once the returned `TempDir` is destroyed.
+    ///
+    /// # Errors
+    ///
+    /// If the directory can not be created, `Err` is returned.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::fs::{self, File};
+    /// use std::io::Write;
+    /// use tempfile::TempDir;
+    ///
+    /// # use std::io;
+    /// # fn run() -> Result<(), io::Error> {
+    /// // Create a directory inside of the current directory
+    /// let tmp_dir = TempDir::with_prefix_in("foo-", ".")?;
+    /// let tmp_name = tmp_dir.path().file_name().unwrap().to_str().unwrap();
+    /// assert!(tmp_name.starts_with("foo-"));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_prefix_in<S: AsRef<OsStr>, P: AsRef<Path>>(
+        prefix: S,
+        dir: P,
+    ) -> io::Result<TempDir> {
+        Builder::new().prefix(&prefix).tempdir_in(dir)
     }
 
     /// Accesses the [`Path`] to the temporary directory.

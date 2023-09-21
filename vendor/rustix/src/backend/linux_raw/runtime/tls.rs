@@ -7,9 +7,9 @@
 #![allow(unsafe_code)]
 
 use crate::backend::c;
-use crate::backend::elf::*;
-use crate::backend::param::auxv::exe_phdrs_slice;
-use core::ptr::null;
+use crate::backend::param::auxv::exe_phdrs;
+use core::ptr::{null, NonNull};
+use linux_raw_sys::elf::*;
 
 /// For use with [`set_thread_area`].
 ///
@@ -22,26 +22,41 @@ pub(crate) fn startup_tls_info() -> StartupTlsInfo {
     let mut tls_phdr = null();
     let mut stack_size = 0;
 
-    let phdrs = exe_phdrs_slice();
+    let (first_phdr, phent, phnum) = exe_phdrs();
+    let mut current_phdr = first_phdr.cast::<Elf_Phdr>();
 
     // SAFETY: We assume the phdr array pointer and length the kernel provided
     // to the process describe a valid phdr array.
     unsafe {
-        for phdr in phdrs {
+        let phdrs_end = current_phdr.cast::<u8>().add(phnum * phent).cast();
+        while current_phdr != phdrs_end {
+            let phdr = &*current_phdr;
+            current_phdr = current_phdr.cast::<u8>().add(phent).cast();
+
             match phdr.p_type {
-                PT_PHDR => base = phdrs.as_ptr().cast::<u8>().sub(phdr.p_vaddr),
+                PT_PHDR => base = first_phdr.cast::<u8>().sub(phdr.p_vaddr),
                 PT_TLS => tls_phdr = phdr,
                 PT_GNU_STACK => stack_size = phdr.p_memsz,
                 _ => {}
             }
         }
 
-        StartupTlsInfo {
-            addr: base.cast::<u8>().add((*tls_phdr).p_vaddr).cast(),
-            mem_size: (*tls_phdr).p_memsz,
-            file_size: (*tls_phdr).p_filesz,
-            align: (*tls_phdr).p_align,
-            stack_size,
+        if tls_phdr.is_null() {
+            StartupTlsInfo {
+                addr: NonNull::dangling().as_ptr(),
+                mem_size: 0,
+                file_size: 0,
+                align: 1,
+                stack_size: 0,
+            }
+        } else {
+            StartupTlsInfo {
+                addr: base.cast::<u8>().add((*tls_phdr).p_vaddr).cast(),
+                mem_size: (*tls_phdr).p_memsz,
+                file_size: (*tls_phdr).p_filesz,
+                align: (*tls_phdr).p_align,
+                stack_size,
+            }
         }
     }
 }

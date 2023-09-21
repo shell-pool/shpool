@@ -12,7 +12,7 @@
 [package]
 edition = "2018"
 name = "cc"
-version = "1.0.79"
+version = "1.0.83"
 authors = ["Alex Crichton <alex@alexcrichton.com>"]
 exclude = ["/.github"]
 description = """
@@ -37,3 +37,7 @@ version = "3"
 
 [features]
 parallel = ["jobserver"]
+
+[target."cfg(unix)".dependencies.libc]
+version = "0.2.62"
+default-features = false

@@ -12,7 +12,7 @@
 [package]
 edition = "2021"
 name = "regex-automata"
-version = "0.3.3"
+version = "0.3.8"
 authors = [
     "The Rust Project Developers",
     "Andrew Gallant <jamslam@gmail.com>",
@@ -49,12 +49,12 @@ version = "0.4.14"
 optional = true
 
 [dependencies.memchr]
-version = "2.5.0"
+version = "2.6.0"
 optional = true
 default-features = false
 
 [dependencies.regex-syntax]
-version = "0.7.0"
+version = "0.7.4"
 optional = true
 default-features = false
 
@@ -120,6 +120,7 @@ internal-instrument-pikevm = [
 logging = [
     "dep:log",
     "aho-corasick?/logging",
+    "memchr?/logging",
 ]
 meta = [
     "syntax",

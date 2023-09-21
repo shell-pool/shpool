@@ -3,17 +3,16 @@
 //! # Safety
 //!
 //! See the `rustix::backend` module documentation for details.
-#![allow(unsafe_code)]
-#![allow(clippy::undocumented_unsafe_blocks)]
+#![allow(unsafe_code, clippy::undocumented_unsafe_blocks)]
 
 use super::types::RawCpuSet;
 use crate::backend::c;
-#[cfg(feature = "fs")]
+#[cfg(all(feature = "alloc", feature = "fs"))]
 use crate::backend::conv::slice_mut;
 use crate::backend::conv::{
     by_mut, by_ref, c_int, c_uint, negative_pid, pass_usize, raw_fd, ret, ret_c_int,
     ret_c_int_infallible, ret_c_uint, ret_infallible, ret_owned_fd, ret_usize, size_of,
-    slice_just_addr, slice_just_addr_mut, zero,
+    slice_just_addr, zero,
 };
 use crate::fd::{AsRawFd, BorrowedFd, OwnedFd, RawFd};
 #[cfg(feature = "fs")]
@@ -21,8 +20,8 @@ use crate::ffi::CStr;
 use crate::io;
 use crate::pid::RawPid;
 use crate::process::{
-    Cpuid, Gid, MembarrierCommand, MembarrierQuery, Pid, PidfdFlags, PidfdGetfdFlags, Resource,
-    Rlimit, Uid, WaitId, WaitOptions, WaitStatus, WaitidOptions, WaitidStatus,
+    Cpuid, MembarrierCommand, MembarrierQuery, Pid, PidfdFlags, PidfdGetfdFlags, Resource, Rlimit,
+    Uid, WaitId, WaitOptions, WaitStatus, WaitidOptions, WaitidStatus,
 };
 use crate::signal::Signal;
 use crate::utils::as_mut_ptr;
@@ -32,9 +31,10 @@ use linux_raw_sys::general::{
     membarrier_cmd, membarrier_cmd_flag, rlimit, rlimit64, PRIO_PGRP, PRIO_PROCESS, PRIO_USER,
     RLIM64_INFINITY, RLIM_INFINITY,
 };
-use linux_raw_sys::ioctl::TIOCSCTTY;
 #[cfg(feature = "fs")]
 use {crate::backend::conv::ret_c_uint_infallible, crate::fs::Mode};
+#[cfg(feature = "alloc")]
+use {crate::backend::conv::slice_just_addr_mut, crate::process::Gid};
 
 #[cfg(feature = "fs")]
 #[inline]
@@ -53,7 +53,7 @@ pub(crate) fn chroot(filename: &CStr) -> io::Result<()> {
     unsafe { ret(syscall_readonly!(__NR_chroot, filename)) }
 }
 
-#[cfg(feature = "fs")]
+#[cfg(all(feature = "alloc", feature = "fs"))]
 #[inline]
 pub(crate) fn getcwd(buf: &mut [MaybeUninit<u8>]) -> io::Result<usize> {
     let (buf_addr_mut, buf_len) = slice_mut(buf);
@@ -365,12 +365,12 @@ pub(crate) fn prlimit(pid: Option<Pid>, limit: Resource, new: Rlimit) -> io::Res
 /// Convert a Rust [`Rlimit`] to a C `rlimit64`.
 #[inline]
 fn rlimit_from_linux(lim: rlimit64) -> Rlimit {
-    let current = if lim.rlim_cur == RLIM64_INFINITY as _ {
+    let current = if lim.rlim_cur as u64 == RLIM64_INFINITY as u64 {
         None
     } else {
         Some(lim.rlim_cur)
     };
-    let maximum = if lim.rlim_max == RLIM64_INFINITY as _ {
+    let maximum = if lim.rlim_max as u64 == RLIM64_INFINITY as u64 {
         None
     } else {
         Some(lim.rlim_max)
@@ -395,12 +395,12 @@ fn rlimit_to_linux(lim: Rlimit) -> rlimit64 {
 /// Like `rlimit_from_linux` but uses Linux's old 32-bit `rlimit`.
 #[allow(clippy::useless_conversion)]
 fn rlimit_from_linux_old(lim: rlimit) -> Rlimit {
-    let current = if lim.rlim_cur == RLIM_INFINITY as _ {
+    let current = if lim.rlim_cur as u32 == RLIM_INFINITY as u32 {
         None
     } else {
         Some(lim.rlim_cur.into())
     };
-    let maximum = if lim.rlim_max == RLIM_INFINITY as _ {
+    let maximum = if lim.rlim_max as u32 == RLIM_INFINITY as u32 {
         None
     } else {
         Some(lim.rlim_max.into())
@@ -610,6 +610,7 @@ pub(crate) fn pidfd_open(pid: Pid, flags: PidfdFlags) -> io::Result<OwnedFd> {
     unsafe { ret_owned_fd(syscall_readonly!(__NR_pidfd_open, pid, flags)) }
 }
 
+#[cfg(feature = "alloc")]
 #[inline]
 pub(crate) fn getgroups(buf: &mut [Gid]) -> io::Result<usize> {
     let len = buf.len().try_into().map_err(|_| io::Errno::NOMEM)?;
@@ -619,18 +620,6 @@ pub(crate) fn getgroups(buf: &mut [Gid]) -> io::Result<usize> {
             __NR_getgroups,
             c_int(len),
             slice_just_addr_mut(buf)
-        ))
-    }
-}
-
-#[inline]
-pub(crate) fn ioctl_tiocsctty(fd: BorrowedFd<'_>) -> io::Result<()> {
-    unsafe {
-        ret(syscall_readonly!(
-            __NR_ioctl,
-            fd,
-            c_uint(TIOCSCTTY),
-            by_ref(&0_u32)
         ))
     }
 }
