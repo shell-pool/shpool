@@ -1,3 +1,9 @@
+shpool (0.2.5) unstable; urgency=low
+
+  * Add --ttl flag to attach subcommand
+  * Fix exit status threading
+
+ -- Ethan Pailes <pailes@google.com>  Thu, 21 Sep 2023 14:39:00 -0400
 shpool (0.2.4) unstable; urgency=low
 
   * Fix stuck session bug
