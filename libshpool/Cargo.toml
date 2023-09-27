@@ -2,11 +2,15 @@
 name = "libshpool"
 version = "0.2.5"
 edition = "2021"
-authors = ["Ethan Pailes <pailes@google.com>", "Cloudtop Connectivity Team"]
+authors = ["Ethan Pailes <pailes@google.com>"]
 description = '''
-shpool is a mechanism for establishing lightweight persistant shell
-sessions to gracefully handle network disconnects.
+libshpool contains the implementation of the shpool tool,
+which provides a mechanism for establishing lightweight
+persistant shell sessions to gracefully handle network
+disconnects.
 '''
+license = "Apache-2.0"
+license-file = "../LICENSE"
 
 [features]
 test_hooks = [] # for internal testing only, don't enable this feature
