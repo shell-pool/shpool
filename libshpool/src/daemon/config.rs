@@ -82,13 +82,13 @@ pub enum SessionRestoreMode {
     /// Just reattach to the pty and issue SIGWINCH to force apps like
     /// vim and emacs to redraw. Don't emit anything from the output
     /// spool at all.
-    #[default]
     Simple,
     /// Emit enough data from the output spool to restore the screen
     /// full of text which would have been present on the screen if
     /// the connection never dropped. If a command drops while generating
     /// output, it will restore a screen showing the most recent output
     /// rather than the screen visible right before disconnect.
+    #[default]
     Screen,
     /// Emit enough output data to restore the last n lines of
     /// history from the output spool.

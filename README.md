@@ -99,9 +99,24 @@ Shpool can do a few different things when you re-attach to an existing
 session. You can choose what you want it to do with the `session_restore_mode`
 configuration option.
 
-##### `"simple"` (default)
+##### `"screen"` (default)
 
-The `"simple"` option is the default. In this reconnect mode, shpool will
+The `"screen"` option causes shpool to re-draw sufficient output to fill the
+entire screen of the client terminal as well as using the SIGWINCH trick
+described in the `"simple"` section below. This will help restore
+context for interactive terminal sessions that are not full blown ncurses
+apps. `"screen"` is the default reattach behavior for shpool.
+You can choose this option explicitly by adding
+
+```
+session_restore_mode = "screen"
+```
+
+to your `~/.config/shpool/config.toml`.
+
+##### `"simple"`
+
+The `"simple"` avoids restoring any output. In this reconnect mode, shpool will
 issue some SIGWINCH signals to try to convince full screen ncurses apps
 such as vim or emacs to re-draw the screen, but will otherwise do nothing.
 Any shell output produced when there was no client connected to the session
@@ -109,21 +124,6 @@ will be lost. You can choose this connection mode by adding
 
 ```
 session_restore_mode = "simple"
-```
-
-to your `~/.config/shpool/config.toml`, but since this is the default, you
-don't need to.
-
-##### `"screen"`
-
-The `"screen"` option causes shpool to re-draw sufficient output to fill the
-entire screen of the client terminal, but no more. This will help restore
-context for interactive terminal sessions that are not full blown ncurses
-apps. `"screen"` will likely become the default in a future version of
-shpool. You can choose this option by adding
-
-```
-session_restore_mode = "screen"
 ```
 
 to your `~/.config/shpool/config.toml`.
