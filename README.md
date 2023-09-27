@@ -8,24 +8,6 @@ the whole terminal and provide window splitting and tiling features, `shpool`
 only provides persistent sessions. The biggest advantage of this approach is
 that `shpool` does not break native scrollback.
 
-## Project Status
-
-`shpool` has all the usability basics covered, but still has a few
-warts. I've been using it as a daily driver for a few weeks now.
-The biggest thing I'm having to work around is:
-- sometimes I need to manually run `shpool detach` to free up
-  named sessions after my connection drops and I ssh back onto
-  my cloudtop to reattach.
-
-## Installation & Setup
-
-```
-sudo glinux-add-repo shpool unstable && \
-sudo apt update && \
-sudo apt install shpool && \
-systemctl --user start shpool
-```
-
 ### Shell Config
 
 #### bash
