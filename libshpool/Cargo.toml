@@ -1,6 +1,6 @@
 [package]
 name = "libshpool"
-version = "0.2.5"
+version = "0.3.0"
 edition = "2021"
 authors = ["Ethan Pailes <pailes@google.com>"]
 description = '''
@@ -10,7 +10,6 @@ persistant shell sessions to gracefully handle network
 disconnects.
 '''
 license = "Apache-2.0"
-license-file = "../LICENSE"
 
 [features]
 test_hooks = [] # for internal testing only, don't enable this feature

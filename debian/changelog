@@ -1,3 +1,8 @@
+shpool (0.3.0) unstable; urgency=low
+
+  * [BREAKING] Make "screen" the default reattach mode
+
+ -- Ethan Pailes <pailes@google.com>  Tue, 03 Oct 2023 09:26:00 -0400
 shpool (0.2.5) unstable; urgency=low
 
   * Add --ttl flag to attach subcommand
