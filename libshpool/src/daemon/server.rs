@@ -42,7 +42,7 @@ use crate::daemon::exit_notify::ExitNotifier;
 
 const STDERR_FD: i32 = 2;
 const DEFAULT_INITIAL_SHELL_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
-const DEFAULT_OUTPUT_SPOOL_LINES: usize = 10_000;
+const DEFAULT_OUTPUT_SPOOL_LINES: usize = 500;
 
 #[derive(Debug)]
 pub struct Server {
@@ -657,7 +657,11 @@ impl Server {
             session_inner.spawn_reader(
                 conn_id,
                 header.local_tty_size.clone(),
-                self.config.output_spool_lines.unwrap_or(DEFAULT_OUTPUT_SPOOL_LINES),
+                match (self.config.output_spool_lines, &self.config.session_restore_mode) {
+                    (Some(l), _) => l,
+                    (None,  Some(config::SessionRestoreMode::Lines(l))) => *l as usize,
+                    (None, _) => DEFAULT_OUTPUT_SPOOL_LINES,
+                },
                 self.config
                     .session_restore_mode
                     .clone()

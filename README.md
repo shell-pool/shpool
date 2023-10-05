@@ -6,7 +6,7 @@ is not lost if the connection drops. `shpool` can be thought of as a lighter
 weight alternative to `tmux` or GNU `screen`. While `tmux` and `screen` take over
 the whole terminal and provide window splitting and tiling features, `shpool`
 only provides persistent sessions. The biggest advantage of this approach is
-that `shpool` does not break native scrollback.
+that `shpool` does not break native scrollback or copy-paste.
 
 ### Shell Config
 
@@ -117,9 +117,8 @@ than just a screenful of text, it restores the last n lines of text
 from the terminal being re-attached to. This could be useful if you
 wish to have more context than a single screenful of text. Note that
 n cannot exceed the value of the `output_spool_lines` configuration
-option, but it defaults to 10,000, so you likely won't need to change
-it unless you wish to restore very large amounts of text. You can
-choose this option by adding
+option, but it defaults to the value of the lines option, so you likely
+won't need to change it.
 
 ```
 session_restore_mode = { lines = n }

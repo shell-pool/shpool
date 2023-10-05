@@ -36,6 +36,12 @@ use crate::{
     protocol, test_hooks, tty,
 };
 
+// To prevent data getting dropped, we set this to be large, but we don't want
+// to use u16::MAX, since the vt100 crate eagerly fills in its rows, and doing
+// so is very memory intensive. The right fix is to get the vt100 crate to
+// lazily initialize its rows, but that is likely a bunch of work.
+const VTERM_WIDTH: u16 = 1024 * 10;
+
 const SHELL_KILL_TIMEOUT: time::Duration = time::Duration::from_millis(500);
 
 const SUPERVISOR_POLL_DUR: time::Duration = time::Duration::from_millis(300);
@@ -185,7 +191,11 @@ impl SessionInner {
             let _s = span!(Level::INFO, "reader", s = name, cid = conn_id).entered();
 
             let mut output_spool =
-                shpool_vt100::Parser::new(tty_size.rows, std::u16::MAX, scrollback_lines);
+                if matches!(session_restore_mode, config::SessionRestoreMode::Simple) {
+                    None
+                } else {
+                    Some(shpool_vt100::Parser::new(tty_size.rows, VTERM_WIDTH, scrollback_lines))
+                };
             let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
             let mut poll_fds = [poll::PollFd::new(pty_master.as_raw_fd(), poll::PollFlags::POLLIN)];
 
@@ -231,8 +241,8 @@ impl SessionInner {
 
                                 // Always instantly resize the spool, since we don't
                                 // need to inject a delay into that.
-                                output_spool.screen_mut().set_size(
-                                    conn.size.rows, std::u16::MAX);
+                                output_spool.as_mut().map(|s| s.screen_mut().set_size(
+                                    conn.size.rows, std::u16::MAX));
                                 resize_cmd = Some(ResizeCmd {
                                     size: conn.size.clone(),
                                     when: time::Instant::now().add(REATTACH_RESIZE_DELAY),
@@ -306,8 +316,8 @@ impl SessionInner {
                         match new_size {
                             Ok(size) => {
                                 info!("resize size={:?}", size);
-                                output_spool.screen_mut()
-                                    .set_size(size.rows, std::u16::MAX);
+                                output_spool.as_mut().map(|s| s.screen_mut()
+                                    .set_size(size.rows, std::u16::MAX));
                                 resize_cmd = Some(ResizeCmd {
                                     size: size,
                                     // No delay needed for ordinary resizes, just
@@ -350,24 +360,24 @@ impl SessionInner {
                     use config::SessionRestoreMode::*;
 
                     info!("executing reattach protocol (mode={:?})", session_restore_mode);
-                    let restore_buf = match session_restore_mode {
-                        Simple => vec![],
-                        Screen => {
-                            let (rows, cols) = output_spool.screen().size();
+                    let restore_buf = match (output_spool.as_mut(), &session_restore_mode) {
+                        (Some(spool), Screen) => {
+                            let (rows, cols) = spool.screen().size();
                             info!(
                                 "computing screen restore buf with (rows={}, cols={})",
                                 rows, cols
                             );
-                            output_spool.screen().contents_formatted()
+                            spool.screen().contents_formatted()
                         }
-                        Lines(nlines) => {
-                            let (rows, cols) = output_spool.screen().size();
+                        (Some(spool), Lines(nlines)) => {
+                            let (rows, cols) = spool.screen().size();
                             info!(
                                 "computing lines({}) restore buf with (rows={}, cols={})",
                                 nlines, rows, cols
                             );
-                            output_spool.screen().last_n_rows_contents_formatted(nlines)
+                            spool.screen().last_n_rows_contents_formatted(*nlines)
                         }
+                        (_, _) => vec![],
                     };
                     if let (true, ClientConnectionMsg::New(conn)) =
                         (restore_buf.len() > 0, &client_conn)
@@ -420,7 +430,9 @@ impl SessionInner {
                 }
                 trace!("read pty master len={} '{}'", len, String::from_utf8_lossy(&buf[..len]));
 
-                output_spool.process(&buf[..len]);
+                if !matches!(session_restore_mode, config::SessionRestoreMode::Simple) {
+                    output_spool.as_mut().map(|s| s.process(&buf[..len]));
+                }
 
                 let mut reset_client_conn = false;
                 if let ClientConnectionMsg::New(conn) = &client_conn {
