@@ -630,6 +630,30 @@ fn injects_term_even_with_env_config() -> anyhow::Result<()> {
 
 #[test]
 #[timeout(30000)]
+fn injects_display() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc =
+            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut attach_proc = daemon_proc
+            .attach(
+                "sh1",
+                AttachArgs {
+                    extra_env: vec![(String::from("DISPLAY"), String::from(":0"))],
+                    ..Default::default()
+                },
+            )
+            .context("starting attach proc")?;
+        let mut line_matcher = attach_proc.line_matcher()?;
+
+        attach_proc.run_cmd("echo $DISPLAY")?;
+        line_matcher.match_re(":0$")?;
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
 fn has_right_default_path() -> anyhow::Result<()> {
     support::dump_err(|| {
         let mut daemon_proc =

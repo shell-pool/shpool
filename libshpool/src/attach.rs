@@ -106,7 +106,7 @@ fn do_attach(name: &str, ttl: &Option<time::Duration>, socket: &PathBuf) -> anyh
         .write_connect_header(ConnectHeader::Attach(AttachHeader {
             name: String::from(name),
             local_tty_size: tty_size,
-            local_env: vec!["TERM", "SSH_AUTH_SOCK"]
+            local_env: vec!["TERM", "DISPLAY", "SSH_AUTH_SOCK"]
                 .into_iter()
                 .filter_map(|var| {
                     let val = env::var(var).context("resolving var").ok()?;

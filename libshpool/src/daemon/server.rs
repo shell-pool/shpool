@@ -580,6 +580,14 @@ impl Server {
             cmd.env("TERM", t);
         }
 
+        // inject all other local variables
+        for (var, val) in &header.local_env {
+            if var == "TERM" || var == "SSH_AUTH_SOCK" {
+                continue;
+            }
+            cmd.env(var, val);
+        }
+
         // spawn the shell as a login shell by setting
         // arg0 to be the basename of the shell path
         // proceeded with a "-". You can see sshd doing the
@@ -659,7 +667,7 @@ impl Server {
                 header.local_tty_size.clone(),
                 match (self.config.output_spool_lines, &self.config.session_restore_mode) {
                     (Some(l), _) => l,
-                    (None,  Some(config::SessionRestoreMode::Lines(l))) => *l as usize,
+                    (None, Some(config::SessionRestoreMode::Lines(l))) => *l as usize,
                     (None, _) => DEFAULT_OUTPUT_SPOOL_LINES,
                 },
                 self.config
