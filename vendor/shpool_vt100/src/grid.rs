@@ -112,7 +112,18 @@ impl Grid {
     }
 
     pub fn restore_cursor(&mut self) {
-        self.pos = self.saved_pos;
+        self.pos = Pos {
+            row: if self.saved_pos.row >= self.size.rows {
+                self.size.rows - 1
+            } else {
+                self.saved_pos.row
+            },
+            col: if self.saved_pos.col >= self.size.cols {
+                self.size.cols - 1
+            } else {
+                self.saved_pos.col
+            },
+        };
         self.origin_mode = self.saved_origin_mode;
     }
 
