@@ -1,3 +1,10 @@
+shpool (0.3.1) unstable; urgency=low
+
+  * Disable output spool in "simple" session restore mode
+  * Fix bug where shpool was failing to forward $DISPLAY
+  * Fix output shpool out of bounds cursor restore bug
+
+ -- Ethan Pailes <pailes@google.com>  Tue, 10 Oct 2023 11:51:00 -0400
 shpool (0.3.0) unstable; urgency=low
 
   * [BREAKING] Make "screen" the default reattach mode
