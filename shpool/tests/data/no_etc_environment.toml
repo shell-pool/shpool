@@ -1,0 +1,9 @@
+norc = true
+noecho = true
+noread_etc_environment = true
+shell = "/bin/bash"
+session_restore_mode = "simple"
+
+[env]
+PS1 = "prompt> "
+TERM = ""

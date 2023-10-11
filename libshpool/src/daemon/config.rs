@@ -43,6 +43,11 @@ pub struct Config {
     /// use hardware security keys.
     pub nosymlink_ssh_auth_sock: Option<bool>,
 
+    /// By default, shpool will read /etc/environment and inject the
+    /// variables found there into new shells. If this flag is set,
+    /// it will avoid doing so.
+    pub noread_etc_environment: Option<bool>,
+
     /// shell overrides the user's default shell
     pub shell: Option<String>,
 
@@ -51,7 +56,9 @@ pub struct Config {
     pub env: Option<HashMap<String, String>>,
 
     /// The initial path to spawn shell processes with. By default
-    /// `/usr/bin:/bin:/usr/sbin:/sbin` (copying openssh).
+    /// `/usr/bin:/bin:/usr/sbin:/sbin` (copying openssh). This
+    /// value is often overridden by /etc/environment even if you
+    /// do set it.
     pub initial_path: Option<String>,
 
     /// Indicates what shpool should do when it reattaches to an

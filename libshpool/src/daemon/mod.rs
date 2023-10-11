@@ -18,6 +18,7 @@ use anyhow::Context;
 use tracing::{info, instrument};
 
 mod config;
+mod etc_environment;
 mod exit_notify;
 mod keybindings;
 mod server;

@@ -14,7 +14,7 @@
 
 use std::{
     collections::HashMap,
-    env, fs, net,
+    env, fs, io, net,
     ops::Add,
     os,
     os::unix::{
@@ -36,7 +36,7 @@ use tracing::{error, info, instrument, span, trace, warn, Level};
 
 use super::{
     super::{consts, protocol, test_hooks, tty},
-    config, shell, ttl_reaper, user,
+    config, etc_environment, shell, ttl_reaper, user,
 };
 use crate::daemon::exit_notify::ExitNotifier;
 
@@ -586,6 +586,21 @@ impl Server {
                 continue;
             }
             cmd.env(var, val);
+        }
+
+        // parse and load /etc/environment unless we've been asked not to
+        if !self.config.noread_etc_environment.unwrap_or(false) {
+            match fs::File::open("/etc/environment") {
+                Ok(f) => {
+                    let pairs = etc_environment::parse_compat(io::BufReader::new(f))?;
+                    for (var, val) in pairs.into_iter() {
+                        cmd.env(var, val);
+                    }
+                }
+                Err(e) => {
+                    warn!("could not open /etc/environment to load env vars: {:?}", e);
+                }
+            }
         }
 
         // spawn the shell as a login shell by setting

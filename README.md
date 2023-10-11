@@ -51,7 +51,7 @@ to force the session to detach and allow you to attach.
 You can specify some additional configuration options to the daemon
 by passing a `-c /path/to/config.toml` flag, or by creating and
 editing `~/.config/shpool/config.toml`. The options available
-are documented in detail in `src/daemon/config.rs`, but there
+are documented in detail in `libshpool/src/daemon/config.rs`, but there
 are a few common things you may wish to tweak.
 
 #### Detach Keybinding

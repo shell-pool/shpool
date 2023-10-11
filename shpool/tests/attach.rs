@@ -656,8 +656,8 @@ fn injects_display() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn has_right_default_path() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new("no_etc_environment.toml", true)
+            .context("starting daemon proc")?;
         let mut attach_proc =
             daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
 
