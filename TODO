@@ -7,7 +7,7 @@
 - Allow users to specify a command to run instead of their default shell.
    - Note that the way ssh does this is by doing [shell, "-c", command_string]
      for argv, so it seems like shells all need to support "-c" in order to work
-     with sshd. Seems like a safe bet to just do the same thing.
+     with sshd.
 - Call `setsid()` (`man 2 setsid`) in the fork child before exec. This creates
   a fresh new session id for the shell, which is importaint for stuff like
   making sure that a sudo invocation only provides elevated priviledges for

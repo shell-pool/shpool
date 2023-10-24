@@ -7,11 +7,14 @@
 #
 # `dh clean` will remove any dangling files afterwards
 
+export RUST_VERSION := $(shell ls ./android-rust/linux-x86 | sort -n | tail -n 1)
+export PATH := $(shell pwd)/android-rust/linux-x86/${RUST_VERSION}/bin:$(PATH)
+export LD_LIBRARY_PATH := $(shell pwd)/android-rust/linux-x86/${RUST_VERSION}/lib
 export DH_VERBOSE = 1
 
 %:
 	dh $@
 
 override_dh_auto_build:
-	./deb-cleanup-vendor.py
-	cargo build --release
+	./debian/deb-cleanup-vendor.py
+	CARGO_HOME=/tmp/cargo cargo build --release
