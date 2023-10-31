@@ -23,7 +23,7 @@ serde_derive = "1" # config parsing, connection header formatting
 toml = "0.7" # config parsing
 byteorder = "1" # endianness
 signal-hook = "0.3" # signal handling
-nix = { version = "0.25", features = ["poll", "ioctl"] } # rusty wrapper for unix apis
+nix = { version = "0.26", features = ["poll", "ioctl"] } # rusty wrapper for unix apis
 shpool_pty = "0.1" # spawning shells in ptys
 lazy_static = "1" # globals
 crossbeam-channel = "0.5" # channels

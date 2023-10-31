@@ -54,6 +54,7 @@
 #![warn(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(clippy::cast_ptr_alignment)]
+#![allow(clippy::bad_bit_mask)]
 
 // Re-exported external crates
 pub use libc;
@@ -106,7 +107,6 @@ feature! {
     #[allow(missing_docs)]
     pub mod kmod;
 }
-#[cfg(any(target_os = "android", target_os = "freebsd", target_os = "linux"))]
 feature! {
     #![feature = "mount"]
     pub mod mount;

@@ -68,7 +68,7 @@ pub fn test_inetv4_addr_roundtrip_sockaddr_storage_to_addr() {
     assert_eq!(from_storage, sockaddr);
 }
 
-#[cfg(any(target_os = "linux"))]
+#[cfg(target_os = "linux")]
 #[cfg_attr(qemu, ignore)]
 #[test]
 pub fn test_timestamping() {
@@ -223,7 +223,7 @@ pub fn test_addr_equality_abstract() {
 }
 
 // Test getting/setting abstract addresses (without unix socket creation)
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "android", target_os = "linux"))]
 #[test]
 pub fn test_abstract_uds_addr() {
     let empty = String::new();
@@ -242,6 +242,22 @@ pub fn test_abstract_uds_addr() {
 
     // Internally, name is null-prefixed (abstract namespace)
     assert_eq!(unsafe { (*addr.as_ptr()).sun_path[0] }, 0);
+}
+
+// Test getting an unnamed address (without unix socket creation)
+#[cfg(any(target_os = "android", target_os = "linux"))]
+#[test]
+pub fn test_unnamed_uds_addr() {
+    use crate::nix::sys::socket::SockaddrLike;
+
+    let addr = UnixAddr::new_unnamed();
+
+    assert!(addr.is_unnamed());
+    assert_eq!(addr.len(), 2);
+    assert!(addr.path().is_none());
+    assert_eq!(addr.path_len(), 0);
+
+    assert!(addr.as_abstract().is_none());
 }
 
 #[test]
@@ -280,6 +296,45 @@ pub fn test_socketpair() {
     read(fd2, &mut buf).unwrap();
 
     assert_eq!(&buf[..], b"hello");
+}
+
+#[test]
+pub fn test_recvmsg_sockaddr_un() {
+    use nix::sys::socket::{
+        self, bind, socket, AddressFamily, MsgFlags, SockFlag, SockType,
+    };
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let sockname = tempdir.path().join("sock");
+    let sock = socket(
+        AddressFamily::Unix,
+        SockType::Datagram,
+        SockFlag::empty(),
+        None,
+    )
+    .expect("socket failed");
+    let sockaddr = UnixAddr::new(&sockname).unwrap();
+    bind(sock, &sockaddr).expect("bind failed");
+
+    // Send a message
+    let send_buffer = "hello".as_bytes();
+    if let Err(e) = socket::sendmsg(
+        sock,
+        &[std::io::IoSlice::new(send_buffer)],
+        &[],
+        MsgFlags::empty(),
+        Some(&sockaddr),
+    ) {
+        crate::skip!("Couldn't send ({:?}), so skipping test", e);
+    }
+
+    // Receive the message
+    let mut recv_buffer = [0u8; 32];
+    let mut iov = [std::io::IoSliceMut::new(&mut recv_buffer)];
+    let received =
+        socket::recvmsg(sock, &mut iov, None, MsgFlags::empty()).unwrap();
+    // Check the address in the received message
+    assert_eq!(sockaddr, received.address.unwrap());
 }
 
 #[test]
@@ -501,31 +556,31 @@ mod recvfrom {
             rsock,
             ssock,
             move |s, m, flags| {
-                let iov = [IoSlice::new(m)];
-                let mut msgs = vec![SendMmsgData {
-                    iov: &iov,
-                    cmsgs: &[],
-                    addr: Some(sock_addr),
-                    _lt: Default::default(),
-                }];
-
                 let batch_size = 15;
+                let mut iovs = Vec::with_capacity(1 + batch_size);
+                let mut addrs = Vec::with_capacity(1 + batch_size);
+                let mut data = MultiHeaders::preallocate(1 + batch_size, None);
+                let iov = IoSlice::new(m);
+                // first chunk:
+                iovs.push([iov]);
+                addrs.push(Some(sock_addr));
 
                 for _ in 0..batch_size {
-                    msgs.push(SendMmsgData {
-                        iov: &iov,
-                        cmsgs: &[],
-                        addr: Some(sock_addr2),
-                        _lt: Default::default(),
-                    });
+                    iovs.push([iov]);
+                    addrs.push(Some(sock_addr2));
                 }
-                sendmmsg(s, msgs.iter(), flags).map(move |sent_bytes| {
-                    assert!(!sent_bytes.is_empty());
-                    for sent in &sent_bytes {
-                        assert_eq!(*sent, m.len());
-                    }
-                    sent_bytes.len()
-                })
+
+                let res = sendmmsg(s, &mut data, &iovs, addrs, [], flags)?;
+                let mut sent_messages = 0;
+                let mut sent_bytes = 0;
+                for item in res {
+                    sent_messages += 1;
+                    sent_bytes += item.bytes;
+                }
+                //
+                assert_eq!(sent_messages, iovs.len());
+                assert_eq!(sent_bytes, sent_messages * m.len());
+                Ok(sent_messages)
             },
             |_, _| {},
         );
@@ -577,21 +632,19 @@ mod recvfrom {
 
         // Buffers to receive exactly `NUM_MESSAGES_SENT` messages
         let mut receive_buffers = [[0u8; 32]; NUM_MESSAGES_SENT];
-        let iovs: Vec<_> = receive_buffers
-            .iter_mut()
-            .map(|buf| [IoSliceMut::new(&mut buf[..])])
-            .collect();
+        msgs.extend(
+            receive_buffers
+                .iter_mut()
+                .map(|buf| [IoSliceMut::new(&mut buf[..])]),
+        );
 
-        for iov in &iovs {
-            msgs.push_back(RecvMmsgData {
-                iov,
-                cmsg_buffer: None,
-            })
-        }
+        let mut data =
+            MultiHeaders::<SockaddrIn>::preallocate(msgs.len(), None);
 
         let res: Vec<RecvMsg<SockaddrIn>> =
-            recvmmsg(rsock, &mut msgs, MsgFlags::empty(), None)
-                .expect("recvmmsg");
+            recvmmsg(rsock, &mut data, msgs.iter(), MsgFlags::empty(), None)
+                .expect("recvmmsg")
+                .collect();
         assert_eq!(res.len(), DATA.len());
 
         for RecvMsg { address, bytes, .. } in res.into_iter() {
@@ -655,21 +708,26 @@ mod recvfrom {
         // will return when there are fewer than requested messages in the
         // kernel buffers when using `MSG_DONTWAIT`.
         let mut receive_buffers = [[0u8; 32]; NUM_MESSAGES_SENT + 2];
-        let iovs: Vec<_> = receive_buffers
-            .iter_mut()
-            .map(|buf| [IoSliceMut::new(&mut buf[..])])
-            .collect();
+        msgs.extend(
+            receive_buffers
+                .iter_mut()
+                .map(|buf| [IoSliceMut::new(&mut buf[..])]),
+        );
 
-        for iov in &iovs {
-            msgs.push_back(RecvMmsgData {
-                iov,
-                cmsg_buffer: None,
-            })
-        }
+        let mut data = MultiHeaders::<SockaddrIn>::preallocate(
+            NUM_MESSAGES_SENT + 2,
+            None,
+        );
 
-        let res: Vec<RecvMsg<SockaddrIn>> =
-            recvmmsg(rsock, &mut msgs, MsgFlags::MSG_DONTWAIT, None)
-                .expect("recvmmsg");
+        let res: Vec<RecvMsg<SockaddrIn>> = recvmmsg(
+            rsock,
+            &mut data,
+            msgs.iter(),
+            MsgFlags::MSG_DONTWAIT,
+            None,
+        )
+        .expect("recvmmsg")
+        .collect();
         assert_eq!(res.len(), NUM_MESSAGES_SENT);
 
         for RecvMsg { address, bytes, .. } in res.into_iter() {
@@ -1481,7 +1539,7 @@ fn test_impl_scm_credentials_and_rights(mut space: Vec<u8>) {
 
 // Test creating and using named unix domain sockets
 #[test]
-pub fn test_unixdomain() {
+pub fn test_named_unixdomain() {
     use nix::sys::socket::{accept, bind, connect, listen, socket, UnixAddr};
     use nix::sys::socket::{SockFlag, SockType};
     use nix::unistd::{close, read, write};
@@ -1522,6 +1580,59 @@ pub fn test_unixdomain() {
     thr.join().unwrap();
 
     assert_eq!(&buf[..], b"hello");
+}
+
+// Test using unnamed unix domain addresses
+#[cfg(any(target_os = "android", target_os = "linux"))]
+#[test]
+pub fn test_unnamed_unixdomain() {
+    use nix::sys::socket::{getsockname, socketpair};
+    use nix::sys::socket::{SockFlag, SockType};
+    use nix::unistd::close;
+
+    let (fd_1, fd_2) = socketpair(
+        AddressFamily::Unix,
+        SockType::Stream,
+        None,
+        SockFlag::empty(),
+    )
+    .expect("socketpair failed");
+
+    let addr_1: UnixAddr = getsockname(fd_1).expect("getsockname failed");
+    assert!(addr_1.is_unnamed());
+
+    close(fd_1).unwrap();
+    close(fd_2).unwrap();
+}
+
+// Test creating and using unnamed unix domain addresses for autobinding sockets
+#[cfg(any(target_os = "android", target_os = "linux"))]
+#[test]
+pub fn test_unnamed_unixdomain_autobind() {
+    use nix::sys::socket::{bind, getsockname, socket};
+    use nix::sys::socket::{SockFlag, SockType};
+    use nix::unistd::close;
+
+    let fd = socket(
+        AddressFamily::Unix,
+        SockType::Stream,
+        SockFlag::empty(),
+        None,
+    )
+    .expect("socket failed");
+
+    // unix(7): "If a bind(2) call specifies addrlen as `sizeof(sa_family_t)`, or [...], then the
+    // socket is autobound to an abstract address"
+    bind(fd, &UnixAddr::new_unnamed()).expect("bind failed");
+
+    let addr: UnixAddr = getsockname(fd).expect("getsockname failed");
+    let addr = addr.as_abstract().unwrap();
+
+    // changed from 8 to 5 bytes in Linux 2.3.15, and rust's minimum supported Linux version is 3.2
+    // (as of 2022-11)
+    assert_eq!(addr.len(), 5);
+
+    close(fd).unwrap();
 }
 
 // Test creating and using named system control sockets
@@ -2064,63 +2175,50 @@ pub fn test_recv_ipv6pktinfo() {
 }
 
 #[cfg(any(target_os = "android", target_os = "linux"))]
-#[cfg_attr(graviton, ignore = "Not supported by the CI environment")]
 #[test]
 pub fn test_vsock() {
-    use nix::errno::Errno;
-    use nix::sys::socket::{
-        bind, connect, listen, socket, AddressFamily, SockFlag, SockType,
-        VsockAddr,
-    };
-    use nix::unistd::close;
-    use std::thread;
+    use nix::sys::socket::SockaddrLike;
+    use nix::sys::socket::{AddressFamily, VsockAddr};
+    use std::convert::TryInto;
+    use std::mem;
 
     let port: u32 = 3000;
 
-    let s1 = socket(
-        AddressFamily::Vsock,
-        SockType::Stream,
-        SockFlag::empty(),
-        None,
-    )
-    .expect("socket failed");
+    let addr_local = VsockAddr::new(libc::VMADDR_CID_LOCAL, port);
+    assert_eq!(addr_local.cid(), libc::VMADDR_CID_LOCAL);
+    assert_eq!(addr_local.port(), port);
 
-    // VMADDR_CID_HYPERVISOR is reserved, so we expect an EADDRNOTAVAIL error.
-    let sockaddr_hv = VsockAddr::new(libc::VMADDR_CID_HYPERVISOR, port);
-    assert_eq!(bind(s1, &sockaddr_hv).err(), Some(Errno::EADDRNOTAVAIL));
+    let addr_any = VsockAddr::new(libc::VMADDR_CID_ANY, libc::VMADDR_PORT_ANY);
+    assert_eq!(addr_any.cid(), libc::VMADDR_CID_ANY);
+    assert_eq!(addr_any.port(), libc::VMADDR_PORT_ANY);
 
-    let sockaddr_any = VsockAddr::new(libc::VMADDR_CID_ANY, port);
-    assert_eq!(bind(s1, &sockaddr_any), Ok(()));
-    listen(s1, 10).expect("listen failed");
+    assert_ne!(addr_local, addr_any);
+    assert_ne!(calculate_hash(&addr_local), calculate_hash(&addr_any));
 
-    let thr = thread::spawn(move || {
-        let cid: u32 = libc::VMADDR_CID_HOST;
+    let addr1 = VsockAddr::new(libc::VMADDR_CID_HOST, port);
+    let addr2 = VsockAddr::new(libc::VMADDR_CID_HOST, port);
+    assert_eq!(addr1, addr2);
+    assert_eq!(calculate_hash(&addr1), calculate_hash(&addr2));
 
-        let s2 = socket(
-            AddressFamily::Vsock,
-            SockType::Stream,
-            SockFlag::empty(),
-            None,
+    let addr3 = unsafe {
+        VsockAddr::from_raw(
+            addr2.as_ref() as *const libc::sockaddr_vm as *const libc::sockaddr,
+            Some(mem::size_of::<libc::sockaddr_vm>().try_into().unwrap()),
         )
-        .expect("socket failed");
-
-        let sockaddr_host = VsockAddr::new(cid, port);
-
-        // The current implementation does not support loopback devices, so,
-        // for now, we expect a failure on the connect.
-        assert_ne!(connect(s2, &sockaddr_host), Ok(()));
-
-        close(s2).unwrap();
-    });
-
-    close(s1).unwrap();
-    thr.join().unwrap();
+    }
+    .unwrap();
+    assert_eq!(
+        addr3.as_ref().svm_family,
+        AddressFamily::Vsock as libc::sa_family_t
+    );
+    assert_eq!(addr3.as_ref().svm_cid, addr1.cid());
+    assert_eq!(addr3.as_ref().svm_port, addr1.port());
 }
 
 // Disable the test on emulated platforms because it fails in Cirrus-CI.  Lack
 // of QEMU support is suspected.
 #[cfg_attr(qemu, ignore)]
-#[cfg(all(target_os = "linux"))]
+#[cfg(target_os = "linux")]
 #[test]
 fn test_recvmsg_timestampns() {
     use nix::sys::socket::*;
@@ -2175,7 +2273,7 @@ fn test_recvmsg_timestampns() {
 // Disable the test on emulated platforms because it fails in Cirrus-CI.  Lack
 // of QEMU support is suspected.
 #[cfg_attr(qemu, ignore)]
-#[cfg(all(target_os = "linux"))]
+#[cfg(target_os = "linux")]
 #[test]
 fn test_recvmmsg_timestampns() {
     use nix::sys::socket::*;
@@ -2205,14 +2303,13 @@ fn test_recvmmsg_timestampns() {
     assert_eq!(message.len(), l);
     // Receive the message
     let mut buffer = vec![0u8; message.len()];
-    let mut cmsgspace = nix::cmsg_space!(TimeSpec);
-    let iov = [IoSliceMut::new(&mut buffer)];
-    let mut data = vec![RecvMmsgData {
-        iov,
-        cmsg_buffer: Some(&mut cmsgspace),
-    }];
+    let cmsgspace = nix::cmsg_space!(TimeSpec);
+    let iov = vec![[IoSliceMut::new(&mut buffer)]];
+    let mut data = MultiHeaders::preallocate(1, Some(cmsgspace));
     let r: Vec<RecvMsg<()>> =
-        recvmmsg(in_socket, &mut data, flags, None).unwrap();
+        recvmmsg(in_socket, &mut data, iov.iter(), flags, None)
+            .unwrap()
+            .collect();
     let rtime = match r[0].cmsgs().next() {
         Some(ControlMessageOwned::ScmTimestampns(rtime)) => rtime,
         Some(_) => panic!("Unexpected control message"),
