@@ -2,9 +2,7 @@ pub use serde::de::{Deserialize, IntoDeserializer};
 
 use crate::value::{Array, Table, Value};
 
-/// Construct a [`toml::Value`] from TOML syntax.
-///
-/// [`toml::Value`]: value/enum.Value.html
+/// Construct a [`Table`] from TOML syntax.
 ///
 /// ```rust
 /// let cargo_toml = toml::toml! {
@@ -32,7 +30,10 @@ macro_rules! toml {
         let table = $crate::value::Table::new();
         let mut root = $crate::Value::Table(table);
         $crate::toml_internal!(@toplevel root [] $($toml)+);
-        root
+        match root {
+            $crate::Value::Table(table) => table,
+            _ => unreachable!(),
+        }
     }};
 }
 

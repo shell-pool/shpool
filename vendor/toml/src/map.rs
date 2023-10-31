@@ -6,13 +6,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! A map of String to toml::Value.
+//! A map of `String` to [Value].
 //!
 //! By default the map is backed by a [`BTreeMap`]. Enable the `preserve_order`
-//! feature of toml-rs to use [`LinkedHashMap`] instead.
+//! feature of toml-rs to use [`IndexMap`] instead.
 //!
 //! [`BTreeMap`]: https://doc.rust-lang.org/std/collections/struct.BTreeMap.html
-//! [`LinkedHashMap`]: https://docs.rs/linked-hash-map/*/linked_hash_map/struct.LinkedHashMap.html
+//! [`IndexMap`]: https://docs.rs/indexmap
 
 use crate::value::Value;
 use serde::{de, ser};

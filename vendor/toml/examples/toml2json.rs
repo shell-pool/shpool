@@ -13,7 +13,7 @@ fn main() {
     let mut input = String::new();
     if args.len() > 1 {
         let name = args.nth(1).unwrap();
-        File::open(&name)
+        File::open(name)
             .and_then(|mut f| f.read_to_string(&mut input))
             .unwrap();
     } else {

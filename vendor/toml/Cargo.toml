@@ -10,10 +10,10 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2018"
-rust-version = "1.48.0"
+edition = "2021"
+rust-version = "1.60.0"
 name = "toml"
-version = "0.5.11"
+version = "0.7.0"
 authors = ["Alex Crichton <alex@alexcrichton.com>"]
 include = [
     "src/**/*",
@@ -42,7 +42,7 @@ categories = [
     "parsing",
     "config",
 ]
-license = "MIT/Apache-2.0"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/toml-rs/toml"
 
 [[package.metadata.release.pre-release-replacements]]
@@ -77,22 +77,76 @@ file = "CHANGELOG.md"
 search = "<!-- next-url -->"
 replace = """
 <!-- next-url -->
-[Unreleased]: https://github.com/toml-rs/toml_edit/compare/{{tag_name}}...HEAD"""
+[Unreleased]: https://github.com/toml-rs/toml/compare/{{tag_name}}...HEAD"""
 exactly = 1
 
+[[example]]
+name = "decode"
+required-features = [
+    "parse",
+    "display",
+]
+
+[[example]]
+name = "enum_external"
+required-features = [
+    "parse",
+    "display",
+]
+
+[[example]]
+name = "toml2json"
+required-features = [
+    "parse",
+    "display",
+]
+
+[[test]]
+name = "decoder_compliance"
+harness = false
+
+[[test]]
+name = "encoder_compliance"
+harness = false
+
 [dependencies.indexmap]
-version = "1.0"
+version = "1.9.1"
 optional = true
 
 [dependencies.serde]
-version = "1.0.97"
+version = "1.0.145"
 
-[dev-dependencies.serde_derive]
-version = "1.0"
+[dependencies.serde_spanned]
+version = "0.6.0"
+features = ["serde"]
+
+[dependencies.toml_datetime]
+version = "0.6.0"
+features = ["serde"]
+
+[dependencies.toml_edit]
+version = "0.19.0"
+features = ["serde"]
+optional = true
+
+[dev-dependencies.serde]
+version = "1.0.152"
+features = ["derive"]
 
 [dev-dependencies.serde_json]
-version = "1.0"
+version = "1.0.91"
+
+[dev-dependencies.snapbox]
+version = "0.4.3"
+
+[dev-dependencies.toml-test-harness]
+version = "0.4.3"
 
 [features]
-default = []
+default = [
+    "parse",
+    "display",
+]
+display = ["dep:toml_edit"]
+parse = ["dep:toml_edit"]
 preserve_order = ["indexmap"]
