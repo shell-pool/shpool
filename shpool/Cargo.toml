@@ -19,7 +19,7 @@ libshpool = { version = "0.3.1", path = "../libshpool" }
 [dev-dependencies]
 lazy_static = "1" # globals
 crossbeam-channel = "0.5" # channels
-nix = { version = "0.25", features = ["poll", "ioctl"] } # rusty wrapper for unix apis
+nix = { version = "0.26", features = ["poll", "ioctl"] } # rusty wrapper for unix apis
 tempfile = "3" # keeping tests hermetic
 regex = "1" # test assertions
 serde_json = "1" # json parsing
