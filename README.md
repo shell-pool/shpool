@@ -81,7 +81,7 @@ Shpool can do a few different things when you re-attach to an existing
 session. You can choose what you want it to do with the `session_restore_mode`
 configuration option.
 
-##### `"screen"` (default)
+##### `"screen"` (default) - restore a screenful of history
 
 The `"screen"` option causes shpool to re-draw sufficient output to fill the
 entire screen of the client terminal as well as using the SIGWINCH trick
@@ -96,7 +96,7 @@ session_restore_mode = "screen"
 
 to your `~/.config/shpool/config.toml`.
 
-##### `"simple"`
+##### `"simple"` - only ask child processes to redraw
 
 The `"simple"` avoids restoring any output. In this reconnect mode, shpool will
 issue some SIGWINCH signals to try to convince full screen ncurses apps
@@ -110,7 +110,7 @@ session_restore_mode = "simple"
 
 to your `~/.config/shpool/config.toml`.
 
-##### `{ lines = n }`
+##### `{ lines = n }` - restore the last n lines of history
 
 The lines option is much like the `"screen"` option, except that rather
 than just a screenful of text, it restores the last n lines of text
@@ -128,7 +128,7 @@ where n is a number to your `~/.config/shpool/config.toml`.
 
 ### Subcommands
 
-#### `shpool daemon`
+#### shpool daemon
 
 The `daemon` subcommand causes shpool to run in daemon mode. When running in
 this mode, `shpool` listens for incoming connections and opens up subshells,
@@ -136,7 +136,7 @@ retaining ownership of them in a table. In general, this subcommand will not
 be invoked directly by users, but will instead be called from a systemd unit
 file.
 
-#### `shpool attach`
+#### shpool attach
 
 The `attach` subcommand connects to the `shpool daemon` instance, passing in a
 name. If the name is new, a new shell is created, and if it already exists it
@@ -144,17 +144,17 @@ just attaches to the existing session so long as no other terminal is currently
 connected to that session. The `--ttl` flag can be used to limit how long the
 session will last.
 
-#### `shpool list`
+#### shpool list
 
 Lists all the current shell sessions.
 
-#### `shpool detach`
+#### shpool detach
 
 Detach from a one or more sessions without stopping them.
 Will detach the current session if run from inside a shpool
 session with no session name arguments.
 
-#### `shpool kill`
+#### shpool kill
 
 Kills a named shell session.
 
