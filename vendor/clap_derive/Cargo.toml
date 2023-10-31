@@ -11,9 +11,9 @@
 
 [package]
 edition = "2021"
-rust-version = "1.56.1"
+rust-version = "1.70.0"
 name = "clap_derive"
-version = "3.2.25"
+version = "4.4.7"
 include = [
     "build.rs",
     "src/**/*",
@@ -47,13 +47,6 @@ dependent-version = "upgrade"
 shared-version = true
 tag-name = "v{{version}}"
 
-[[package.metadata.release.pre-release-replacements]]
-exactly = 2
-file = "README.md"
-prerelease = true
-replace = "github.com/clap-rs/clap/blob/{{tag_name}}/"
-search = "github.com/clap-rs/clap/blob/[^/]+/"
-
 [lib]
 bench = false
 proc-macro = true
@@ -61,17 +54,14 @@ proc-macro = true
 [dependencies.heck]
 version = "0.4.0"
 
-[dependencies.proc-macro-error]
-version = "1"
-
 [dependencies.proc-macro2]
-version = "1.0.28"
+version = "1.0.42"
 
 [dependencies.quote]
 version = "1.0.9"
 
 [dependencies.syn]
-version = "1.0.74"
+version = "2.0.8"
 features = ["full"]
 
 [features]
@@ -79,4 +69,4 @@ debug = []
 default = []
 deprecated = []
 raw-deprecated = ["deprecated"]
-unstable-v4 = ["deprecated"]
+unstable-v5 = ["deprecated"]

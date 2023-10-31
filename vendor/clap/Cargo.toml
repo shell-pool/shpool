@@ -11,9 +11,9 @@
 
 [package]
 edition = "2021"
-rust-version = "1.56.1"
+rust-version = "1.70.0"
 name = "clap"
-version = "3.2.25"
+version = "4.4.7"
 include = [
     "build.rs",
     "src/**/*",
@@ -39,12 +39,13 @@ repository = "https://github.com/clap-rs/clap"
 [package.metadata.docs.rs]
 cargo-args = [
     "-Zunstable-options",
-    "-Zrustdoc-scrape-examples=examples",
+    "-Zrustdoc-scrape-examples",
 ]
 features = ["unstable-doc"]
 rustdoc-args = [
     "--cfg",
     "docsrs",
+    "--generate-link-to-definition",
 ]
 
 [package.metadata.playground]
@@ -89,6 +90,16 @@ replace = """
 [Unreleased]: https://github.com/clap-rs/clap/compare/{{tag_name}}...HEAD"""
 search = "<!-- next-url -->"
 
+[[package.metadata.release.pre-release-replacements]]
+file = "CITATION.cff"
+replace = "date-released: {{date}}"
+search = "^date-released: ....-..-.."
+
+[[package.metadata.release.pre-release-replacements]]
+file = "CITATION.cff"
+replace = "version: {{version}}"
+search = '^version: .+\..+\..+'
+
 [profile.bench]
 lto = true
 codegen-units = 1
@@ -120,6 +131,10 @@ name = "escaped-positional-derive"
 required-features = ["derive"]
 
 [[example]]
+name = "find"
+required-features = ["cargo"]
+
+[[example]]
 name = "git-derive"
 required-features = ["derive"]
 
@@ -138,6 +153,7 @@ path = "examples/multicall-hostname.rs"
 [[example]]
 name = "repl"
 path = "examples/repl.rs"
+required-features = ["help"]
 
 [[example]]
 name = "01_quick"
@@ -174,8 +190,18 @@ path = "examples/tutorial_builder/03_02_option.rs"
 required-features = ["cargo"]
 
 [[example]]
+name = "03_02_option_mult"
+path = "examples/tutorial_builder/03_02_option_mult.rs"
+required-features = ["cargo"]
+
+[[example]]
 name = "03_03_positional"
 path = "examples/tutorial_builder/03_03_positional.rs"
+required-features = ["cargo"]
+
+[[example]]
+name = "03_03_positional_mult"
+path = "examples/tutorial_builder/03_03_positional_mult.rs"
 required-features = ["cargo"]
 
 [[example]]
@@ -260,8 +286,18 @@ path = "examples/tutorial_derive/03_02_option.rs"
 required-features = ["derive"]
 
 [[example]]
+name = "03_02_option_mult_derive"
+path = "examples/tutorial_derive/03_02_option_mult.rs"
+required-features = ["derive"]
+
+[[example]]
 name = "03_03_positional_derive"
 path = "examples/tutorial_derive/03_03_positional.rs"
+required-features = ["derive"]
+
+[[example]]
+name = "03_03_positional_mult_derive"
+path = "examples/tutorial_derive/03_03_positional_mult.rs"
 required-features = ["derive"]
 
 [[example]]
@@ -311,11 +347,6 @@ test = true
 required-features = ["derive"]
 
 [[example]]
-name = "custom-bool"
-path = "examples/derive_ref/custom-bool.rs"
-required-features = ["derive"]
-
-[[example]]
 name = "interop_augment_args"
 path = "examples/derive_ref/augment_args.rs"
 required-features = ["derive"]
@@ -335,83 +366,31 @@ name = "interop_flatten_hand_args"
 path = "examples/derive_ref/flatten_hand_args.rs"
 required-features = ["derive"]
 
-[dependencies.atty]
-version = "0.2"
-optional = true
-
-[dependencies.backtrace]
-version = "0.3"
-optional = true
-
-[dependencies.bitflags]
-version = "1.2"
-
-[dependencies.clap_derive]
-version = "=3.2.25"
-optional = true
-
-[dependencies.clap_lex]
-version = "0.2.2"
-
-[dependencies.indexmap]
-version = "1.0"
-
-[dependencies.once_cell]
-version = "1.12.0"
-optional = true
-
-[dependencies.regex]
-version = "1.0"
-optional = true
-
-[dependencies.strsim]
-version = "0.10"
-optional = true
-
-[dependencies.termcolor]
-version = "1.1.1"
-optional = true
-
-[dependencies.terminal_size]
-version = "0.2.1"
-optional = true
-
-[dependencies.textwrap]
-version = "0.16"
-features = []
+[dependencies.clap_builder]
+version = "=4.4.7"
 default-features = false
 
-[dependencies.unicase]
-version = "2.6"
-optional = true
-
-[dependencies.yaml-rust]
-version = "0.4.1"
+[dependencies.clap_derive]
+version = "=4.4.7"
 optional = true
 
 [dev-dependencies.humantime]
-version = "2"
-
-[dev-dependencies.regex]
-version = "1.0"
+version = "2.1.0"
 
 [dev-dependencies.rustversion]
-version = "1"
+version = "1.0.14"
 
 [dev-dependencies.shlex]
-version = "1.1.0"
+version = "1.2.0"
 
 [dev-dependencies.snapbox]
-version = "0.2.9"
-
-[dev-dependencies.static_assertions]
-version = "1.1.0"
+version = "0.4.13"
 
 [dev-dependencies.trybuild]
-version = "1.0.18"
+version = "1.0.85"
 
 [dev-dependencies.trycmd]
-version = "0.13"
+version = "0.14.18"
 features = [
     "color-auto",
     "diff",
@@ -420,51 +399,41 @@ features = [
 default-features = false
 
 [features]
-cargo = ["once_cell"]
-color = [
-    "atty",
-    "termcolor",
-]
+cargo = ["clap_builder/cargo"]
+color = ["clap_builder/color"]
 debug = [
-    "clap_derive/debug",
-    "backtrace",
+    "clap_builder/debug",
+    "clap_derive?/debug",
 ]
 default = [
     "std",
     "color",
+    "help",
+    "usage",
+    "error-context",
     "suggestions",
 ]
-deprecated = ["clap_derive/deprecated"]
-derive = [
-    "clap_derive",
-    "once_cell",
+deprecated = [
+    "clap_builder/deprecated",
+    "clap_derive?/deprecated",
 ]
-env = []
-std = ["indexmap/std"]
-suggestions = ["strsim"]
-unicode = [
-    "textwrap/unicode-width",
-    "unicase",
-]
+derive = ["dep:clap_derive"]
+env = ["clap_builder/env"]
+error-context = ["clap_builder/error-context"]
+help = ["clap_builder/help"]
+std = ["clap_builder/std"]
+string = ["clap_builder/string"]
+suggestions = ["clap_builder/suggestions"]
+unicode = ["clap_builder/unicode"]
 unstable-doc = [
+    "clap_builder/unstable-doc",
     "derive",
-    "cargo",
-    "wrap_help",
-    "yaml",
-    "env",
-    "unicode",
-    "regex",
-    "unstable-replace",
-    "unstable-grouped",
 ]
-unstable-grouped = []
-unstable-replace = []
-unstable-v4 = [
-    "clap_derive/unstable-v4",
+unstable-styles = ["clap_builder/unstable-styles"]
+unstable-v5 = [
+    "clap_builder/unstable-v5",
+    "clap_derive?/unstable-v5",
     "deprecated",
 ]
-wrap_help = [
-    "terminal_size",
-    "textwrap/terminal_size",
-]
-yaml = ["yaml-rust"]
+usage = ["clap_builder/usage"]
+wrap_help = ["clap_builder/wrap_help"]

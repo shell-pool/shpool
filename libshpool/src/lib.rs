@@ -119,7 +119,7 @@ This does not close the shell. If no session name is provided
 $SHPOOL_SESSION_NAME will be used if it is present in the
 environment.")]
     Detach {
-        #[clap(multiple = true, help = "sessions to detach")]
+        #[clap(help = "sessions to detach")]
         sessions: Vec<String>,
     },
 
@@ -130,7 +130,7 @@ shell with a SIGHUP followed by a SIGKILL if the shell fails to exit
 quickly enough. If no session name is provided $SHPOOL_SESSION_NAME
 will be used if it is present in the environment.")]
     Kill {
-        #[clap(multiple = true, help = "sessions to kill")]
+        #[clap(help = "sessions to kill")]
         sessions: Vec<String>,
     },
 

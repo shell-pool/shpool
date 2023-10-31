@@ -6,7 +6,7 @@ fn main() {
     // Create application like normal
     let matches = command!() // requires `cargo` feature
         // Add the version arguments
-        .arg(arg!(--"set-ver" <VER> "set version manually").required(false))
+        .arg(arg!(--"set-ver" <VER> "set version manually"))
         .arg(arg!(--major         "auto inc major").action(ArgAction::SetTrue))
         .arg(arg!(--minor         "auto inc minor").action(ArgAction::SetTrue))
         .arg(arg!(--patch         "auto inc patch").action(ArgAction::SetTrue))
@@ -14,7 +14,7 @@ fn main() {
         .group(
             ArgGroup::new("vers")
                 .required(true)
-                .args(&["set-ver", "major", "minor", "patch"]),
+                .args(["set-ver", "major", "minor", "patch"]),
         )
         // Arguments can also be added to a group individually, these two arguments
         // are part of the "input" group which is not required
@@ -25,7 +25,6 @@ fn main() {
         )
         .arg(
             arg!(--"spec-in" <SPEC_IN> "some special input argument")
-                .required(false)
                 .value_parser(value_parser!(PathBuf))
                 .group("input"),
         )
@@ -33,7 +32,6 @@ fn main() {
         // (but **not** both) the "input" arguments
         .arg(
             arg!(config: -c <CONFIG>)
-                .required(false)
                 .value_parser(value_parser!(PathBuf))
                 .requires("input"),
         )
@@ -60,10 +58,10 @@ fn main() {
             (_, _, true) => patch += 1,
             _ => unreachable!(),
         };
-        format!("{}.{}.{}", major, minor, patch)
+        format!("{major}.{minor}.{patch}")
     };
 
-    println!("Version: {}", version);
+    println!("Version: {version}");
 
     // Check for usage of -c
     if matches.contains_id("config") {

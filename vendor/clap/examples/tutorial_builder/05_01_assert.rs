@@ -7,10 +7,10 @@ fn main() {
     let port: usize = *matches
         .get_one::<usize>("PORT")
         .expect("'PORT' is required and parsing will fail if its missing");
-    println!("PORT = {}", port);
+    println!("PORT = {port}");
 }
 
-fn cmd() -> clap::Command<'static> {
+fn cmd() -> clap::Command {
     command!() // requires `cargo` feature
         .arg(
             arg!(<PORT>)

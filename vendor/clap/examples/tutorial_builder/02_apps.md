@@ -1,17 +1,14 @@
 ```console
 $ 02_apps --help
-MyApp 1.0
-Kevin K. <kbknapp@gmail.com>
 Does awesome things
 
-USAGE:
-    02_apps[EXE] --two <VALUE> --one <VALUE>
+Usage: 02_apps[EXE] --two <VALUE> --one <VALUE>
 
-OPTIONS:
-    -h, --help           Print help information
-        --one <VALUE>    
-        --two <VALUE>    
-    -V, --version        Print version information
+Options:
+      --two <VALUE>  
+      --one <VALUE>  
+  -h, --help         Print help
+  -V, --version      Print version
 
 $ 02_apps --version
 MyApp 1.0

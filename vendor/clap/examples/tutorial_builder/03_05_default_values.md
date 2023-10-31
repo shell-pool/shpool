@@ -1,22 +1,20 @@
 ```console
 $ 03_05_default_values --help
-clap [..]
 A simple to use, efficient, and full-featured Command Line Argument Parser
 
-USAGE:
-    03_05_default_values[EXE] [NAME]
+Usage: 03_05_default_values[EXE] [PORT]
 
-ARGS:
-    <NAME>    [default: alice]
+Arguments:
+  [PORT]  [default: 2020]
 
-OPTIONS:
-    -h, --help       Print help information
-    -V, --version    Print version information
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
 
 $ 03_05_default_values
-NAME: "alice"
+port: 2020
 
-$ 03_05_default_values bob
-NAME: "bob"
+$ 03_05_default_values 22
+port: 22
 
 ```

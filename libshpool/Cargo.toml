@@ -15,7 +15,7 @@ license = "Apache-2.0"
 test_hooks = [] # for internal testing only, don't enable this feature
 
 [dependencies]
-clap = { version = "3", features = ["derive"] } # cli parsing
+clap = { version = "4", features = ["derive"] } # cli parsing
 anyhow = "1" # dynamic, unstructured errors
 chrono = "0.4" # getting current time and formatting it
 serde = "1" # config parsing, connection header formatting
