@@ -1,3 +1,9 @@
+shpool (0.3.2) unstable; urgency=low
+
+  * Start correctly parsing /etc/environment
+  * Update dependencies
+
+ -- Ethan Pailes <pailes@google.com>  Tue, 31 Oct 2023 11:11:00 -0400
 shpool (0.3.1) unstable; urgency=low
 
   * Disable output spool in "simple" session restore mode
