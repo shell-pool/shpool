@@ -12,7 +12,7 @@
 [package]
 edition = "2021"
 name = "shpool_vt100"
-version = "0.1.1"
+version = "0.1.2"
 authors = [
     "Jesse Luehrs <doy@tozt.net>",
     "Ethan Pailes <ethan@pailes.org>",
@@ -47,7 +47,7 @@ version = "0.4"
 version = "0.1"
 
 [dependencies.vte]
-version = "0.11"
+version = "0.12"
 
 [dev-dependencies.nix]
 version = "0.27"

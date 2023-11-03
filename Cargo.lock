@@ -680,9 +680,9 @@ dependencies = [
 
 [[package]]
 name = "shpool_vt100"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "353b27d42cef69262b65722fb69c3e75ca795be7619c0045d0e3eac941ce0843"
+checksum = "7a06c7404cb9956f07e8c208f40386eca47db552b611878c839a37a770e908fb"
 dependencies = [
  "itoa",
  "log",
@@ -883,9 +883,9 @@ checksum = "830b7e5d4d90034032940e4ace0d9a9a057e7a45cd94e6c007832e39edb82f6d"
 
 [[package]]
 name = "vte"
-version = "0.11.1"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5022b5fbf9407086c180e9557be968742d839e68346af7792b8592489732197"
+checksum = "401dc1020e10f74d38616c1f1ab92ccd85dc902705a29d0730e0fbea8534f91a"
 dependencies = [
  "arrayvec",
  "utf8parse",

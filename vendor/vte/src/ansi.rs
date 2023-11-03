@@ -11,6 +11,7 @@ extern crate alloc;
 use alloc::borrow::ToOwned;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use bitflags::bitflags;
 
 use core::convert::TryFrom;
 use core::fmt::{self, Display, Formatter, Write};
@@ -25,6 +26,7 @@ use core::ops::Mul;
 #[cfg(not(feature = "no_std"))]
 use std::time::Instant;
 
+use cursor_icon::CursorIcon;
 use log::{debug, trace};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -37,14 +39,14 @@ const SYNC_UPDATE_TIMEOUT: Duration = Duration::from_millis(150);
 /// Maximum number of bytes read in one synchronized update (2MiB).
 const SYNC_BUFFER_SIZE: usize = 0x20_0000;
 
-/// Number of bytes in the synchronized update DCS sequence before the passthrough parameters.
-const SYNC_ESCAPE_START_LEN: usize = 5;
+/// Number of bytes in the BSU/ESU CSI sequences.
+const SYNC_ESCAPE_LEN: usize = 8;
 
-/// Start of the DCS sequence for beginning synchronized updates.
-const SYNC_START_ESCAPE_START: [u8; SYNC_ESCAPE_START_LEN] = [b'\x1b', b'P', b'=', b'1', b's'];
+/// BSU CSI sequence for beginning or extending synchronized updates.
+const BSU_CSI: [u8; SYNC_ESCAPE_LEN] = *b"\x1b[?2026h";
 
-/// Start of the DCS sequence for terminating synchronized updates.
-const SYNC_END_ESCAPE_START: [u8; SYNC_ESCAPE_START_LEN] = [b'\x1b', b'P', b'=', b'2', b's'];
+/// ESU CSI sequence for terminating synchronized updates.
+const ESU_CSI: [u8; SYNC_ESCAPE_LEN] = *b"\x1b[?2026l";
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Hyperlink {
@@ -250,9 +252,6 @@ struct ProcessorState<T: Timeout> {
     /// Last processed character for repetition.
     preceding_char: Option<char>,
 
-    /// DCS sequence waiting for termination.
-    dcs: Option<Dcs>,
-
     /// State for synchronized terminal updates.
     sync_state: SyncState<T>,
 }
@@ -262,31 +261,14 @@ struct SyncState<T: Timeout> {
     /// Handler for synchronized updates.
     timeout: T,
 
-    /// Sync DCS waiting for termination sequence.
-    pending_dcs: Option<Dcs>,
-
     /// Bytes read during the synchronized update.
     buffer: Vec<u8>,
 }
 
 impl<T: Timeout> Default for SyncState<T> {
     fn default() -> Self {
-        Self {
-            buffer: Vec::with_capacity(SYNC_BUFFER_SIZE),
-            pending_dcs: None,
-            timeout: T::default(),
-        }
+        Self { buffer: Vec::with_capacity(SYNC_BUFFER_SIZE), timeout: T::default() }
     }
-}
-
-/// Pending DCS sequence.
-#[derive(Debug)]
-enum Dcs {
-    /// Begin of the synchronized update.
-    SyncStart,
-
-    /// End of the synchronized update.
-    SyncEnd,
 }
 
 /// The processor wraps a `crate::Parser` to ultimately call methods on a Handler.
@@ -361,46 +343,29 @@ impl<T: Timeout> Processor<T> {
     {
         self.state.sync_state.buffer.push(byte);
 
-        // Handle sync DCS escape sequences.
-        match self.state.sync_state.pending_dcs {
-            Some(_) => self.advance_sync_dcs_end(handler, byte),
-            None => self.advance_sync_dcs_start(),
-        }
+        // Handle sync CSI escape sequences.
+        self.advance_sync_csi(handler);
     }
 
-    /// Find the start of sync DCS sequences.
-    fn advance_sync_dcs_start(&mut self) {
-        // Get the last few bytes for comparison.
-        let len = self.state.sync_state.buffer.len();
-        let offset = len.saturating_sub(SYNC_ESCAPE_START_LEN);
-        let end = &self.state.sync_state.buffer[offset..];
-
-        // Check for extension/termination of the synchronized update.
-        if end == SYNC_START_ESCAPE_START {
-            self.state.sync_state.pending_dcs = Some(Dcs::SyncStart);
-        } else if end == SYNC_END_ESCAPE_START || len >= SYNC_BUFFER_SIZE - 1 {
-            self.state.sync_state.pending_dcs = Some(Dcs::SyncEnd);
-        }
-    }
-
-    /// Parse the DCS termination sequence for synchronized updates.
-    fn advance_sync_dcs_end<H>(&mut self, handler: &mut H, byte: u8)
+    /// Handle BSU/ESU CSI sequences during synchronized update.
+    fn advance_sync_csi<H>(&mut self, handler: &mut H)
     where
         H: Handler,
     {
-        match byte {
-            // Ignore DCS passthrough characters.
-            0x00..=0x17 | 0x19 | 0x1c..=0x7f | 0xa0..=0xff => (),
-            // Cancel the DCS sequence.
-            0x18 | 0x1a | 0x80..=0x9f => self.state.sync_state.pending_dcs = None,
-            // Dispatch on ESC.
-            0x1b => match self.state.sync_state.pending_dcs.take() {
-                Some(Dcs::SyncStart) => {
-                    self.state.sync_state.timeout.set_timeout(SYNC_UPDATE_TIMEOUT);
-                },
-                Some(Dcs::SyncEnd) => self.stop_sync(handler),
-                None => (),
-            },
+        // Get the last few bytes for comparison.
+        let len = self.state.sync_state.buffer.len();
+        let offset = len.saturating_sub(SYNC_ESCAPE_LEN);
+        let end = &self.state.sync_state.buffer[offset..];
+
+        // NOTE: It is technically legal to specify multiple private modes in the same
+        // escape, but we only allow EXACTLY `\e[?2026h`/`\e[?2026l` to keep the parser
+        // reasonable.
+        //
+        // Check for extension/termination of the synchronized update.
+        if end == BSU_CSI {
+            self.state.sync_state.timeout.set_timeout(SYNC_UPDATE_TIMEOUT);
+        } else if end == ESU_CSI || len >= SYNC_BUFFER_SIZE - 1 {
+            self.stop_sync(handler);
         }
     }
 }
@@ -668,6 +633,114 @@ pub trait Handler {
 
     /// Set hyperlink.
     fn set_hyperlink(&mut self, _: Option<Hyperlink>) {}
+
+    /// Set mouse cursor icon.
+    fn set_mouse_cursor_icon(&mut self, _: CursorIcon) {}
+
+    /// Report current keyboard mode.
+    fn report_keyboard_mode(&mut self) {}
+
+    /// Push keyboard mode into the keyboard mode stack.
+    fn push_keyboard_mode(&mut self, _mode: KeyboardModes) {}
+
+    /// Pop the given amount of keyboard modes from the
+    /// keyboard mode stack.
+    fn pop_keyboard_modes(&mut self, _to_pop: u16) {}
+
+    /// Set the [`keyboard mode`] using the given [`behavior`].
+    ///
+    /// [`keyboard mode`]: crate::ansi::KeyboardModes
+    /// [`behavior`]: crate::ansi::KeyboardModesApplyBehavior
+    fn set_keyboard_mode(&mut self, _mode: KeyboardModes, _behavior: KeyboardModesApplyBehavior) {}
+
+    /// Set XTerm's [`ModifyOtherKeys`] option.
+    fn set_modify_other_keys(&mut self, _mode: ModifyOtherKeys) {}
+
+    /// Report XTerm's [`ModifyOtherKeys`] state.
+    ///
+    /// The output is of form `CSI > 4 ; mode m`.
+    fn report_modify_other_keys(&mut self) {}
+}
+
+bitflags! {
+    /// A set of [`kitty keyboard protocol'] modes.
+    ///
+    /// [`kitty keyboard protocol']: https://sw.kovidgoyal.net/kitty/keyboard-protocol
+    #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct KeyboardModes : u8 {
+        /// No keyboard protocol mode is set.
+        const NO_MODE                 = 0b0000_0000;
+        /// Report `Esc`, `alt` + `key`, `ctrl` + `key`, `ctrl` + `alt` + `key`, `shift`
+        /// + `alt` + `key` keys using `CSI u` sequence instead of raw ones.
+        const DISAMBIGUATE_ESC_CODES  = 0b0000_0001;
+        /// Report key presses, release, and repetition alongside the escape. Key events
+        /// that result in text are reported as plain UTF-8, unless the
+        /// [`Self::REPORT_ALL_KEYS_AS_ESC`] is enabled.
+        const REPORT_EVENT_TYPES      = 0b0000_0010;
+        /// Additionally report shifted key an dbase layout key.
+        const REPORT_ALTERNATE_KEYS   = 0b0000_0100;
+        /// Report every key as an escape sequence.
+        const REPORT_ALL_KEYS_AS_ESC  = 0b0000_1000;
+        /// Report the text generated by the key event.
+        const REPORT_ASSOCIATED_TEXT  = 0b0001_0000;
+    }
+}
+
+/// XTMODKEYS modifyOtherKeys state.
+///
+/// This only applies to keys corresponding to ascii characters.
+///
+/// For the details on how to implement the mode handling correctly, consult [`XTerm's
+/// implementation`] and the [`output`] of XTerm's provided [`perl script`]. Some libraries and
+/// implementations also use the [`fixterms`] definition of the `CSI u`.
+///
+/// The end escape sequence has a `CSI char; modifiers u` form while the original
+/// `CSI 27 ; modifier ; char ~`. The clients should prefer the `CSI u`, since it has
+/// more adoption.
+///
+/// [`XTerm's implementation`]: https://invisible-island.net/xterm/modified-keys.html
+/// [`perl script`]: https://github.com/ThomasDickey/xterm-snapshots/blob/master/vttests/modify-keys.pl
+/// [`output`]: https://github.com/alacritty/vte/blob/master/doc/modifyOtherKeys-example.txt
+/// [`fixterms`]: http://www.leonerd.org.uk/hacks/fixterms/
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ModifyOtherKeys {
+    /// Reset the state.
+    Reset,
+    /// Enables this feature except for keys with well-known behavior, e.g., Tab, Backspace and
+    /// some special control character cases which are built into the X11 library (e.g.,
+    /// Control-Space to make a NUL, or Control-3 to make an Escape character).
+    ///
+    /// Escape sequences shouldn't be emitted under the following circumstances:
+    /// - When the key is in range of `[64;127]` and the modifier is either Control or Shift
+    /// - When the key combination is a known control combination alias
+    ///
+    /// For more details, consult the [`example`] for the suggested translation.
+    ///
+    /// [`example`]: https://github.com/alacritty/vte/blob/master/doc/modifyOtherKeys-example.txt
+    EnableExceptWellDefined,
+    /// Enables this feature for all keys including the exceptions of
+    /// [`Self::EnableExceptWellDefined`].  XTerm still ignores the special cases built into the
+    /// X11 library. Any shifted (modified) ordinary key send an escape sequence. The Alt- and
+    /// Meta- modifiers cause XTerm to send escape sequences.
+    ///
+    /// For more details, consult the [`example`] for the suggested translation.
+    ///
+    /// [`example`]: https://github.com/alacritty/vte/blob/master/doc/modifyOtherKeys-example.txt
+    EnableAll,
+}
+
+/// Describes how the new [`KeyboardModes`] should be applied.
+#[repr(u8)]
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub enum KeyboardModesApplyBehavior {
+    /// Replace the active flags with the new ones.
+    #[default]
+    Replace,
+    /// Merge the given flags with currently active ones.
+    Union,
+    /// Remove the given flags from the active ones.
+    Difference,
 }
 
 /// Terminal cursor configuration.
@@ -678,9 +751,10 @@ pub struct CursorStyle {
 }
 
 /// Terminal cursor shape.
-#[derive(Debug, Eq, PartialEq, Copy, Clone, Hash)]
+#[derive(Debug, Default, Eq, PartialEq, Copy, Clone, Hash)]
 pub enum CursorShape {
     /// Cursor is a block like `▒`.
+    #[default]
     Block,
 
     /// Cursor is an underscore like `_`.
@@ -694,12 +768,6 @@ pub enum CursorShape {
 
     /// Invisible cursor.
     Hidden,
-}
-
-impl Default for CursorShape {
-    fn default() -> CursorShape {
-        CursorShape::Block
-    }
 }
 
 /// Terminal modes.
@@ -1023,32 +1091,22 @@ pub enum Attr {
 }
 
 /// Identifiers which can be assigned to a graphic character set.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum CharsetIndex {
     /// Default set, is designated as ASCII at startup.
+    #[default]
     G0,
     G1,
     G2,
     G3,
 }
 
-impl Default for CharsetIndex {
-    fn default() -> Self {
-        CharsetIndex::G0
-    }
-}
-
 /// Standard or common character sets which can be designated as G0-G3.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum StandardCharset {
+    #[default]
     Ascii,
     SpecialCharacterAndLineDrawing,
-}
-
-impl Default for StandardCharset {
-    fn default() -> Self {
-        StandardCharset::Ascii
-    }
 }
 
 impl StandardCharset {
@@ -1125,18 +1183,10 @@ where
 
     #[inline]
     fn hook(&mut self, params: &Params, intermediates: &[u8], ignore: bool, action: char) {
-        match (action, intermediates) {
-            ('s', [b'=']) => {
-                // Start a synchronized update. The end is handled with a separate parser.
-                if params.iter().next().map_or(false, |param| param[0] == 1) {
-                    self.state.dcs = Some(Dcs::SyncStart);
-                }
-            },
-            _ => debug!(
-                "[unhandled hook] params={:?}, ints: {:?}, ignore: {:?}, action: {:?}",
-                params, intermediates, ignore, action
-            ),
-        }
+        debug!(
+            "[unhandled hook] params={:?}, ints: {:?}, ignore: {:?}, action: {:?}",
+            params, intermediates, ignore, action
+        );
     }
 
     #[inline]
@@ -1146,13 +1196,7 @@ where
 
     #[inline]
     fn unhook(&mut self) {
-        match self.state.dcs {
-            Some(Dcs::SyncStart) => {
-                self.state.sync_state.timeout.set_timeout(SYNC_UPDATE_TIMEOUT);
-            },
-            Some(Dcs::SyncEnd) => (),
-            _ => debug!("[unhandled unhook]"),
-        }
+        debug!("[unhandled unhook]");
     }
 
     #[inline]
@@ -1280,6 +1324,15 @@ where
                     }
                 }
                 unhandled(params);
+            },
+
+            // Set mouse cursor shape.
+            b"22" if params.len() == 2 => {
+                let shape = String::from_utf8_lossy(params[1]);
+                match CursorIcon::from_str(&shape) {
+                    Ok(cursor_icon) => self.handler.set_mouse_cursor_icon(cursor_icon),
+                    Err(_) => debug!("[osc 22] unrecognized cursor icon shape: {shape:?}"),
+                }
             },
 
             // Set cursor style.
@@ -1417,7 +1470,14 @@ where
             },
             ('h', intermediates) => {
                 for param in params_iter.map(|param| param[0]) {
-                    match Mode::from_primitive(intermediates.first(), param) {
+                    let intermediate = intermediates.first();
+
+                    // Handle sync updates opaquely.
+                    if intermediate == Some(&b'?') && param == 2026 {
+                        self.state.sync_state.timeout.set_timeout(SYNC_UPDATE_TIMEOUT);
+                    }
+
+                    match Mode::from_primitive(intermediate, param) {
                         Some(mode) => handler.set_mode(mode),
                         None => unhandled!(),
                     }
@@ -1473,6 +1533,22 @@ where
                     }
                 }
             },
+            ('m', [b'>']) => {
+                let mode = match (next_param_or(1) == 4).then(|| next_param_or(0)) {
+                    Some(0) => ModifyOtherKeys::Reset,
+                    Some(1) => ModifyOtherKeys::EnableExceptWellDefined,
+                    Some(2) => ModifyOtherKeys::EnableAll,
+                    _ => return unhandled!(),
+                };
+                handler.set_modify_other_keys(mode);
+            },
+            ('m', [b'?']) => {
+                if params_iter.next() == Some(&[4]) {
+                    handler.report_modify_other_keys();
+                } else {
+                    unhandled!()
+                }
+            },
             ('n', []) => handler.device_status(next_param_or(0) as usize),
             ('P', []) => handler.delete_chars(next_param_or(1) as usize),
             ('q', [b' ']) => {
@@ -1509,6 +1585,25 @@ where
                 22 => handler.push_title(),
                 23 => handler.pop_title(),
                 _ => unhandled!(),
+            },
+            ('u', [b'?']) => handler.report_keyboard_mode(),
+            ('u', [b'=']) => {
+                let mode = KeyboardModes::from_bits_truncate(next_param_or(0) as u8);
+                let behavior = match next_param_or(1) {
+                    3 => KeyboardModesApplyBehavior::Difference,
+                    2 => KeyboardModesApplyBehavior::Union,
+                    // Default is replace.
+                    _ => KeyboardModesApplyBehavior::Replace,
+                };
+                handler.set_keyboard_mode(mode, behavior);
+            },
+            ('u', [b'>']) => {
+                let mode = KeyboardModes::from_bits_truncate(next_param_or(0) as u8);
+                handler.push_keyboard_mode(mode);
+            },
+            ('u', [b'<']) => {
+                // The default is 1.
+                handler.pop_keyboard_modes(next_param_or(1));
             },
             ('u', []) => handler.restore_cursor_position(),
             ('X', []) => handler.erase_chars(next_param_or(1) as usize),

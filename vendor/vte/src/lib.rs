@@ -52,7 +52,6 @@ use definitions::{unpack, Action, State};
 
 const MAX_INTERMEDIATES: usize = 2;
 const MAX_OSC_PARAMS: usize = 16;
-#[cfg(any(feature = "no_std", test))]
 const MAX_OSC_RAW: usize = 1024;
 
 struct VtUtf8Receiver<'a, P: Perform>(&'a mut P, &'a mut State);
@@ -72,15 +71,18 @@ impl<'a, P: Perform> utf8::Receiver for VtUtf8Receiver<'a, P> {
 /// Parser for raw _VTE_ protocol which delegates actions to a [`Perform`]
 ///
 /// [`Perform`]: trait.Perform.html
+///
+/// Generic over the value for the size of the raw Operating System Command
+/// buffer. Only used when the `no_std` feature is enabled.
 #[derive(Default)]
-pub struct Parser {
+pub struct Parser<const OSC_RAW_BUF_SIZE: usize = MAX_OSC_RAW> {
     state: State,
     intermediates: [u8; MAX_INTERMEDIATES],
     intermediate_idx: usize,
     params: Params,
     param: u16,
     #[cfg(feature = "no_std")]
-    osc_raw: ArrayVec<u8, MAX_OSC_RAW>,
+    osc_raw: ArrayVec<u8, OSC_RAW_BUF_SIZE>,
     #[cfg(not(feature = "no_std"))]
     osc_raw: Vec<u8>,
     osc_params: [(usize, usize); MAX_OSC_PARAMS],
@@ -92,7 +94,21 @@ pub struct Parser {
 impl Parser {
     /// Create a new Parser
     pub fn new() -> Parser {
-        Parser::default()
+        Default::default()
+    }
+}
+
+impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
+    /// Create a new Parser with a custom size for the Operating System Command buffer.
+    ///
+    /// Call with a const-generic param on `Parser`, like:
+    ///
+    /// ```rust
+    /// let mut p = vte::Parser::<64>::new_with_size();
+    /// ```
+    #[cfg(feature = "no_std")]
+    pub fn new_with_size() -> Parser<OSC_RAW_BUF_SIZE> {
+        Default::default()
     }
 
     #[inline]
@@ -358,7 +374,7 @@ impl Parser {
 /// movement, or simply printing characters to the screen.
 ///
 /// The methods on this type correspond to actions described in
-/// http://vt100.net/emu/dec_ansi_parser. I've done my best to describe them in
+/// <http://vt100.net/emu/dec_ansi_parser>. I've done my best to describe them in
 /// a useful way in my own words for completeness, but the site should be
 /// referenced if something isn't clear. If the site disappears at some point in
 /// the future, consider checking archive.org.
@@ -921,6 +937,98 @@ mod tests {
                 assert!(ignore);
             },
             _ => panic!("expected csi sequence"),
+        }
+    }
+
+    #[cfg(feature = "no_std")]
+    #[test]
+    fn build_with_fixed_size() {
+        static INPUT: &[u8] = b"\x1b[3;1\x1b[?1049h";
+        let mut dispatcher = Dispatcher::default();
+        let mut parser: Parser<30> = Parser::new_with_size();
+
+        for byte in INPUT {
+            parser.advance(&mut dispatcher, *byte);
+        }
+
+        assert_eq!(dispatcher.dispatched.len(), 1);
+        match &dispatcher.dispatched[0] {
+            Sequence::Csi(params, intermediates, ignore, _) => {
+                assert_eq!(intermediates, &[b'?']);
+                assert_eq!(params, &[[1049]]);
+                assert!(!ignore);
+            },
+            _ => panic!("expected csi sequence"),
+        }
+    }
+
+    #[cfg(feature = "no_std")]
+    #[test]
+    fn exceed_fixed_osc_buffer_size() {
+        const OSC_BUFFER_SIZE: usize = 32;
+        static NUM_BYTES: usize = OSC_BUFFER_SIZE + 100;
+        static INPUT_START: &[u8] = b"\x1b]52;";
+        static INPUT_END: &[u8] = b"\x07";
+
+        let mut dispatcher = Dispatcher::default();
+        let mut parser: Parser<OSC_BUFFER_SIZE> = Parser::new_with_size();
+
+        // Create valid OSC escape
+        for byte in INPUT_START {
+            parser.advance(&mut dispatcher, *byte);
+        }
+
+        // Exceed max buffer size
+        for _ in 0..NUM_BYTES {
+            parser.advance(&mut dispatcher, b'a');
+        }
+
+        // Terminate escape for dispatch
+        for byte in INPUT_END {
+            parser.advance(&mut dispatcher, *byte);
+        }
+
+        assert_eq!(dispatcher.dispatched.len(), 1);
+        match &dispatcher.dispatched[0] {
+            Sequence::Osc(params, _) => {
+                assert_eq!(params.len(), 2);
+                assert_eq!(params[0], b"52");
+                assert_eq!(params[1].len(), OSC_BUFFER_SIZE - params[0].len());
+                for item in params[1].iter() {
+                    assert_eq!(*item, b'a');
+                }
+            },
+            _ => panic!("expected osc sequence"),
+        }
+    }
+
+    #[cfg(feature = "no_std")]
+    #[test]
+    fn fixed_size_osc_containing_string_terminator() {
+        static INPUT_START: &[u8] = b"\x1b]2;";
+        static INPUT_MIDDLE: &[u8] = b"s\xe6\x9c\xab";
+        static INPUT_END: &[u8] = b"\x1b\\";
+
+        let mut dispatcher = Dispatcher::default();
+        let mut parser: Parser<5> = Parser::new_with_size();
+
+        for byte in INPUT_START {
+            parser.advance(&mut dispatcher, *byte);
+        }
+        for byte in INPUT_MIDDLE {
+            parser.advance(&mut dispatcher, *byte);
+        }
+        for byte in INPUT_END {
+            parser.advance(&mut dispatcher, *byte);
+        }
+
+        assert_eq!(dispatcher.dispatched.len(), 2);
+        match &dispatcher.dispatched[0] {
+            Sequence::Osc(params, false) => {
+                assert_eq!(params[0], b"2");
+                assert_eq!(params[1], INPUT_MIDDLE);
+            },
+            _ => panic!("expected osc sequence"),
         }
     }
 }
