@@ -1,0 +1,6 @@
+compression = xz
+compression-level = fast
+tar-ignore = "placeholder_to_exclude_the_defaults"
+tar-ignore = "**/android-rust/darwin-x86"
+tar-ignore = "**/android-rust/linux-musl-x86"
+tar-ignore = "**/android-rust/windows-x86"
