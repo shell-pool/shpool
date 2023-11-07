@@ -630,7 +630,7 @@ fn injects_term_even_with_env_config() -> anyhow::Result<()> {
 
 #[test]
 #[timeout(30000)]
-fn injects_display() -> anyhow::Result<()> {
+fn injects_local_env_vars() -> anyhow::Result<()> {
     support::dump_err(|| {
         let mut daemon_proc =
             support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
@@ -638,7 +638,10 @@ fn injects_display() -> anyhow::Result<()> {
             .attach(
                 "sh1",
                 AttachArgs {
-                    extra_env: vec![(String::from("DISPLAY"), String::from(":0"))],
+                    extra_env: vec![
+                        (String::from("DISPLAY"), String::from(":0")),
+                        (String::from("LANG"), String::from("fakelang")),
+                    ],
                     ..Default::default()
                 },
             )
@@ -647,6 +650,9 @@ fn injects_display() -> anyhow::Result<()> {
 
         attach_proc.run_cmd("echo $DISPLAY")?;
         line_matcher.match_re(":0$")?;
+
+        attach_proc.run_cmd("echo $LANG")?;
+        line_matcher.match_re("fakelang$")?;
 
         Ok(())
     })
