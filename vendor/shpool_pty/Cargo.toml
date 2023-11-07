@@ -11,7 +11,7 @@
 
 [package]
 name = "shpool_pty"
-version = "0.1.0"
+version = "0.2.1"
 authors = [
     "Hika Hibariya <hibariya@gmail.com>",
     "Ethan Pailes <ethan@pailes.org>",

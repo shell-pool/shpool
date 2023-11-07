@@ -9,6 +9,8 @@ pub use self::pty::{Master, MasterError};
 pub use self::pty::{Slave, SlaveError};
 use std::ffi::CString;
 
+const MAX_PTS_NAME: usize = 1024;
+
 #[derive(Debug, Clone)]
 pub enum Fork {
     // Parent child's pid and master's pty.
@@ -23,17 +25,25 @@ impl Fork {
     pub fn new(path: &'static str) -> Result<Self> {
         match Master::new(CString::new(path).ok().unwrap_or_default().as_ptr()) {
             Err(cause) => Err(ForkError::BadMaster(cause)),
-            Ok(master) => unsafe {
+            Ok(master) => {
                 if let Some(cause) = master.grantpt().err().or(master.unlockpt().err()) {
                     Err(ForkError::BadMaster(cause))
                 } else {
-                    match libc::fork() {
+                    // Safety: no params to worry about, just an ffi call
+                    let fork_ret = unsafe { libc::fork() };
+                    match fork_ret {
                         -1 => Err(ForkError::Failure),
                         0 => {
-                            match master.ptsname() {
-                                Err(cause) => Err(ForkError::BadMaster(cause)),
-                                Ok(name) => Fork::from_pts(name), 
+                            let mut ptsname_buf = vec![0; MAX_PTS_NAME];
+                            if let Err(cause) = master.ptsname_r(&mut ptsname_buf) {
+                                return Err(ForkError::BadMaster(cause));
                             }
+                            // ensure null termination
+                            let last_idx = ptsname_buf.len() - 1;
+                            ptsname_buf[last_idx] = 0;
+
+                            let name: *const u8 = &ptsname_buf[0];
+                            Fork::from_pts(name as *const libc::c_char)
                         }
                         pid => Ok(Fork::Parent(pid, master)),
                     }
@@ -46,6 +56,10 @@ impl Fork {
     /// extention from the constructor function `new` who
     /// prepares and returns the child.
     fn from_pts(ptsname: *const ::libc::c_char) -> Result<Self> {
+        if ptsname.is_null() {
+            return Err(ForkError::BadPtsname);
+        }
+
         unsafe {
             if libc::setsid() == -1 {
                 Err(ForkError::SetsidFail)
@@ -135,8 +149,8 @@ impl Fork {
 
 impl Drop for Fork {
     fn drop(&mut self) {
-        match *self {
-            Fork::Parent(_, ref master) => Descriptor::drop(master),
+        match self {
+            Fork::Parent(_, master) => Descriptor::drop(master),
             _ => {}
         }
     }

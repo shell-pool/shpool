@@ -33,7 +33,7 @@
 //! and this to your crate root:
 //!
 //! ```rust
-//! extern crate pty;
+//! extern crate shpool_pty;
 //! ```
 //!
 //! ### pty::fork()
@@ -43,14 +43,14 @@
 //! For example, the following code spawns `tty(1)` command by `pty::fork()` and outputs the result of the command.
 //!
 //! ```rust
-//! extern crate pty;
+//! extern crate shpool_pty;
 //! extern crate libc;
 //!
 //! use std::ffi::CString;
 //! use std::io::Read;
 //! use std::process::{Command};
 //!
-//! use pty::fork::*;
+//! use shpool_pty::fork::*;
 //!
 //! fn main() {
 //!   let fork = Fork::from_ptmx().unwrap();

@@ -1,8 +1,8 @@
-extern crate pty;
+extern crate shpool_pty;
 extern crate libc;
 extern crate errno;
 
-use pty::fork::*;
+use shpool_pty::fork::*;
 use std::io::Read;
 use std::process::{Command};
 

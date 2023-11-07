@@ -1,8 +1,8 @@
-extern crate pty;
+extern crate shpool_pty;
 extern crate libc;
 extern crate errno;
 
-use self::pty::prelude::*;
+use self::shpool_pty::prelude::*;
 
 use std::io::prelude::*;
 use std::process::{Command, Stdio};

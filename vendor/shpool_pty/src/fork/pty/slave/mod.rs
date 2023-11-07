@@ -4,11 +4,11 @@ use ::descriptor::Descriptor;
 use ::libc;
 
 pub use self::err::{SlaveError, Result};
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::RawFd;
 
 #[derive(Debug, Clone)]
 pub struct Slave {
-    pty: RawFd,
+    pty: Option<RawFd>,
 }
 
 impl Slave {
@@ -16,26 +16,32 @@ impl Slave {
     pub fn new(path: *const ::libc::c_char) -> Result<Self> {
         match Self::open(path, libc::O_RDWR, None) {
             Err(cause) => Err(SlaveError::BadDescriptor(cause)),
-            Ok(fd) => Ok(Slave { pty: fd }),
+            Ok(fd) => Ok(Slave { pty: Some(fd) }),
         }
     }
 
+    /// Extract the raw fd from the underlying object
+    pub fn raw_fd(&self) -> &Option<RawFd> {
+        &self.pty
+    }
+
     pub fn dup2(&self, std: libc::c_int) -> Result<libc::c_int> {
-        unsafe {
-            match libc::dup2(self.as_raw_fd(), std) {
-                -1 => Err(SlaveError::Dup2Error),
-                d => Ok(d),
+        if let Some(fd) = self.pty {
+            unsafe {
+                match libc::dup2(fd, std) {
+                    -1 => Err(SlaveError::Dup2Error),
+                    d => Ok(d),
+                }
             }
+        } else {
+            Err(SlaveError::NoFdError)
         }
     }
 }
 
-impl Descriptor for Slave {}
-
-impl AsRawFd for Slave {
-    /// The accessor function `as_raw_fd` returns the fd.
-    fn as_raw_fd(&self) -> RawFd {
-        self.pty
+impl Descriptor for Slave {
+    fn take_raw_fd(&mut self) -> Option<RawFd> {
+        self.pty.take()
     }
 }
 

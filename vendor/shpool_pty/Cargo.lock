@@ -162,7 +162,7 @@ dependencies = [
 
 [[package]]
 name = "shpool_pty"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "clippy",
  "errno",

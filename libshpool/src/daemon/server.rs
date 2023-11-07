@@ -620,7 +620,9 @@ impl Server {
         let fork = shpool_pty::fork::Fork::from_ptmx().context("forking pty")?;
         if let Ok(slave) = fork.is_child() {
             if noecho {
-                tty::disable_echo(slave.as_raw_fd()).unwrap();
+                if let Some(fd) = slave.raw_fd() {
+                    tty::disable_echo(*fd).context("disabling echo on pty")?;
+                }
             }
             for fd in STDERR_FD + 1..(nix::unistd::SysconfVar::OPEN_MAX as i32) {
                 let _ = nix::unistd::close(fd);

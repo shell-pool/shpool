@@ -28,6 +28,8 @@ pub enum ForkError {
     BadDescriptorMaster(DescriptorError),
     /// The Slave's Descriptor occured a error.
     BadDescriptorSlave(DescriptorError),
+    /// Cannot create a fork from a null ptsname
+    BadPtsname,
 }
 
 impl fmt::Display for ForkError {
@@ -55,6 +57,7 @@ impl Error for ForkError {
             ForkError::BadSlave(_) => "the slave as occured an error",
             ForkError::BadDescriptorMaster(_) => "the master's descriptor as occured an error",
             ForkError::BadDescriptorSlave(_) => "the slave's descriptor as occured an error",
+            ForkError::BadPtsname => "null ptsname",
 
         }
     }
