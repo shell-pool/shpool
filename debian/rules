@@ -8,8 +8,8 @@
 # `dh clean` will remove any dangling files afterwards
 
 export RUST_VERSION := $(shell ls ./android-rust/linux-x86 | sort -n | tail -n 1)
-export PATH := $(shell pwd)/android-rust/linux-x86/${RUST_VERSION}/bin:$(PATH)
-export LD_LIBRARY_PATH := $(shell pwd)/android-rust/linux-x86/${RUST_VERSION}/lib
+export PATH := $(shell pwd)/android-rust/linux-x86/${RUST_VERSION}/bin:${PATH}
+export LD_LIBRARY_PATH := $(shell pwd)/android-rust/linux-x86/${RUST_VERSION}/lib:${LD_LIBRARY_PATH}
 export DH_VERBOSE = 1
 
 %:
