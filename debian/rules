@@ -16,8 +16,5 @@ export DH_VERBOSE = 1
 	dh $@
 
 override_dh_auto_build:
-	ls ./android-rust/linux-x86
-	ls ./android-rust/linux-x86/${RUST_VERSION}/lib
-	ls ./android-rust/linux-x86/${RUST_VERSION}/lib/rustlib
 	./debian/deb-cleanup-vendor.py
 	CARGO_HOME=/tmp/cargo cargo build --release
