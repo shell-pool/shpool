@@ -197,11 +197,10 @@ impl SessionInner {
                     Some(shpool_vt100::Parser::new(tty_size.rows, VTERM_WIDTH, scrollback_lines))
                 };
             let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
-            let mut poll_fds = [
-                poll::PollFd::new(
-                    pty_master.raw_fd().ok_or(anyhow!("no master fd"))?,
-                    poll::PollFlags::POLLIN)
-            ];
+            let mut poll_fds = [poll::PollFd::new(
+                pty_master.raw_fd().ok_or(anyhow!("no master fd"))?,
+                poll::PollFlags::POLLIN,
+            )];
 
             // block until we get the first connection attached so that we don't drop
             // the initial prompt on the floor
@@ -348,7 +347,9 @@ impl SessionInner {
                     if resize_cmd.when.saturating_duration_since(time::Instant::now())
                         == time::Duration::ZERO
                     {
-                        resize_cmd.size.set_fd(pty_master.raw_fd().ok_or(anyhow!("no master fd"))?)?;
+                        resize_cmd
+                            .size
+                            .set_fd(pty_master.raw_fd().ok_or(anyhow!("no master fd"))?)?;
                         executed_resize = true;
                         info!(
                             "resized fd (rows={}, cols={})",

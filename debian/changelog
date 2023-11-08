@@ -1,3 +1,9 @@
+shpool (0.3.3) unstable; urgency=low
+
+  * forward LANG env var from client to daemon
+  * Update dependencies
+
+ -- Ethan Pailes <pailes@google.com>  Tue, 08 Nov 2023 12:48:00 -0400
 shpool (0.3.2) unstable; urgency=low
 
   * Start correctly parsing /etc/environment

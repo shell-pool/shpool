@@ -1,6 +1,6 @@
 [package]
 name = "shpool"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2021"
 authors = ["Ethan Pailes <pailes@google.com>"]
 description = '''
@@ -14,7 +14,7 @@ license = "Apache-2.0"
 [dependencies]
 clap = { version = "4", features = ["derive"] } # cli parsing
 anyhow = "1" # dynamic, unstructured errors
-libshpool = { version = "0.3.2", path = "../libshpool" }
+libshpool = { version = "0.3.3", path = "../libshpool" }
 
 [dev-dependencies]
 lazy_static = "1" # globals
