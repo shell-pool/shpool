@@ -41,6 +41,6 @@ pub fn activation_socket() -> anyhow::Result<UnixListener> {
         return Err(anyhow!("expected to be passed a unix socket"));
     }
 
-    // Saftey: we have just verified that this is a unix socket.
+    // Safety: we have just verified that this is a unix socket.
     unsafe { Ok(UnixListener::from_raw_fd(fd)) }
 }

@@ -923,7 +923,7 @@ fn snip_buf(
             continue;
         }
         let section_len = *end - *start;
-        // Saftey: we are copying sections of buf into itself, just overwriting
+        // Safety: we are copying sections of buf into itself, just overwriting
         //         little sections of the buffer. This should be fine because it
         //         is all happening within the same section of memory and
         //         std::ptr::copy (memmove in c) allows overlapping buffers.

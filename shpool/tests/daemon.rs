@@ -77,7 +77,7 @@ fn systemd_activation() -> anyhow::Result<()> {
 
         let (parent_stderr, child_stderr) =
             nix::unistd::pipe().context("creating pipe to collect stderr")?;
-        // Saftey: this is a test
+        // Safety: this is a test
         let child_stderr_pipe = unsafe { Stdio::from_raw_fd(child_stderr) };
         let mut cmd = Command::new(support::shpool_bin()?);
         cmd.stdout(Stdio::piped())
@@ -96,7 +96,7 @@ fn systemd_activation() -> anyhow::Result<()> {
         // there does not appear to be a way to set an environment
         // variable the child will inherit in the pre_exec callback.
         //
-        // Saftey: it's a test, get off my back. I try to avoid allocating.
+        // Safety: it's a test, get off my back. I try to avoid allocating.
         let child_pid = match unsafe { nix::unistd::fork() } {
             Ok(ForkResult::Parent { child, .. }) => child,
             Ok(ForkResult::Child) => {

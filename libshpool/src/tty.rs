@@ -43,7 +43,7 @@ impl Size {
     pub fn from_fd(fd: RawFd) -> anyhow::Result<Size> {
         let mut term_size = libc::winsize { ws_row: 0, ws_col: 0, ws_xpixel: 0, ws_ypixel: 0 };
 
-        // Saftey: term_size is stack allocated and live for the whole
+        // Safety: term_size is stack allocated and live for the whole
         //         call.
         unsafe {
             tiocgwinsz(fd, &mut term_size).context("fetching term size")?;

@@ -24,7 +24,7 @@ pub struct Info {
 }
 
 pub fn info() -> anyhow::Result<Info> {
-    // Saftey: we immediately copy the data into an owned buffer and don't
+    // Safety: we immediately copy the data into an owned buffer and don't
     //         use it subsequently.
     unsafe {
         *libc::__errno_location() = 0;
