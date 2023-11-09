@@ -5,6 +5,7 @@ use libc;
 use ::descriptor::Descriptor;
 
 pub use self::err::{MasterError, Result};
+use std::ffi::CStr;
 use std::io;
 use std::os::unix::io::RawFd;
 
@@ -14,7 +15,7 @@ pub struct Master {
 }
 
 impl Master {
-    pub fn new(path: *const ::libc::c_char) -> Result<Self> {
+    pub fn new(path: &CStr) -> Result<Self> {
         match Self::open(path, libc::O_RDWR, None) {
             Err(cause) => Err(MasterError::BadDescriptor(cause)),
             Ok(fd) => Ok(Master { pty: Some(fd) }),
@@ -74,7 +75,7 @@ impl Master {
     }
 }
 
-impl Descriptor for Master {
+unsafe impl Descriptor for Master {
     fn take_raw_fd(&mut self) -> Option<RawFd> {
         self.pty.take()
     }

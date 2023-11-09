@@ -24,7 +24,7 @@ toml = "0.7" # config parsing
 byteorder = "1" # endianness
 signal-hook = "0.3" # signal handling
 nix = { version = "0.26", features = ["poll", "ioctl"] } # rusty wrapper for unix apis
-shpool_pty = "~0.2.1" # spawning shells in ptys
+shpool_pty = "0.3.0" # spawning shells in ptys
 lazy_static = "1" # globals
 crossbeam-channel = "0.5" # channels
 libc = "0.2" # basic libc types

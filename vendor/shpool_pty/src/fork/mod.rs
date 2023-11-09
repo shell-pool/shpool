@@ -3,10 +3,11 @@ mod err;
 
 use ::descriptor::Descriptor;
 
-use ::libc;
 pub use self::err::{ForkError, Result};
 pub use self::pty::{Master, MasterError};
 pub use self::pty::{Slave, SlaveError};
+use ::libc;
+use std::ffi::CStr;
 use std::ffi::CString;
 
 const MAX_PTS_NAME: usize = 1024;
@@ -23,7 +24,7 @@ impl Fork {
     /// The constructor function `new` forks the program
     /// and returns the current pid.
     pub fn new(path: &'static str) -> Result<Self> {
-        match Master::new(CString::new(path).ok().unwrap_or_default().as_ptr()) {
+        match Master::new(CString::new(path).ok().unwrap_or_default().as_c_str()) {
             Err(cause) => Err(ForkError::BadMaster(cause)),
             Ok(master) => {
                 if let Some(cause) = master.grantpt().err().or(master.unlockpt().err()) {
@@ -42,8 +43,12 @@ impl Fork {
                             let last_idx = ptsname_buf.len() - 1;
                             ptsname_buf[last_idx] = 0;
 
-                            let name: *const u8 = &ptsname_buf[0];
-                            Fork::from_pts(name as *const libc::c_char)
+                            let name_ptr: *const u8 = &ptsname_buf[0];
+                            // Safety: ptsname_r returns a valid c string when it returns a 0
+                            // (success) code, and we make double extra sure there is a null
+                            // terminator by adding one ourselves.
+                            let name: &CStr = unsafe { CStr::from_ptr(name_ptr as *const libc::c_char) };
+                            Fork::from_pts(name)
                         }
                         pid => Ok(Fork::Parent(pid, master)),
                     }
@@ -55,11 +60,7 @@ impl Fork {
     /// The constructor function `from_pts` is a private
     /// extention from the constructor function `new` who
     /// prepares and returns the child.
-    fn from_pts(ptsname: *const ::libc::c_char) -> Result<Self> {
-        if ptsname.is_null() {
-            return Err(ForkError::BadPtsname);
-        }
-
+    fn from_pts(ptsname: &CStr) -> Result<Self> {
         unsafe {
             if libc::setsid() == -1 {
                 Err(ForkError::SetsidFail)

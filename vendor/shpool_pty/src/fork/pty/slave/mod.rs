@@ -4,6 +4,7 @@ use ::descriptor::Descriptor;
 use ::libc;
 
 pub use self::err::{SlaveError, Result};
+use std::ffi::CStr;
 use std::os::unix::io::RawFd;
 
 #[derive(Debug, Clone)]
@@ -13,7 +14,7 @@ pub struct Slave {
 
 impl Slave {
     /// The constructor function `new` returns the Slave interface.
-    pub fn new(path: *const ::libc::c_char) -> Result<Self> {
+    pub fn new(path: &CStr) -> Result<Self> {
         match Self::open(path, libc::O_RDWR, None) {
             Err(cause) => Err(SlaveError::BadDescriptor(cause)),
             Ok(fd) => Ok(Slave { pty: Some(fd) }),
@@ -39,7 +40,7 @@ impl Slave {
     }
 }
 
-impl Descriptor for Slave {
+unsafe impl Descriptor for Slave {
     fn take_raw_fd(&mut self) -> Option<RawFd> {
         self.pty.take()
     }

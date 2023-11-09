@@ -3,26 +3,23 @@ mod err;
 use ::libc;
 
 pub use self::err::DescriptorError;
+use std::ffi::CStr;
 use std::os::unix::io::RawFd;
 
-pub trait Descriptor {
+pub unsafe trait Descriptor {
     /// If the descriptor has a valid fd, return it
     fn take_raw_fd(&mut self) -> Option<RawFd>;
 
     /// The constructor function `open` opens the path
     /// and returns the fd.
-    fn open(path: *const libc::c_char,
+    fn open(path: &CStr,
             flag: libc::c_int,
             mode: Option<libc::c_int>)
             -> Result<RawFd, DescriptorError> {
-        if path.is_null() {
-            return Err(DescriptorError::OpenFail);
-        }
-
         // Safety: we've just ensured that path is non-null and the
         // other params are valid by construction.
         unsafe {
-            match libc::open(path, flag, mode.unwrap_or_default()) {
+            match libc::open(path.as_ptr().cast(), flag, mode.unwrap_or_default()) {
                 -1 => Err(DescriptorError::OpenFail),
                 fd => Ok(fd),
             }
