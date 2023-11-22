@@ -1,3 +1,9 @@
+shpool (0.3.4) unstable; urgency=low
+
+  * bump shpool_pty
+  * correctly set up SHELL variable for all shells
+
+ -- Ethan Pailes <pailes@google.com>  Wed, 22 Nov 2023 14:52:00 -0400
 shpool (0.3.3) unstable; urgency=low
 
   * forward LANG env var from client to daemon
