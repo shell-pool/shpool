@@ -40,6 +40,10 @@ fn happy_path() -> anyhow::Result<()> {
         attach_proc.run_cmd(r#"echo "user=$USER" "#)?;
         line_matcher.match_re("user=[a-zA-Z0-9]+$")?;
 
+        // make sure that shpool sets the $SHELL variable
+        attach_proc.run_cmd(r#"echo "shell=$SHELL" "#)?;
+        line_matcher.match_re("shell=[/a-zA-Z0-9]+$")?;
+
         Ok(())
     })
 }

@@ -529,6 +529,7 @@ impl Server {
                     .unwrap_or(DEFAULT_INITIAL_SHELL_PATH),
             )
             .env("SHPOOL_SESSION_NAME", &header.name)
+            .env("SHELL", user_info.default_shell)
             .env("USER", user_info.user)
             .env("SSH_AUTH_SOCK", self.ssh_auth_sock_symlink(PathBuf::from(&header.name)));
         if self.config.norc.unwrap_or(false) && shell == "/bin/bash" {
