@@ -12,13 +12,13 @@ Architecture: any
 Depends: ${misc:Depends}, ${shlibs:Depends}
 Description: think tmux... then aim lower
  shpool is a shell pooler, which allows for persistant named
- shell session. This is useful when you are connecting to
+ shell sessions. This is useful when you are connecting to
  a remote server over a connection which might drop. It is
  similar to tmux and GNU screen in that it allows you to
  create a named shell session, then re-attach to it later,
  but it differs in that it does not do any multiplexing.
  This means that your local terminal emulater does all the
- work to reder the terminal output, which preserves the
+ work to render the terminal output, which preserves the
  typical terminal user experience more faithfully than tmux.
  In particular, while tmux and GNU screen break scrollback
  and copy-paste, with shpool they both just work. Additionally,
