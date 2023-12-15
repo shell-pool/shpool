@@ -169,6 +169,8 @@ pub struct AttachHeader {
     /// reattach). The daemon is responsible for automatically killing the
     /// session once the ttl is over.
     pub ttl_secs: Option<u64>,
+    /// If specified, a command to run instead of the users default shell.
+    pub cmd: Option<String>,
 }
 
 impl AttachHeader {

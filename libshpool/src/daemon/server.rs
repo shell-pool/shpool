@@ -509,7 +509,23 @@ impl Server {
         // We will exec this command after a fork, so we want to just inherit
         // stdout/stderr/stdin. The pty crate automatically `dup2`s the file
         // descriptors for us.
-        let mut cmd = process::Command::new(&shell);
+        let mut cmd = if let Some(cmd_str) = &header.cmd {
+            let cmd_parts = shell_words::split(&cmd_str).context("parsing cmd")?;
+            info!("running cmd: {:?}", cmd_parts);
+            if cmd_parts.len() < 1 {
+                return Err(anyhow!("no command to run"));
+            }
+            let mut cmd = process::Command::new(&cmd_parts[0]);
+            cmd.args(&cmd_parts[1..]);
+            cmd
+        } else {
+            let mut cmd = process::Command::new(&shell);
+            if self.config.norc.unwrap_or(false) && shell == "/bin/bash" {
+                cmd.arg("--norc").arg("--noprofile");
+            }
+            cmd
+        };
+
         cmd.current_dir(user_info.home_dir.clone())
             .stdin(process::Stdio::inherit())
             .stdout(process::Stdio::inherit())
@@ -518,103 +534,23 @@ impl Server {
             // rc files and whatnot, so we will start things off with
             // an environment that is blank except for a few vars we inject
             // to avoid breakage and vars the user has asked us to inject.
-            .env_clear()
-            .env("HOME", user_info.home_dir)
-            .env(
-                "PATH",
-                self.config
-                    .initial_path
-                    .as_ref()
-                    .map(|x| x.as_ref())
-                    .unwrap_or(DEFAULT_INITIAL_SHELL_PATH),
-            )
-            .env("SHPOOL_SESSION_NAME", &header.name)
-            .env("SHELL", user_info.default_shell)
-            .env("USER", user_info.user)
-            .env("SSH_AUTH_SOCK", self.ssh_auth_sock_symlink(PathBuf::from(&header.name)));
-        if self.config.norc.unwrap_or(false) && shell == "/bin/bash" {
-            cmd.arg("--norc").arg("--noprofile");
-        }
+            .env_clear();
 
-        if let Ok(xdg_runtime_dir) = env::var("XDG_RUNTIME_DIR") {
-            cmd.env("XDG_RUNTIME_DIR", xdg_runtime_dir);
-        }
+        self.inject_env(&mut cmd, &user_info, header).context("setting up shell env")?;
 
-        // Most of the time, use the TERM that the user sent along in
-        // the attach header. If they have an explicit TERM value set
-        // in their config file, use that instead. If they have a blank
-        // term in their config, don't set TERM in the spawned shell at
-        // all.
-        let mut term = None;
-        if let Some(t) = header.local_env_get("TERM") {
-            term = Some(String::from(t));
+        if header.cmd.is_none() {
+            // spawn the shell as a login shell by setting
+            // arg0 to be the basename of the shell path
+            // proceeded with a "-". You can see sshd doing the
+            // same thing if you look in the session.c file of
+            // openssh.
+            let shell_basename = Path::new(&shell)
+                .file_name()
+                .ok_or(anyhow!("error building login shell indicator"))?
+                .to_str()
+                .ok_or(anyhow!("error parsing shell name as utf8"))?;
+            cmd.arg0(format!("-{}", shell_basename));
         }
-        if let Some(env) = self.config.env.as_ref() {
-            term = match env.get("TERM") {
-                None => term,
-                Some(t) if t.is_empty() => None,
-                Some(t) => Some(String::from(t)),
-            };
-
-            // If the user has configured a term of "", we want
-            // to make sure not to set it at all in the environment.
-            // An unset TERM variable can produce a shell that generates
-            // output which is easier to parse and interact with for
-            // another machine. This is particularly useful for testing
-            // shpool itself.
-            let filtered_env_pin;
-            let env = if term.is_none() {
-                let mut e = env.clone();
-                e.remove("TERM");
-                filtered_env_pin = Some(e);
-                filtered_env_pin.as_ref().unwrap()
-            } else {
-                env
-            };
-
-            if env.len() > 0 {
-                cmd.envs(env);
-            }
-        }
-        info!("injecting TERM into shell {:?}", term);
-        if let Some(t) = term {
-            cmd.env("TERM", t);
-        }
-
-        // inject all other local variables
-        for (var, val) in &header.local_env {
-            if var == "TERM" || var == "SSH_AUTH_SOCK" {
-                continue;
-            }
-            cmd.env(var, val);
-        }
-
-        // parse and load /etc/environment unless we've been asked not to
-        if !self.config.noread_etc_environment.unwrap_or(false) {
-            match fs::File::open("/etc/environment") {
-                Ok(f) => {
-                    let pairs = etc_environment::parse_compat(io::BufReader::new(f))?;
-                    for (var, val) in pairs.into_iter() {
-                        cmd.env(var, val);
-                    }
-                }
-                Err(e) => {
-                    warn!("could not open /etc/environment to load env vars: {:?}", e);
-                }
-            }
-        }
-
-        // spawn the shell as a login shell by setting
-        // arg0 to be the basename of the shell path
-        // proceeded with a "-". You can see sshd doing the
-        // same thing if you look in the session.c file of
-        // openssh.
-        let shell_basename = Path::new(&shell)
-            .file_name()
-            .ok_or(anyhow!("error building login shell indicator"))?
-            .to_str()
-            .ok_or(anyhow!("error parsing shell name as utf8"))?;
-        cmd.arg0(format!("-{}", shell_basename));
 
         let noecho = self.config.noecho.unwrap_or(false);
         info!("about to fork subshell noecho={}", noecho);
@@ -713,6 +649,98 @@ impl Server {
             started_at: time::SystemTime::now(),
             inner: Arc::new(Mutex::new(session_inner)),
         })
+    }
+
+    #[instrument(skip_all)]
+    fn inject_env(
+        &self,
+        cmd: &mut process::Command,
+        user_info: &user::Info,
+        header: &protocol::AttachHeader,
+    ) -> anyhow::Result<()> {
+        cmd.env("HOME", &user_info.home_dir)
+            .env(
+                "PATH",
+                self.config
+                    .initial_path
+                    .as_ref()
+                    .map(|x| x.as_ref())
+                    .unwrap_or(DEFAULT_INITIAL_SHELL_PATH),
+            )
+            .env("SHPOOL_SESSION_NAME", &header.name)
+            .env("SHELL", &user_info.default_shell)
+            .env("USER", &user_info.user)
+            .env("SSH_AUTH_SOCK", self.ssh_auth_sock_symlink(PathBuf::from(&header.name)));
+
+        if let Ok(xdg_runtime_dir) = env::var("XDG_RUNTIME_DIR") {
+            cmd.env("XDG_RUNTIME_DIR", xdg_runtime_dir);
+        }
+
+        // Most of the time, use the TERM that the user sent along in
+        // the attach header. If they have an explicit TERM value set
+        // in their config file, use that instead. If they have a blank
+        // term in their config, don't set TERM in the spawned shell at
+        // all.
+        let mut term = None;
+        if let Some(t) = header.local_env_get("TERM") {
+            term = Some(String::from(t));
+        }
+        if let Some(env) = self.config.env.as_ref() {
+            term = match env.get("TERM") {
+                None => term,
+                Some(t) if t.is_empty() => None,
+                Some(t) => Some(String::from(t)),
+            };
+
+            // If the user has configured a term of "", we want
+            // to make sure not to set it at all in the environment.
+            // An unset TERM variable can produce a shell that generates
+            // output which is easier to parse and interact with for
+            // another machine. This is particularly useful for testing
+            // shpool itself.
+            let filtered_env_pin;
+            let env = if term.is_none() {
+                let mut e = env.clone();
+                e.remove("TERM");
+                filtered_env_pin = Some(e);
+                filtered_env_pin.as_ref().unwrap()
+            } else {
+                env
+            };
+
+            if env.len() > 0 {
+                cmd.envs(env);
+            }
+        }
+        info!("injecting TERM into shell {:?}", term);
+        if let Some(t) = term {
+            cmd.env("TERM", t);
+        }
+
+        // inject all other local variables
+        for (var, val) in &header.local_env {
+            if var == "TERM" || var == "SSH_AUTH_SOCK" {
+                continue;
+            }
+            cmd.env(var, val);
+        }
+
+        // parse and load /etc/environment unless we've been asked not to
+        if !self.config.noread_etc_environment.unwrap_or(false) {
+            match fs::File::open("/etc/environment") {
+                Ok(f) => {
+                    let pairs = etc_environment::parse_compat(io::BufReader::new(f))?;
+                    for (var, val) in pairs.into_iter() {
+                        cmd.env(var, val);
+                    }
+                }
+                Err(e) => {
+                    warn!("could not open /etc/environment to load env vars: {:?}", e);
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn ssh_auth_sock_symlink(&self, session_name: PathBuf) -> PathBuf {

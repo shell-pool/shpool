@@ -109,6 +109,15 @@ using a number with a trailing letter to indicate time unit
 (i.e. '3d', '19h', or '5s')."
         )]
         ttl: Option<String>,
+        #[clap(
+            short,
+            long,
+            long_help = "A command to run instead of the user's default shell
+
+The command is broken up into a binary to invoke and a list of arguments to
+pass to the binary using the shell-words crate."
+        )]
+        cmd: Option<String>,
         #[clap(help = "The name of the shell session to create or attach to")]
         name: String,
     },
@@ -204,7 +213,7 @@ pub fn run(args: Args) -> anyhow::Result<()> {
 
     let res: anyhow::Result<()> = match args.command {
         Commands::Daemon { config_file } => daemon::run(config_file, runtime_dir, socket),
-        Commands::Attach { force, ttl, name } => attach::run(name, force, ttl, socket),
+        Commands::Attach { force, ttl, cmd, name } => attach::run(name, force, ttl, cmd, socket),
         Commands::Detach { sessions } => detach::run(sessions, socket),
         Commands::Kill { sessions } => kill::run(sessions, socket),
         Commands::List => list::run(socket),

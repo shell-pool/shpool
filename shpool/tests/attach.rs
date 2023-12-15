@@ -50,6 +50,38 @@ fn happy_path() -> anyhow::Result<()> {
 
 #[test]
 #[timeout(30000)]
+fn custom_cmd() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc =
+            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let script = support::testdata_file("echo_stop.sh");
+        let mut attach_proc = daemon_proc
+            .attach(
+                "sh1",
+                AttachArgs {
+                    cmd: Some(format!("{} foo", script.into_os_string().into_string().unwrap())),
+                    ..Default::default()
+                },
+            )
+            .context("starting attach proc")?;
+        let mut line_matcher = attach_proc.line_matcher()?;
+
+        // the script first echos the arg we gave it
+        line_matcher.match_re("foo$")?;
+
+        // then it echos its argv[0] so we can make sure it has not been re-written
+        // to '-echo_stop.sh' like it would for a login shell
+        line_matcher.match_re(r#"\/echo_stop\.sh$"#)?;
+
+        // then waits until we tell it to bail (so we can avoid sleeps)
+        attach_proc.run_cmd("stop")?;
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
 fn symlink_ssh_auth_sock() -> anyhow::Result<()> {
     support::dump_err(|| {
         let mut daemon_proc =

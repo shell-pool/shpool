@@ -30,11 +30,12 @@ pub struct AttachArgs {
     pub force: bool,
     pub extra_env: Vec<(String, String)>,
     pub ttl: Option<time::Duration>,
+    pub cmd: Option<String>,
 }
 
 impl Default for AttachArgs {
     fn default() -> Self {
-        AttachArgs { force: false, extra_env: vec![], ttl: None }
+        AttachArgs { force: false, extra_env: vec![], ttl: None, cmd: None }
     }
 }
 
@@ -132,6 +133,10 @@ impl Proc {
         if let Some(ttl) = args.ttl {
             cmd.arg("--ttl");
             cmd.arg(format!("{}s", ttl.as_secs()));
+        }
+        if let Some(cmd_str) = &args.cmd {
+            cmd.arg("-c");
+            cmd.arg(cmd_str);
         }
         let proc = cmd.arg(name).spawn().context(format!("spawning attach proc for {}", name))?;
 
