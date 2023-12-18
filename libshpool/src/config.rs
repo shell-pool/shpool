@@ -13,10 +13,36 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
 
+use anyhow::Context;
 use serde_derive::Deserialize;
+use tracing::{info, instrument};
 
-use super::keybindings;
+use super::{daemon::keybindings, user};
+
+#[instrument(skip_all)]
+pub fn read_config(config_file: &Option<String>) -> anyhow::Result<Config> {
+    let mut config = Config::default();
+    if let Some(config_path) = config_file {
+        info!("parsing explicitly passed in config ({})", config_path);
+        let config_str = fs::read_to_string(config_path).context("reading config toml (1)")?;
+        config = toml::from_str(&config_str).context("parsing config file (1)")?;
+    } else {
+        let user_info = user::info()?;
+        let mut config_path = PathBuf::from(user_info.home_dir);
+        config_path.push(".config");
+        config_path.push("shpool");
+        config_path.push("config.toml");
+        if config_path.exists() {
+            let config_str = fs::read_to_string(config_path).context("reading config toml (2)")?;
+            config = toml::from_str(&config_str).context("parsing config file (2)")?;
+        }
+    }
+
+    Ok(config)
+}
 
 #[derive(Deserialize, Default, Debug, Clone)]
 pub struct Config {
@@ -54,6 +80,12 @@ pub struct Config {
     /// a table of environment variables to inject into the
     /// initial shell
     pub env: Option<HashMap<String, String>>,
+
+    /// A list of environment variables to forward from the environment
+    /// of the initial shell that invoked `shpool attach` to the newly
+    /// launched shell. Note that this config option has no impact when
+    /// reattaching to an existing shell.
+    pub forward_env: Option<Vec<String>>,
 
     /// The initial path to spawn shell processes with. By default
     /// `/usr/bin:/bin:/usr/sbin:/sbin` (copying openssh). This

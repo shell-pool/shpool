@@ -18,7 +18,7 @@ use anyhow::{anyhow, bail, Context};
 use tracing::{error, info, warn};
 
 use super::{
-    duration, protocol,
+    config, duration, protocol,
     protocol::{AttachHeader, ConnectHeader},
     test_hooks, tty,
 };
@@ -26,6 +26,7 @@ use super::{
 const MAX_FORCE_RETRIES: usize = 20;
 
 pub fn run(
+    config_file: Option<String>,
     name: String,
     force: bool,
     ttl: Option<String>,
@@ -35,6 +36,8 @@ pub fn run(
     info!("\n\n======================== STARTING ATTACH ============================\n\n");
     test_hooks::emit("attach-startup");
     SignalHandler::new(name.clone(), socket.clone()).spawn()?;
+
+    let config = config::read_config(&config_file)?;
 
     let ttl = match &ttl {
         Some(src) => match duration::parse(src.as_str()) {
@@ -48,7 +51,7 @@ pub fn run(
 
     let mut detached = false;
     let mut tries = 0;
-    while let Err(err) = do_attach(name.as_str(), &ttl, &cmd, &socket) {
+    while let Err(err) = do_attach(&config, name.as_str(), &ttl, &cmd, &socket) {
         match err.downcast() {
             Ok(BusyError) if !force => {
                 eprintln!("session '{}' already has a terminal attached", name);
@@ -98,6 +101,7 @@ impl fmt::Display for BusyError {
 impl std::error::Error for BusyError {}
 
 fn do_attach(
+    config: &config::Config,
     name: &str,
     ttl: &Option<time::Duration>,
     cmd: &Option<String>,
@@ -113,11 +117,18 @@ fn do_attach(
         }
     };
 
+    let mut local_env_keys = vec!["TERM", "DISPLAY", "LANG", "SSH_AUTH_SOCK"];
+    if let Some(forward_env) = &config.forward_env {
+        for var in forward_env.iter() {
+            local_env_keys.push(var);
+        }
+    }
+
     client
         .write_connect_header(ConnectHeader::Attach(AttachHeader {
             name: String::from(name),
             local_tty_size: tty_size,
-            local_env: vec!["TERM", "DISPLAY", "LANG", "SSH_AUTH_SOCK"]
+            local_env: local_env_keys
                 .into_iter()
                 .filter_map(|var| {
                     let val = env::var(var).context("resolving var").ok()?;

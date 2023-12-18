@@ -35,8 +35,8 @@ use nix::unistd::Pid;
 use tracing::{error, info, instrument, span, trace, warn, Level};
 
 use super::{
-    super::{consts, protocol, test_hooks, tty},
-    config, etc_environment, shell, ttl_reaper, user,
+    super::{config, consts, protocol, test_hooks, tty, user},
+    etc_environment, shell, ttl_reaper,
 };
 use crate::daemon::exit_notify::ExitNotifier;
 

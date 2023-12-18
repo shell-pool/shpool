@@ -28,6 +28,7 @@ use tracing_subscriber::fmt::format::FmtSpan;
 
 mod attach;
 mod common;
+mod config;
 mod consts;
 mod daemon;
 mod detach;
@@ -37,6 +38,7 @@ mod list;
 mod protocol;
 mod test_hooks;
 mod tty;
+mod user;
 
 /// The command line arguments that shpool expects.
 /// These can be directly parsed with clap or manually
@@ -78,6 +80,9 @@ the daemon is launched by systemd."
     )]
     socket: Option<String>,
 
+    #[clap(short, long, action, help = "a toml file containing configuration")]
+    config_file: Option<String>,
+
     #[clap(subcommand)]
     command: Commands,
 }
@@ -87,7 +92,7 @@ the daemon is launched by systemd."
 pub enum Commands {
     #[clap(about = "Starts running a daemon that holds a pool of shells")]
     Daemon {
-        #[clap(short, long, action, help = "a toml file containing configuration")]
+        #[clap(short, long, action, help = "DEPRECATED; use global -c flag instead")]
         config_file: Option<String>,
     },
 
@@ -212,8 +217,14 @@ pub fn run(args: Args) -> anyhow::Result<()> {
     };
 
     let res: anyhow::Result<()> = match args.command {
-        Commands::Daemon { config_file } => daemon::run(config_file, runtime_dir, socket),
-        Commands::Attach { force, ttl, cmd, name } => attach::run(name, force, ttl, cmd, socket),
+        Commands::Daemon { config_file } => {
+            let config_file =
+                if args.config_file.is_some() { args.config_file } else { config_file };
+            daemon::run(config_file, runtime_dir, socket)
+        }
+        Commands::Attach { force, ttl, cmd, name } => {
+            attach::run(args.config_file, name, force, ttl, cmd, socket)
+        }
         Commands::Detach { sessions } => detach::run(sessions, socket),
         Commands::Kill { sessions } => kill::run(sessions, socket),
         Commands::List => list::run(socket),

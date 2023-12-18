@@ -82,6 +82,36 @@ fn custom_cmd() -> anyhow::Result<()> {
 
 #[test]
 #[timeout(30000)]
+fn forward_env() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc =
+            support::daemon::Proc::new("forward_env.toml", true).context("starting daemon proc")?;
+        let mut attach_proc = daemon_proc
+            .attach(
+                "sh1",
+                AttachArgs {
+                    config: Some(String::from("forward_env.toml")),
+                    extra_env: vec![
+                        (String::from("FOO"), String::from("foo")),
+                        (String::from("BAR"), String::from("bar")),
+                        (String::from("BAZ"), String::from("baz")),
+                    ],
+                    ..Default::default()
+                },
+            )
+            .context("starting attach proc")?;
+
+        let mut line_matcher = attach_proc.line_matcher()?;
+
+        attach_proc.run_cmd(r#"echo "$FOO:$BAR:$BAZ" "#)?;
+        line_matcher.match_re("foo:bar:$")?;
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
 fn symlink_ssh_auth_sock() -> anyhow::Result<()> {
     support::dump_err(|| {
         let mut daemon_proc =

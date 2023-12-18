@@ -12,21 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fs, os::unix::net::UnixListener, path::PathBuf};
+use std::{os::unix::net::UnixListener, path::PathBuf};
 
 use anyhow::Context;
 use tracing::{info, instrument};
 
-mod config;
+use super::config;
+
 mod etc_environment;
 mod exit_notify;
-mod keybindings;
+pub mod keybindings;
 mod server;
 mod shell;
 mod signals;
 mod systemd;
 mod ttl_reaper;
-mod user;
 
 #[instrument(skip_all)]
 pub fn run(
@@ -36,23 +36,7 @@ pub fn run(
 ) -> anyhow::Result<()> {
     info!("\n\n======================== STARTING DAEMON ============================\n\n");
 
-    let mut config = config::Config::default();
-    if let Some(config_path) = config_file {
-        info!("parsing explicitly passed in config ({})", config_path);
-        let config_str = fs::read_to_string(config_path).context("reading config toml (1)")?;
-        config = toml::from_str(&config_str).context("parsing config file (1)")?;
-    } else {
-        let user_info = user::info()?;
-        let mut config_path = PathBuf::from(user_info.home_dir);
-        config_path.push(".config");
-        config_path.push("shpool");
-        config_path.push("config.toml");
-        if config_path.exists() {
-            let config_str = fs::read_to_string(config_path).context("reading config toml (2)")?;
-            config = toml::from_str(&config_str).context("parsing config file (2)")?;
-        }
-    }
-
+    let config = config::read_config(&config_file)?;
     let server = server::Server::new(config, runtime_dir);
 
     let (cleanup_socket, listener) = match systemd::activation_socket() {

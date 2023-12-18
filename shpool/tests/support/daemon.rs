@@ -27,6 +27,7 @@ pub struct Proc {
 }
 
 pub struct AttachArgs {
+    pub config: Option<String>,
     pub force: bool,
     pub extra_env: Vec<(String, String)>,
     pub ttl: Option<time::Duration>,
@@ -35,7 +36,7 @@ pub struct AttachArgs {
 
 impl Default for AttachArgs {
     fn default() -> Self {
-        AttachArgs { force: false, extra_env: vec![], ttl: None, cmd: None }
+        AttachArgs { config: None, force: false, extra_env: vec![], ttl: None, cmd: None }
     }
 }
 
@@ -114,10 +115,11 @@ impl Proc {
         self.subproc_counter += 1;
 
         let mut cmd = Command::new(shpool_bin()?);
-        cmd.stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .stdin(Stdio::piped())
-            .arg("-v")
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).stdin(Stdio::piped());
+        if let Some(config_file) = args.config {
+            cmd.arg("--config-file").arg(testdata_file(config_file));
+        }
+        cmd.arg("-v")
             .arg("--log-file")
             .arg(&log_file)
             .arg("--socket")

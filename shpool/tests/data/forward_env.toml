@@ -1,0 +1,10 @@
+norc = true
+noecho = true
+shell = "/bin/bash"
+session_restore_mode = "simple"
+
+forward_env = ["FOO", "BAR"]
+
+[env]
+PS1 = "prompt> "
+TERM = ""
