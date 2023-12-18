@@ -1,3 +1,11 @@
+shpool (0.3.5) unstable; urgency=low
+
+  * add -c/--cmd flag to attach subcommand
+  * add forward_env config option
+  * deprecate -c/--config_file flag to daemon subcommand
+  * make -c/--config_file a top level flag
+
+ -- Ethan Pailes <pailes@google.com>  Mon, 18 Dec 2023 13:16:00 -0400
 shpool (0.3.4) unstable; urgency=low
 
   * bump shpool_pty
