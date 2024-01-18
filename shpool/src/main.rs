@@ -14,6 +14,15 @@
 
 use clap::Parser;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 fn main() -> anyhow::Result<()> {
-    libshpool::run(libshpool::Args::parse())
+    let args = libshpool::Args::parse();
+
+    if args.version() {
+        println!("shpool {}", VERSION);
+        return Ok(());
+    }
+
+    libshpool::run(args)
 }

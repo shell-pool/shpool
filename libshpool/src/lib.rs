@@ -21,7 +21,7 @@ use std::{
     sync::Mutex,
 };
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use clap::{Parser, Subcommand};
 use tracing::error;
 use tracing_subscriber::fmt::format::FmtSpan;
@@ -44,8 +44,12 @@ mod user;
 /// These can be directly parsed with clap or manually
 /// constructed in order to present some other user
 /// interface.
+///
+/// NOTE: You must check `version()` and handle it yourself
+/// if it is set. Clap won't do a good job with its
+/// automatic version support for a library.
 #[derive(Parser, Debug)]
-#[clap(version, author, about)]
+#[clap(author, about)]
 pub struct Args {
     #[clap(
         short,
@@ -90,6 +94,9 @@ the daemon is launched by systemd."
 /// The subcommds that shpool supports.
 #[derive(Subcommand, Debug)]
 pub enum Commands {
+    #[clap(about = "Print version")]
+    Version,
+
     #[clap(about = "Starts running a daemon that holds a pool of shells")]
     Daemon {
         #[clap(short, long, action, help = "DEPRECATED; use global -c flag instead")]
@@ -150,6 +157,14 @@ will be used if it is present in the environment.")]
 
     #[clap(about = "lists all the running shell sessions")]
     List,
+}
+
+impl Args {
+    /// Version indicates if the wrapping binary must display the
+    /// version then exit.
+    pub fn version(&self) -> bool {
+        if let Commands::Version = self.command { true } else { false }
+    }
 }
 
 /// Run the shpool tool with the given arguments.
@@ -217,6 +232,7 @@ pub fn run(args: Args) -> anyhow::Result<()> {
     };
 
     let res: anyhow::Result<()> = match args.command {
+        Commands::Version => return Err(anyhow!("wrapper binary must handle version")),
         Commands::Daemon { config_file } => {
             let config_file =
                 if args.config_file.is_some() { args.config_file } else { config_file };
