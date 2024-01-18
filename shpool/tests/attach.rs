@@ -1,10 +1,4 @@
-use std::{
-    env, fs,
-    io::BufRead,
-    io::Read,
-    process::{Command, Stdio},
-    thread, time,
-};
+use std::{fs, io::BufRead, io::Read, thread, time};
 
 use anyhow::{anyhow, Context};
 use ntest::timeout;
@@ -737,47 +731,6 @@ fn has_right_default_path() -> anyhow::Result<()> {
 
         attach_proc.run_cmd("echo $PATH")?;
         line_matcher.match_re("/usr/bin:/bin:/usr/sbin:/sbin$")?;
-
-        Ok(())
-    })
-}
-
-#[test]
-#[timeout(30000)]
-fn mismatch_exe() -> anyhow::Result<()> {
-    support::dump_err(|| {
-        let daemon_proc =
-            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
-        let mut copied_exe_path = daemon_proc.tmp_dir.clone();
-        copied_exe_path.push("copied-shpool");
-        fs::copy(support::shpool_bin()?, &copied_exe_path)?;
-
-        let log_file = daemon_proc.tmp_dir.join("attach.log");
-        eprintln!("spawning attach proc with log {:?}", &log_file);
-
-        let mut child = Command::new(copied_exe_path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .stdin(Stdio::piped())
-            .arg("-v")
-            .arg("--log-file")
-            .arg(&log_file)
-            .arg("--socket")
-            .arg(&daemon_proc.socket_path)
-            .env_clear()
-            .env("XDG_RUNTIME_DIR", env::var("XDG_RUNTIME_DIR")?)
-            .arg("attach")
-            .arg("sh1")
-            .spawn()
-            .context("spawning attach proc")?;
-
-        std::thread::sleep(time::Duration::from_millis(500));
-        child.kill().context("killing child")?;
-
-        let mut stderr = child.stderr.take().context("missing stderr")?;
-        let mut stderr_str = String::from("");
-        stderr.read_to_string(&mut stderr_str).context("slurping stderr")?;
-        assert!(stderr_str.contains("shpool: warn: attach binary differs from daemon binary"));
 
         Ok(())
     })

@@ -110,22 +110,18 @@ impl Server {
 
         let header = parse_connect_header(&mut stream).context("parsing connect header")?;
 
-        let warnings = match check_peer(&stream) {
-            Ok(warnings) => warnings,
-            Err(err) => {
-                if let protocol::ConnectHeader::Attach(_) = header {
-                    write_reply(
-                        &mut stream,
-                        protocol::AttachReplyHeader {
-                            status: protocol::AttachStatus::Forbidden(format!("{:?}", err)),
-                        },
-                    )?;
-                }
-                stream.shutdown(net::Shutdown::Both).context("closing stream")?;
-                return Err(err);
+        if let Err(err) = check_peer(&stream) {
+            if let protocol::ConnectHeader::Attach(_) = header {
+                write_reply(
+                    &mut stream,
+                    protocol::AttachReplyHeader {
+                        status: protocol::AttachStatus::Forbidden(format!("{:?}", err)),
+                    },
+                )?;
             }
+            stream.shutdown(net::Shutdown::Both).context("closing stream")?;
+            return Err(err);
         };
-        info!("checked peer with warnings: {:?}", warnings);
 
         // Unset the read timeout before we pass things off to a
         // worker thread because it is perfectly fine for there to
@@ -134,7 +130,7 @@ impl Server {
         stream.set_read_timeout(None).context("unsetting read timout on inbound session")?;
 
         match header {
-            protocol::ConnectHeader::Attach(h) => self.handle_attach(stream, conn_id, h, warnings),
+            protocol::ConnectHeader::Attach(h) => self.handle_attach(stream, conn_id, h),
             protocol::ConnectHeader::Detach(r) => self.handle_detach(stream, r),
             protocol::ConnectHeader::Kill(r) => self.handle_kill(stream, r),
             protocol::ConnectHeader::List => self.handle_list(stream),
@@ -150,8 +146,11 @@ impl Server {
         mut stream: UnixStream,
         conn_id: usize,
         header: protocol::AttachHeader,
-        warnings: Vec<String>,
     ) -> anyhow::Result<()> {
+        // We don't currently populate any warnings, but we used to and we might
+        // want to in the future, so it is not worth breaking the protocol over.
+        let warnings = vec![];
+
         let (child_exit_notifier, inner_to_stream, status) = {
             // we unwrap to propagate the poison as an unwind
             let mut shells = self.shells.lock().unwrap();
@@ -774,7 +773,7 @@ where
 /// check_peer makes sure that a process dialing in on the shpool
 /// control socket has the same UID as the current user and that
 /// both have the same executable path.
-fn check_peer(sock: &UnixStream) -> anyhow::Result<Vec<String>> {
+fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
     use nix::{sys::socket, unistd};
 
     let peer_creds = socket::getsockopt(sock.as_raw_fd(), socket::sockopt::PeerCredentials)
@@ -790,10 +789,10 @@ fn check_peer(sock: &UnixStream) -> anyhow::Result<Vec<String>> {
     let peer_exe = exe_for_pid(peer_pid).context("could not resolve exe from the pid")?;
     let self_exe = exe_for_pid(self_pid).context("could not resolve our own exe")?;
     if peer_exe != self_exe {
-        return Ok(vec![String::from("attach binary differs from daemon binary")]);
+        warn!("attach binary differs from daemon binary");
     }
 
-    Ok(vec![])
+    Ok(())
 }
 
 fn exe_for_pid(pid: Pid) -> anyhow::Result<PathBuf> {
