@@ -51,6 +51,24 @@ pub fn inject_prefix(
         );
         let mut pty_master = pty_master.is_parent().context("expected parent")?;
         pty_master.write_all(script.as_bytes()).context("running prefix script")?;
+    } else if shell.ends_with("zsh") {
+        let script = format!(
+            r#"
+            typeset -a precmd_functions
+            SHPOOL__OLD_PROMPT="${{PROMPT}}"
+            function __shpool__reset_rprompt() {{
+                PROMPT="${{SHPOOL__OLD_PROMPT}}"
+            }}
+            precmd_functions[1,0]=(__shpool__reset_rprompt)
+            function __shpool__prompt_command() {{
+               PROMPT="{prompt_prefix}${{PROMPT}}"
+            }}
+            precmd_functions+=(__shpool__prompt_command)
+            clear
+"#
+        );
+        let mut pty_master = pty_master.is_parent().context("expected parent")?;
+        pty_master.write_all(script.as_bytes()).context("running prefix script")?;
     } else {
         return Err(anyhow!("don't know how to inject a prefix for shell '{}'", shell));
     }

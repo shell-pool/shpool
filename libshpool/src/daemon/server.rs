@@ -543,7 +543,7 @@ impl Server {
             // proceeded with a "-". You can see sshd doing the
             // same thing if you look in the session.c file of
             // openssh.
-            shell_basename = Path::new(&shell)
+            let shell_basename = Path::new(&shell)
                 .file_name()
                 .ok_or(anyhow!("error building login shell indicator"))?
                 .to_str()

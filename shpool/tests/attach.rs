@@ -978,9 +978,9 @@ fn ttl_no_hangup_yet() -> anyhow::Result<()> {
 
 #[test]
 #[timeout(30000)]
-fn prompt_prefix() -> anyhow::Result<()> {
+fn prompt_prefix_bash() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let daemon_proc = support::daemon::Proc::new("prompt_prefix.toml", true)
+        let daemon_proc = support::daemon::Proc::new("prompt_prefix_bash.toml", true)
             .context("starting daemon proc")?;
 
         // we have to manually spawn the child proc rather than using the support
@@ -993,7 +993,7 @@ fn prompt_prefix() -> anyhow::Result<()> {
             .arg("--socket")
             .arg(&daemon_proc.socket_path)
             .arg("--config-file")
-            .arg(support::testdata_file("prompt_prefix.toml"))
+            .arg(support::testdata_file("prompt_prefix_bash.toml"))
             .arg("attach")
             .arg("sh1")
             .spawn()
@@ -1013,6 +1013,46 @@ fn prompt_prefix() -> anyhow::Result<()> {
         let mut stdout_str = String::from("");
         stdout.read_to_string(&mut stdout_str).context("slurping stdout")?;
         let stdout_re = Regex::new(".*session_name=sh1 prompt>.*")?;
+        assert!(stdout_re.is_match(&stdout_str));
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
+fn prompt_prefix_zsh() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let daemon_proc = support::daemon::Proc::new("prompt_prefix_zsh.toml", true)
+            .context("starting daemon proc")?;
+
+        // see the bash case for why
+        let mut child = Command::new(support::shpool_bin()?)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .arg("--socket")
+            .arg(&daemon_proc.socket_path)
+            .arg("--config-file")
+            .arg(support::testdata_file("prompt_prefix_zsh.toml"))
+            .arg("attach")
+            .arg("sh1")
+            .spawn()
+            .context("spawning daemon process")?;
+
+        // The attach shell should be spawned and have read the
+        // initial prompt after half a second.
+        std::thread::sleep(time::Duration::from_millis(500));
+        child.kill().context("killing child")?;
+
+        let mut stderr = child.stderr.take().context("missing stderr")?;
+        let mut stderr_str = String::from("");
+        stderr.read_to_string(&mut stderr_str).context("slurping stderr")?;
+        assert!(stderr_str.len() == 0);
+
+        let mut stdout = child.stdout.take().context("missing stdout")?;
+        let mut stdout_str = String::from("");
+        stdout.read_to_string(&mut stdout_str).context("slurping stdout")?;
+        let stdout_re = Regex::new(".*session_name=sh1.*")?;
         assert!(stdout_re.is_match(&stdout_str));
 
         Ok(())
