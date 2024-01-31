@@ -75,9 +75,9 @@ impl Proc {
             .arg(&log_file)
             .arg("--socket")
             .arg(&socket_path)
-            .arg("daemon")
             .arg("--config-file")
-            .arg(testdata_file(config));
+            .arg(testdata_file(config))
+            .arg("daemon");
         if listen_events {
             cmd.env("SHPOOL_TEST_HOOK_SOCKET_PATH", &test_hook_socket_path);
         }

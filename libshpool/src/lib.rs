@@ -98,10 +98,7 @@ pub enum Commands {
     Version,
 
     #[clap(about = "Starts running a daemon that holds a pool of shells")]
-    Daemon {
-        #[clap(short, long, action, help = "DEPRECATED; use global -c flag instead")]
-        config_file: Option<String>,
-    },
+    Daemon,
 
     #[clap(about = "Creates or attaches to an existing shell session")]
     Attach {
@@ -233,11 +230,7 @@ pub fn run(args: Args) -> anyhow::Result<()> {
 
     let res: anyhow::Result<()> = match args.command {
         Commands::Version => return Err(anyhow!("wrapper binary must handle version")),
-        Commands::Daemon { config_file } => {
-            let config_file =
-                if args.config_file.is_some() { args.config_file } else { config_file };
-            daemon::run(config_file, runtime_dir, socket)
-        }
+        Commands::Daemon => daemon::run(args.config_file, runtime_dir, socket),
         Commands::Attach { force, ttl, cmd, name } => {
             attach::run(args.config_file, name, force, ttl, cmd, socket)
         }

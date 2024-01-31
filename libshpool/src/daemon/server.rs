@@ -36,7 +36,7 @@ use tracing::{error, info, instrument, span, trace, warn, Level};
 
 use super::{
     super::{config, consts, protocol, test_hooks, tty, user},
-    etc_environment, shell, ttl_reaper,
+    etc_environment, prompt, shell, ttl_reaper,
 };
 use crate::daemon::exit_notify::ExitNotifier;
 
@@ -537,23 +537,26 @@ impl Server {
 
         self.inject_env(&mut cmd, &user_info, header).context("setting up shell env")?;
 
-        if header.cmd.is_none() {
+        let shell_basename = if header.cmd.is_none() {
             // spawn the shell as a login shell by setting
             // arg0 to be the basename of the shell path
             // proceeded with a "-". You can see sshd doing the
             // same thing if you look in the session.c file of
             // openssh.
-            let shell_basename = Path::new(&shell)
+            shell_basename = Path::new(&shell)
                 .file_name()
                 .ok_or(anyhow!("error building login shell indicator"))?
                 .to_str()
                 .ok_or(anyhow!("error parsing shell name as utf8"))?;
             cmd.arg0(format!("-{}", shell_basename));
-        }
+            Some(shell_basename)
+        } else {
+            None
+        };
 
         let noecho = self.config.noecho.unwrap_or(false);
         info!("about to fork subshell noecho={}", noecho);
-        let fork = shpool_pty::fork::Fork::from_ptmx().context("forking pty")?;
+        let mut fork = shpool_pty::fork::Fork::from_ptmx().context("forking pty")?;
         if let Ok(slave) = fork.is_child() {
             if noecho {
                 if let Some(fd) = slave.raw_fd() {
@@ -593,6 +596,18 @@ impl Server {
             }
             info!("reaped child shell: {:?}", waitable_child);
         });
+
+        // inject the prompt prefix, if any
+        let prompt_prefix = self.config.prompt_prefix.clone().unwrap_or(String::from(""));
+        if let Some(shell_basename) = shell_basename {
+            if prompt_prefix.len() > 0 {
+                if let Err(err) =
+                    prompt::inject_prefix(&mut fork, shell_basename, &prompt_prefix, &header.name)
+                {
+                    warn!("issue injecting prefix: {:?}", err);
+                }
+            }
+        }
 
         let (client_connection_tx, client_connection_rx) = crossbeam_channel::bounded(0);
         let (client_connection_ack_tx, client_connection_ack_rx) = crossbeam_channel::bounded(0);

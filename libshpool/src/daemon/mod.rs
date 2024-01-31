@@ -22,6 +22,7 @@ use super::config;
 mod etc_environment;
 mod exit_notify;
 pub mod keybindings;
+mod prompt;
 mod server;
 mod shell;
 mod signals;

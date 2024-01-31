@@ -104,6 +104,12 @@ pub struct Config {
 
     /// The user supplied keybindings.
     pub keybinding: Option<Vec<Keybinding>>,
+
+    /// A prefix to inject into the prompt of freshly spawned shells.
+    /// The prefix will get included in the shell's prompt variable
+    /// verbatim except that the string '$SHPOOL_SESSION_NAME' will
+    /// get replaced with the actual name of the shpool session.
+    pub prompt_prefix: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]

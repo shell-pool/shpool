@@ -1,7 +1,14 @@
-use std::{fs, io::BufRead, io::Read, thread, time};
+use std::{
+    fs,
+    io::BufRead,
+    io::Read,
+    process::{Command, Stdio},
+    thread, time,
+};
 
 use anyhow::{anyhow, Context};
 use ntest::timeout;
+use regex::Regex;
 
 mod support;
 
@@ -964,6 +971,49 @@ fn ttl_no_hangup_yet() -> anyhow::Result<()> {
 
         let listout = daemon_proc.list()?;
         assert!(String::from_utf8_lossy(listout.stdout.as_slice()).contains("sh1"));
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
+fn prompt_prefix() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let daemon_proc = support::daemon::Proc::new("prompt_prefix.toml", true)
+            .context("starting daemon proc")?;
+
+        // we have to manually spawn the child proc rather than using the support
+        // util because the line matcher gets bound only after the process gets
+        // spawned, so there will be a race between the prompt printing and
+        // binding the line matcher if we use the wrapper util.
+        let mut child = Command::new(support::shpool_bin()?)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .arg("--socket")
+            .arg(&daemon_proc.socket_path)
+            .arg("--config-file")
+            .arg(support::testdata_file("prompt_prefix.toml"))
+            .arg("attach")
+            .arg("sh1")
+            .spawn()
+            .context("spawning daemon process")?;
+
+        // The attach shell should be spawned and have read the
+        // initial prompt after half a second.
+        std::thread::sleep(time::Duration::from_millis(500));
+        child.kill().context("killing child")?;
+
+        let mut stderr = child.stderr.take().context("missing stderr")?;
+        let mut stderr_str = String::from("");
+        stderr.read_to_string(&mut stderr_str).context("slurping stderr")?;
+        assert!(stderr_str.len() == 0);
+
+        let mut stdout = child.stdout.take().context("missing stdout")?;
+        let mut stdout_str = String::from("");
+        stdout.read_to_string(&mut stdout_str).context("slurping stdout")?;
+        let stdout_re = Regex::new(".*session_name=sh1 prompt>.*")?;
+        assert!(stdout_re.is_match(&stdout_str));
 
         Ok(())
     })

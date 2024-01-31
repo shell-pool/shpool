@@ -168,9 +168,9 @@ fn config() -> anyhow::Result<()> {
             .stderr(Stdio::piped())
             .arg("--socket")
             .arg(tmp_dir.path().join("shpool.socket"))
-            .arg("daemon")
             .arg("--config-file")
             .arg(support::testdata_file("empty.toml"))
+            .arg("daemon")
             .spawn()
             .context("spawning daemon process")?;
 
