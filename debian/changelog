@@ -1,20 +1,31 @@
+shpool (0.4.0) unstable; urgency=low
+
+  * Add new default-disabled prompt_prefix option
+    supporting both bash and zsh
+  * [BREAKING] remove -c/--config_file daemon flag
+  * [BREAKING] remove old version switch
+  * Add version subcommand
+  * Remove "binary differs ..." warning
+  * Update docs about automatic connection methods
+
+ -- Ethan Pailes <pailes@google.com>  Thu, 01 Feb 2023 14:14:00 -0400
 shpool (0.3.5) unstable; urgency=low
 
-  * add -c/--cmd flag to attach subcommand
-  * add forward_env config option
-  * deprecate -c/--config_file flag to daemon subcommand
-  * make -c/--config_file a top level flag
+  * Add -c/--cmd flag to attach subcommand
+  * Add forward_env config option
+  * Deprecate -c/--config_file flag to daemon subcommand
+  * Make -c/--config_file a top level flag
 
  -- Ethan Pailes <pailes@google.com>  Mon, 18 Dec 2023 13:16:00 -0400
 shpool (0.3.4) unstable; urgency=low
 
-  * bump shpool_pty
-  * correctly set up SHELL variable for all shells
+  * Bump shpool_pty
+  * Correctly set up SHELL variable for all shells
 
  -- Ethan Pailes <pailes@google.com>  Wed, 22 Nov 2023 14:52:00 -0400
 shpool (0.3.3) unstable; urgency=low
 
-  * forward LANG env var from client to daemon
+  * Forward LANG env var from client to daemon
   * Update dependencies
 
  -- Ethan Pailes <pailes@google.com>  Tue, 08 Nov 2023 12:48:00 -0400
