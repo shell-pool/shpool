@@ -17,6 +17,7 @@ use nix::{
     unistd::{ForkResult, Pid},
 };
 use ntest::timeout;
+use regex::Regex;
 
 mod support;
 
@@ -200,14 +201,62 @@ fn config() -> anyhow::Result<()> {
 
 #[test]
 #[timeout(30000)]
+fn hooks() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc =
+            support::daemon::Proc::new_instrumented("norc.toml").context("starting daemon proc")?;
+        let sh1_detached_re = Regex::new("sh1.*disconnected")?;
+        let sh1_present_re = Regex::new("sh1")?;
+
+        {
+            // 1 new session
+            let mut sh1_proc =
+                daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+
+            // sequencing
+            let mut sh1_matcher = sh1_proc.line_matcher()?;
+            sh1_proc.run_cmd("echo hi")?;
+            sh1_matcher.match_re("hi$")?;
+
+            // 1 busy
+            let mut busy_proc =
+                daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+            busy_proc.proc.wait()?;
+        } // 1 client disconnect
+
+        // spin until sh1 disconnects
+        daemon_proc.wait_until_list_matches(|listout| sh1_detached_re.is_match(listout))?;
+
+        // 1 reattach
+        let mut sh1_proc =
+            daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+        sh1_proc.run_cmd("exit")?; // 1 shell disconnect
+        daemon_proc.wait_until_list_matches(|listout| !sh1_present_re.is_match(listout))?;
+
+        let hook_records = daemon_proc.hook_records.as_ref().unwrap().lock().unwrap();
+        assert_eq!(hook_records.new_sessions[0], "sh1");
+        assert_eq!(hook_records.reattaches[0], "sh1");
+        assert_eq!(hook_records.busys[0], "sh1");
+        assert_eq!(hook_records.client_disconnects[0], "sh1");
+        assert_eq!(hook_records.shell_disconnects[0], "sh1");
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
 fn cleanup_socket() -> anyhow::Result<()> {
     support::dump_err(|| {
         let mut daemon_proc =
             support::daemon::Proc::new("norc.toml", false).context("starting daemon proc")?;
 
-        signal::kill(Pid::from_raw(daemon_proc.proc.id() as i32), Signal::SIGINT)?;
+        signal::kill(
+            Pid::from_raw(daemon_proc.proc.as_ref().unwrap().id() as i32),
+            Signal::SIGINT,
+        )?;
 
-        daemon_proc.proc.wait()?;
+        daemon_proc.proc_wait()?;
 
         assert!(!path::Path::new(&daemon_proc.socket_path).exists());
         Ok(())

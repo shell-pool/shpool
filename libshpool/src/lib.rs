@@ -23,6 +23,7 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use clap::{Parser, Subcommand};
+pub use hooks::Hooks;
 use tracing::error;
 use tracing_subscriber::fmt::format::FmtSpan;
 
@@ -33,6 +34,7 @@ mod consts;
 mod daemon;
 mod detach;
 mod duration;
+mod hooks;
 mod kill;
 mod list;
 mod protocol;
@@ -60,7 +62,7 @@ pub struct Args {
 In most modes logs are discarded by default, but if shpool is
 running in daemon mode, the logs will go to stderr by default."
     )]
-    log_file: Option<String>,
+    pub log_file: Option<String>,
 
     #[clap(
         short,
@@ -68,7 +70,7 @@ running in daemon mode, the logs will go to stderr by default."
         action = clap::ArgAction::Count,
         help = "Show more in logs, may be provided multiple times",
     )]
-    verbose: u8,
+    pub verbose: u8,
 
     #[clap(
         short,
@@ -82,13 +84,13 @@ if XDG_RUNTIME_DIR is unset.
 This flag gets overridden by systemd socket activation when
 the daemon is launched by systemd."
     )]
-    socket: Option<String>,
+    pub socket: Option<String>,
 
     #[clap(short, long, action, help = "a toml file containing configuration")]
-    config_file: Option<String>,
+    pub config_file: Option<String>,
 
     #[clap(subcommand)]
-    command: Commands,
+    pub command: Commands,
 }
 
 /// The subcommds that shpool supports.
@@ -164,8 +166,9 @@ impl Args {
     }
 }
 
-/// Run the shpool tool with the given arguments.
-pub fn run(args: Args) -> anyhow::Result<()> {
+/// Run the shpool tool with the given arguments. If hooks is provided,
+/// inject the callbacks into the daemon.
+pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> anyhow::Result<()> {
     let trace_level = if args.verbose == 0 {
         tracing::Level::INFO
     } else if args.verbose == 1 {
@@ -230,7 +233,12 @@ pub fn run(args: Args) -> anyhow::Result<()> {
 
     let res: anyhow::Result<()> = match args.command {
         Commands::Version => return Err(anyhow!("wrapper binary must handle version")),
-        Commands::Daemon => daemon::run(args.config_file, runtime_dir, socket),
+        Commands::Daemon => daemon::run(
+            args.config_file,
+            runtime_dir,
+            hooks.unwrap_or(Box::new(NoopHooks {})),
+            socket,
+        ),
         Commands::Attach { force, ttl, cmd, name } => {
             attach::run(args.config_file, name, force, ttl, cmd, socket)
         }
@@ -246,3 +254,6 @@ pub fn run(args: Args) -> anyhow::Result<()> {
 
     Ok(())
 }
+
+struct NoopHooks {}
+impl hooks::Hooks for NoopHooks {}

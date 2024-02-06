@@ -36,7 +36,7 @@ use tracing::{error, info, instrument, span, trace, warn, Level};
 
 use super::{
     super::{config, consts, protocol, test_hooks, tty, user},
-    etc_environment, prompt, shell, ttl_reaper,
+    etc_environment, hooks, prompt, shell, ttl_reaper,
 };
 use crate::daemon::exit_notify::ExitNotifier;
 
@@ -44,7 +44,6 @@ const STDERR_FD: i32 = 2;
 const DEFAULT_INITIAL_SHELL_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
 const DEFAULT_OUTPUT_SPOOL_LINES: usize = 500;
 
-#[derive(Debug)]
 pub struct Server {
     config: config::Config,
     /// A map from shell session names to session descriptors.
@@ -56,11 +55,16 @@ pub struct Server {
     shells: Arc<Mutex<HashMap<String, Box<shell::Session>>>>,
     runtime_dir: PathBuf,
     register_new_reapable_session: crossbeam_channel::Sender<(String, Instant)>,
+    hooks: Box<dyn hooks::Hooks + Send + Sync>,
 }
 
 impl Server {
     #[instrument(skip_all)]
-    pub fn new(config: config::Config, runtime_dir: PathBuf) -> Arc<Self> {
+    pub fn new(
+        config: config::Config,
+        hooks: Box<dyn hooks::Hooks + Send + Sync>,
+        runtime_dir: PathBuf,
+    ) -> Arc<Self> {
         let shells = Arc::new(Mutex::new(HashMap::new()));
         // buffered so that we are unlikely to block when setting up a
         // new session
@@ -72,7 +76,13 @@ impl Server {
             }
         });
 
-        Arc::new(Server { config, shells, runtime_dir, register_new_reapable_session: new_sess_tx })
+        Arc::new(Server {
+            config,
+            shells,
+            runtime_dir,
+            register_new_reapable_session: new_sess_tx,
+            hooks,
+        })
     }
 
     #[instrument(skip_all)]
@@ -220,6 +230,9 @@ impl Server {
                         protocol::AttachReplyHeader { status: protocol::AttachStatus::Busy },
                     )?;
                     stream.shutdown(net::Shutdown::Both).context("closing stream")?;
+                    if let Err(err) = self.hooks.on_busy(&header.name) {
+                        warn!("busy hook: {:?}", err);
+                    }
                     return Ok(());
                 }
             } else {
@@ -229,10 +242,17 @@ impl Server {
 
             if matches!(status, protocol::AttachStatus::Created { .. }) {
                 info!("creating new subshell");
+                if let Err(err) = self.hooks.on_new_session(&header.name) {
+                    warn!("new_session hook: {:?}", err);
+                }
                 let session = self.spawn_subshell(conn_id, stream, &header)?;
 
                 shells.insert(header.name.clone(), Box::new(session));
                 // fallthrough to bidi streaming
+            } else {
+                if let Err(err) = self.hooks.on_reattach(&header.name) {
+                    warn!("reattach hook: {:?}", err);
+                }
             }
 
             // return a reference to the inner session so that
@@ -280,10 +300,12 @@ impl Server {
 
             if child_done {
                 info!("'{}' exited, removing from session table", header.name);
+                if let Err(err) = self.hooks.on_shell_disconnect(&header.name) {
+                    warn!("shell_disconnect hook: {:?}", err);
+                }
                 let mut shells = self.shells.lock().unwrap();
                 shells.remove(&header.name);
-            }
-            if child_done {
+
                 // The child shell has exited, so the reader thread should
                 // attempt to read from its stdout and get an error, causing
                 // it to exit. That means we should be safe to join. We use
@@ -293,6 +315,10 @@ impl Server {
                     h.join()
                         .map_err(|e| anyhow!("joining reader after child exit: {:?}", e))?
                         .context("within reader thread after child exit")?;
+                }
+            } else {
+                if let Err(err) = self.hooks.on_client_disconnect(&header.name) {
+                    warn!("client_disconnect hook: {:?}", err);
                 }
             }
 

@@ -1,11 +1,12 @@
 use std::{
     default::Default,
     env,
-    os::unix::net::UnixStream,
+    os::unix::{net::UnixStream, prelude::ExitStatusExt},
     path::{Path, PathBuf},
     process,
     process::{Command, Stdio},
-    time,
+    sync::{Arc, Mutex},
+    thread, time,
 };
 
 use anyhow::{anyhow, Context};
@@ -17,13 +18,15 @@ use super::{attach, events::Events, shpool_bin, testdata_file};
 /// Proc is a helper handle for a `shpool daemon` subprocess.
 /// It kills the subprocess when it goes out of scope.
 pub struct Proc {
-    pub proc: process::Child,
+    pub proc: Option<process::Child>,
     subproc_counter: usize,
     log_file: PathBuf,
     local_tmp_dir: Option<TempDir>,
     pub tmp_dir: PathBuf,
     pub events: Option<Events>,
     pub socket_path: PathBuf,
+    // Only present when created by new_instrumented()
+    pub hook_records: Option<Arc<Mutex<HookRecords>>>,
 }
 
 pub struct AttachArgs {
@@ -38,6 +41,51 @@ impl Default for AttachArgs {
     fn default() -> Self {
         AttachArgs { config: None, force: false, extra_env: vec![], ttl: None, cmd: None }
     }
+}
+
+pub struct HooksRecorder {
+    records: Arc<Mutex<HookRecords>>,
+}
+
+impl libshpool::Hooks for HooksRecorder {
+    fn on_new_session(&self, session_name: &str) -> anyhow::Result<()> {
+        let mut recs = self.records.lock().unwrap();
+        recs.new_sessions.push(String::from(session_name));
+        Ok(())
+    }
+
+    fn on_reattach(&self, session_name: &str) -> anyhow::Result<()> {
+        let mut recs = self.records.lock().unwrap();
+        recs.reattaches.push(String::from(session_name));
+        Ok(())
+    }
+
+    fn on_busy(&self, session_name: &str) -> anyhow::Result<()> {
+        let mut recs = self.records.lock().unwrap();
+        recs.busys.push(String::from(session_name));
+        Ok(())
+    }
+
+    fn on_client_disconnect(&self, session_name: &str) -> anyhow::Result<()> {
+        let mut recs = self.records.lock().unwrap();
+        recs.client_disconnects.push(String::from(session_name));
+        Ok(())
+    }
+
+    fn on_shell_disconnect(&self, session_name: &str) -> anyhow::Result<()> {
+        let mut recs = self.records.lock().unwrap();
+        recs.shell_disconnects.push(String::from(session_name));
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct HookRecords {
+    pub new_sessions: Vec<String>,
+    pub reattaches: Vec<String>,
+    pub busys: Vec<String>,
+    pub client_disconnects: Vec<String>,
+    pub shell_disconnects: Vec<String>,
 }
 
 impl Proc {
@@ -97,14 +145,119 @@ impl Proc {
         }
 
         Ok(Proc {
-            proc,
+            proc: Some(proc),
             local_tmp_dir: Some(local_tmp_dir),
             tmp_dir,
             log_file,
             subproc_counter: 0,
             events,
             socket_path,
+            hook_records: None,
         })
+    }
+
+    // Start a daemon process using a background thread rather than forking an
+    // actual subprocess. Include a custom hooks impl for tracking events.
+    pub fn new_instrumented<P: AsRef<Path>>(config: P) -> anyhow::Result<Proc> {
+        let local_tmp_dir = tempfile::Builder::new()
+            .prefix("shpool-test")
+            .rand_bytes(20)
+            .tempdir()
+            .context("creating tmp dir")?;
+        let tmp_dir = if let Ok(base) = std::env::var("KOKORO_ARTIFACTS_DIR") {
+            let mut dir = PathBuf::from(base);
+            let rand_blob: String = rand::thread_rng()
+                .sample_iter(&rand::distributions::Alphanumeric)
+                .take(20)
+                .map(char::from)
+                .collect();
+            dir.push(format!("shpool-test{}", rand_blob));
+            std::fs::create_dir(&dir)?;
+            dir
+        } else {
+            local_tmp_dir.path().to_path_buf()
+        };
+
+        let socket_path = tmp_dir.join("shpool.socket");
+
+        let log_file = tmp_dir.join("daemon.log");
+        eprintln!("spawning instrumented daemon thread with log {:?}", &log_file);
+
+        let args = libshpool::Args {
+            log_file: Some(
+                log_file
+                    .clone()
+                    .into_os_string()
+                    .into_string()
+                    .map_err(|e| anyhow!("conversion error: {:?}", e))?,
+            ),
+            verbose: 2,
+            socket: Some(
+                socket_path
+                    .clone()
+                    .into_os_string()
+                    .into_string()
+                    .map_err(|e| anyhow!("conversion error: {:?}", e))?,
+            ),
+            config_file: Some(
+                testdata_file(config)
+                    .into_os_string()
+                    .into_string()
+                    .map_err(|e| anyhow!("conversion error: {:?}", e))?,
+            ),
+            command: libshpool::Commands::Daemon,
+        };
+        let hooks_recorder = Box::new(HooksRecorder {
+            records: Arc::new(Mutex::new(HookRecords {
+                new_sessions: vec![],
+                reattaches: vec![],
+                busys: vec![],
+                client_disconnects: vec![],
+                shell_disconnects: vec![],
+            })),
+        });
+        let hook_records = Arc::clone(&hooks_recorder.records);
+
+        // spawn the daemon in a thread
+        thread::spawn(move || {
+            if let Err(err) = libshpool::run(args, Some(hooks_recorder)) {
+                eprintln!("shpool proc exited with err: {:?}", err);
+            }
+        });
+
+        // spin until we can dial the socket successfully
+        let mut sleep_dur = time::Duration::from_millis(5);
+        for _ in 0..12 {
+            if let Ok(_) = UnixStream::connect(&socket_path) {
+                break;
+            } else {
+                std::thread::sleep(sleep_dur);
+                sleep_dur *= 2;
+            }
+        }
+
+        Ok(Proc {
+            proc: None,
+            local_tmp_dir: Some(local_tmp_dir),
+            tmp_dir,
+            log_file,
+            subproc_counter: 0,
+            events: None,
+            socket_path,
+            hook_records: Some(hook_records),
+        })
+    }
+
+    pub fn proc_kill(&mut self) -> std::io::Result<()> {
+        if let Some(proc) = &mut self.proc { proc.kill() } else { Ok(()) }
+    }
+
+    pub fn proc_wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
+        if let Some(proc) = &mut self.proc {
+            proc.wait()
+        } else {
+            Ok(process::ExitStatus::from_raw(0))
+        }
     }
 
     pub fn attach(&mut self, name: &str, args: AttachArgs) -> anyhow::Result<attach::Proc> {
@@ -185,6 +338,34 @@ impl Proc {
         cmd.output().context("spawning kill proc")
     }
 
+    pub fn wait_until_list_matches<F>(&mut self, pred: F) -> anyhow::Result<()>
+    where
+        F: Fn(&str) -> bool,
+    {
+        let mut sleep_dur = time::Duration::from_millis(5);
+        let mut detached = false;
+        for _ in 0..12 {
+            let list_out = self.list()?;
+            if !list_out.status.success() {
+                let list_stderr = String::from_utf8_lossy(&list_out.stdout[..]);
+                eprintln!("list bad exit, stderr: {:?}", list_stderr);
+                continue;
+            }
+
+            let list_stdout = String::from_utf8_lossy(&list_out.stdout[..]);
+            if pred(&list_stdout) {
+                detached = true;
+                break;
+            } else {
+                std::thread::sleep(sleep_dur);
+                sleep_dur *= 2;
+            }
+        }
+        assert!(detached);
+
+        Ok(())
+    }
+
     /// list launches a `shpool list` process, collects the
     /// output and returns it as a string
     pub fn list(&mut self) -> anyhow::Result<process::Output> {
@@ -214,7 +395,7 @@ impl Proc {
 
 impl std::ops::Drop for Proc {
     fn drop(&mut self) {
-        if let Err(e) = self.proc.kill() {
+        if let Err(e) = self.proc_kill() {
             eprintln!("err killing daemon proc: {:?}", e);
         }
         if std::env::var("SHPOOL_LEAVE_TEST_LOGS").unwrap_or(String::from("")) == "true" {

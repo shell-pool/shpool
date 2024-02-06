@@ -475,7 +475,7 @@ fn daemon_hangup() -> anyhow::Result<()> {
         attach_proc.run_cmd("echo foo")?;
         line_matcher.match_re("foo$")?;
 
-        daemon_proc.proc.kill()?;
+        daemon_proc.proc_kill()?;
 
         let exit_status = attach_proc.proc.wait()?;
         assert!(!exit_status.success());

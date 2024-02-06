@@ -17,7 +17,7 @@ use std::{os::unix::net::UnixListener, path::PathBuf};
 use anyhow::Context;
 use tracing::{info, instrument};
 
-use super::config;
+use super::{config, hooks};
 
 mod etc_environment;
 mod exit_notify;
@@ -33,12 +33,13 @@ mod ttl_reaper;
 pub fn run(
     config_file: Option<String>,
     runtime_dir: PathBuf,
+    hooks: Box<dyn hooks::Hooks + Send + Sync>,
     socket: PathBuf,
 ) -> anyhow::Result<()> {
     info!("\n\n======================== STARTING DAEMON ============================\n\n");
 
     let config = config::read_config(&config_file)?;
-    let server = server::Server::new(config, runtime_dir);
+    let server = server::Server::new(config, hooks, runtime_dir);
 
     let (cleanup_socket, listener) = match systemd::activation_socket() {
         Ok(l) => {

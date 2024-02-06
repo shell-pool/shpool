@@ -24,5 +24,5 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    libshpool::run(args)
+    libshpool::run(args, None)
 }
