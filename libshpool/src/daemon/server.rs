@@ -425,10 +425,16 @@ impl Server {
         let sessions: anyhow::Result<Vec<protocol::Session>> = shells
             .iter()
             .map(|(k, v)| {
+                let status = match v.inner.try_lock() {
+                    Ok(_) => protocol::SessionStatus::Disconnected,
+                    Err(_) => protocol::SessionStatus::Attached,
+                };
+
                 Ok(protocol::Session {
                     name: k.to_string(),
                     started_at_unix_ms: v.started_at.duration_since(time::UNIX_EPOCH)?.as_millis()
                         as i64,
+                    status,
                 })
             })
             .collect();

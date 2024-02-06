@@ -14,6 +14,7 @@
 
 use std::{
     convert::TryFrom,
+    fmt,
     io::{self, Read, Write},
     os::unix::net::UnixStream,
     path::Path,
@@ -198,6 +199,23 @@ pub struct ListReply {
 pub struct Session {
     pub name: String,
     pub started_at_unix_ms: i64,
+    pub status: SessionStatus,
+}
+
+/// Indicates if a shpool session currently has a client attached.
+#[derive(Serialize, Deserialize, Debug)]
+pub enum SessionStatus {
+    Attached,
+    Disconnected,
+}
+
+impl fmt::Display for SessionStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SessionStatus::Attached => write!(f, "attached"),
+            SessionStatus::Disconnected => write!(f, "disconnected"),
+        }
+    }
 }
 
 /// AttachStatus indicates what happened during an attach attempt.
