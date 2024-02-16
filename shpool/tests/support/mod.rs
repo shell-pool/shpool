@@ -9,6 +9,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::Mutex,
+    time,
 };
 
 use anyhow::{anyhow, Context};
@@ -36,6 +37,23 @@ pub fn testdata_file<P: AsRef<Path>>(file: P) -> PathBuf {
 lazy_static::lazy_static! {
     // cache the result and make sure we only ever compile once
     static ref SHPOOL_BIN_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
+}
+
+pub fn wait_until<P>(mut pred: P) -> anyhow::Result<()>
+where
+    P: FnMut() -> anyhow::Result<bool>,
+{
+    let mut sleep_dur = time::Duration::from_millis(5);
+    for _ in 0..12 {
+        if pred()? {
+            return Ok(());
+        } else {
+            std::thread::sleep(sleep_dur);
+            sleep_dur *= 2;
+        }
+    }
+
+    return Err(anyhow!("pred never became true"));
 }
 
 pub fn shpool_bin() -> anyhow::Result<PathBuf> {

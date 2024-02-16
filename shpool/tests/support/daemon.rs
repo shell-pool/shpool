@@ -13,7 +13,7 @@ use anyhow::{anyhow, Context};
 use rand::Rng;
 use tempfile::TempDir;
 
-use super::{attach, events::Events, shpool_bin, testdata_file};
+use super::{attach, events::Events, shpool_bin, testdata_file, wait_until};
 
 /// Proc is a helper handle for a `shpool daemon` subprocess.
 /// It kills the subprocess when it goes out of scope.
@@ -49,30 +49,35 @@ pub struct HooksRecorder {
 
 impl libshpool::Hooks for HooksRecorder {
     fn on_new_session(&self, session_name: &str) -> anyhow::Result<()> {
+        eprintln!("on_new_session: {}", session_name);
         let mut recs = self.records.lock().unwrap();
         recs.new_sessions.push(String::from(session_name));
         Ok(())
     }
 
     fn on_reattach(&self, session_name: &str) -> anyhow::Result<()> {
+        eprintln!("on_reattach: {}", session_name);
         let mut recs = self.records.lock().unwrap();
         recs.reattaches.push(String::from(session_name));
         Ok(())
     }
 
     fn on_busy(&self, session_name: &str) -> anyhow::Result<()> {
+        eprintln!("on_busy: {}", session_name);
         let mut recs = self.records.lock().unwrap();
         recs.busys.push(String::from(session_name));
         Ok(())
     }
 
     fn on_client_disconnect(&self, session_name: &str) -> anyhow::Result<()> {
+        eprintln!("on_client_disconnect: {}", session_name);
         let mut recs = self.records.lock().unwrap();
         recs.client_disconnects.push(String::from(session_name));
         Ok(())
     }
 
     fn on_shell_disconnect(&self, session_name: &str) -> anyhow::Result<()> {
+        eprintln!("on_shell_disconnect: {}", session_name);
         let mut recs = self.records.lock().unwrap();
         recs.shell_disconnects.push(String::from(session_name));
         Ok(())
@@ -342,28 +347,16 @@ impl Proc {
     where
         F: Fn(&str) -> bool,
     {
-        let mut sleep_dur = time::Duration::from_millis(5);
-        let mut detached = false;
-        for _ in 0..12 {
+        wait_until(|| {
             let list_out = self.list()?;
             if !list_out.status.success() {
                 let list_stderr = String::from_utf8_lossy(&list_out.stdout[..]);
                 eprintln!("list bad exit, stderr: {:?}", list_stderr);
-                continue;
+                return Ok(false);
             }
-
             let list_stdout = String::from_utf8_lossy(&list_out.stdout[..]);
-            if pred(&list_stdout) {
-                detached = true;
-                break;
-            } else {
-                std::thread::sleep(sleep_dur);
-                sleep_dur *= 2;
-            }
-        }
-        assert!(detached);
-
-        Ok(())
+            return Ok(pred(&list_stdout));
+        })
     }
 
     /// list launches a `shpool list` process, collects the

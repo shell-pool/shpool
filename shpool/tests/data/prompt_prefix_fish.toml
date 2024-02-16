@@ -1,0 +1,9 @@
+norc = true
+noecho = true
+shell = "/usr/bin/fish"
+session_restore_mode = "simple"
+prompt_prefix="session_name=$SHPOOL_SESSION_NAME "
+
+[env]
+TERM = ""
+

@@ -1059,6 +1059,46 @@ fn prompt_prefix_zsh() -> anyhow::Result<()> {
     })
 }
 
+#[test]
+#[timeout(30000)]
+fn prompt_prefix_fish() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let daemon_proc = support::daemon::Proc::new("prompt_prefix_fish.toml", true)
+            .context("starting daemon proc")?;
+
+        // see the bash case for why
+        let mut child = Command::new(support::shpool_bin()?)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .arg("--socket")
+            .arg(&daemon_proc.socket_path)
+            .arg("--config-file")
+            .arg(support::testdata_file("prompt_prefix_fish.toml"))
+            .arg("attach")
+            .arg("sh1")
+            .spawn()
+            .context("spawning daemon process")?;
+
+        // The attach shell should be spawned and have read the
+        // initial prompt after half a second.
+        std::thread::sleep(time::Duration::from_millis(500));
+        child.kill().context("killing child")?;
+
+        let mut stderr = child.stderr.take().context("missing stderr")?;
+        let mut stderr_str = String::from("");
+        stderr.read_to_string(&mut stderr_str).context("slurping stderr")?;
+        assert!(stderr_str.len() == 0);
+
+        let mut stdout = child.stdout.take().context("missing stdout")?;
+        let mut stdout_str = String::from("");
+        stdout.read_to_string(&mut stdout_str).context("slurping stdout")?;
+        let stdout_re = Regex::new(".*session_name=sh1.*")?;
+        assert!(stdout_re.is_match(&stdout_str));
+
+        Ok(())
+    })
+}
+
 #[ignore] // TODO: re-enable, this test if flaky
 #[test]
 fn up_arrow_no_crash() -> anyhow::Result<()> {

@@ -206,7 +206,6 @@ fn hooks() -> anyhow::Result<()> {
         let mut daemon_proc =
             support::daemon::Proc::new_instrumented("norc.toml").context("starting daemon proc")?;
         let sh1_detached_re = Regex::new("sh1.*disconnected")?;
-        let sh1_present_re = Regex::new("sh1")?;
 
         {
             // 1 new session
@@ -231,7 +230,11 @@ fn hooks() -> anyhow::Result<()> {
         let mut sh1_proc =
             daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
         sh1_proc.run_cmd("exit")?; // 1 shell disconnect
-        daemon_proc.wait_until_list_matches(|listout| !sh1_present_re.is_match(listout))?;
+
+        support::wait_until(|| {
+            let hook_records = daemon_proc.hook_records.as_ref().unwrap().lock().unwrap();
+            Ok(hook_records.shell_disconnects.len() > 0)
+        })?;
 
         let hook_records = daemon_proc.hook_records.as_ref().unwrap().lock().unwrap();
         assert_eq!(hook_records.new_sessions[0], "sh1");
