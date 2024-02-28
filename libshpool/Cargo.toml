@@ -2,6 +2,7 @@
 name = "libshpool"
 version = "0.5.0"
 edition = "2021"
+repository = "https://github.com/shell-pool/shpool"
 authors = ["Ethan Pailes <pailes@google.com>"]
 description = '''
 libshpool contains the implementation of the shpool tool,
@@ -10,6 +11,7 @@ persistant shell sessions to gracefully handle network
 disconnects.
 '''
 license = "Apache-2.0"
+keywords = ["tmux", "tty", "terminal", "shell", "persistence"]
 
 [features]
 test_hooks = [] # for internal testing only, don't enable this feature

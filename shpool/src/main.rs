@@ -11,6 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+/// Shpool is a session persistence tool that works simillarly to tmux, but
+/// aims to provide a simpler user experience. See [the
+/// README](https://github.com/shell-pool/shpool) for more
+/// info.
 
 use clap::Parser;
 
