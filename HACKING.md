@@ -49,10 +49,6 @@ $ source "$HOME/.cargo/env"
 
 in your `.profile` file should do the trick.
 
-In addition to the standard rust toolchain, shpool uses the
-`cargo-vendor-filterer` tool, so you should install it with
-`cargo install cargo-vendor-filterer`.
-
 ### Build `shpool`
 
 To build and install `shpool` run
@@ -79,17 +75,6 @@ enable and start it up with
 ```
 $ systemctl --user enable shpool
 $ systemctl --user start shpool
-```
-
-## Adding or updating a dependency
-
-Since shpool uses `cargo-vendor-filterer`, adding or updating a dependency requires
-an extra step. After you edit `Cargo.toml` to reflect the change you want
-to make as normal. If you have not already installed `cargo-vendor-filterer`
-you can do so with `cargo install cargo-vendor-filterer`. Then run the command
-
-```
-./vendor.sh
 ```
 
 ## Formatting
