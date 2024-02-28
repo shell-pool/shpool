@@ -96,7 +96,7 @@ to your `~/.config/shpool/config.toml`.
 
 ##### `"simple"` - only ask child processes to redraw
 
-The `"simple"` avoids restoring any output. In this reconnect mode, shpool will
+The `"simple"` option avoids restoring any output. In this reconnect mode, shpool will
 issue some SIGWINCH signals to try to convince full screen ncurses apps
 such as vim or emacs to re-draw the screen, but will otherwise do nothing.
 Any shell output produced when there was no client connected to the session
