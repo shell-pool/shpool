@@ -8,22 +8,20 @@ the whole terminal and provide window splitting and tiling features, `shpool`
 only provides persistent sessions. The biggest advantage of this approach is
 that `shpool` does not break native scrollback or copy-paste.
 
-### Shell Config
+## Installation
 
-#### bash
+### Installing from crates.io
 
-If you use bash, you may want to ensure that the `huponexit` option
-is set to make sure that child processes exit when you leave a
-shell. Without this setting, background processes you have
-spawned over the course of your shell session will stick around
-in the shpool daemon's process tree and eat up memory. To set
-this option add
+Run
 
 ```
-shopt -s huponexit
+cargo install shpool
+curl -fLo "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/shpool.service" --create-dirs https://raw.githubusercontent.com/shell-pool/shpool/master/systemd/shpool.service
+sed -i "s|/usr|$HOME/.cargo|" .config/systemd/user/shpool.service
+curl -fLo "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/shpool.socket" --create-dirs https://raw.githubusercontent.com/shell-pool/shpool/master/systemd/shpool.socket
+systemctl --user enable shpool
+systemctl --user start shpool
 ```
-
-to your `~/.bashrc`.
 
 ## Usage
 
@@ -125,6 +123,23 @@ session_restore_mode = { lines = n }
 ```
 
 where n is a number to your `~/.config/shpool/config.toml`.
+
+#### Shell Config
+
+##### bash
+
+If you use bash, you may want to ensure that the `huponexit` option
+is set to make sure that child processes exit when you leave a
+shell. Without this setting, background processes you have
+spawned over the course of your shell session will stick around
+in the shpool daemon's process tree and eat up memory. To set
+this option add
+
+```
+shopt -s huponexit
+```
+
+to your `~/.bashrc`.
 
 ### Subcommands
 
