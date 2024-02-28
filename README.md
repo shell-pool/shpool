@@ -247,11 +247,6 @@ need to specify a session name, but it can run into problems
 if you have to close the local window and open a new terminal,
 which can come up if your connection freezes rather than drops.
 
-## Bugs
-
-You can report a bug
-[here](https://b.corp.google.com/issues/new?component=1320938&template=0).
-
 ## Hacking
 
 For information on how to develop shpool, see [HACKING.md](./HACKING.md).
