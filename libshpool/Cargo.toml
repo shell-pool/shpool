@@ -4,6 +4,7 @@ version = "0.5.0"
 edition = "2021"
 repository = "https://github.com/shell-pool/shpool"
 authors = ["Ethan Pailes <pailes@google.com>"]
+readme = "README.md"
 description = '''
 libshpool contains the implementation of the shpool tool,
 which provides a mechanism for establishing lightweight
