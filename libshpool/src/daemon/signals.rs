@@ -49,6 +49,11 @@ impl Handler {
 
         let mut signals = Signals::new(TERM_SIGNALS).context("creating signal iterator")?;
         thread::spawn(move || {
+            // Signals are exposed via an iterator so this loop is just to consume
+            // that by blocking until the first value is emitted. Clippy thinks we
+            // are looping over a collection and is confused about why we always
+            // exit in the loop body.
+            #[allow(clippy::never_loop)]
             for signal in &mut signals {
                 assert!(TERM_SIGNALS.contains(&signal));
 

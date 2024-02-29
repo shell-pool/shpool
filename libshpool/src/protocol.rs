@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::{
-    convert::TryFrom,
     fmt,
     io::{self, Read, Write},
     os::unix::net::UnixStream,
@@ -301,7 +300,7 @@ impl<'data> Chunk<'data> {
         } else {
             w.write_u32::<LittleEndian>(self.buf.len() as u32)?;
         }
-        w.write_all(&self.buf[..])?;
+        w.write_all(self.buf)?;
 
         Ok(())
     }
@@ -321,7 +320,7 @@ impl<'data> Chunk<'data> {
             Ok(Chunk { kind, buf: &buf[..4] })
         } else {
             let len = r.read_u32::<LittleEndian>()? as usize;
-            if len as usize > buf.len() {
+            if len > buf.len() {
                 return Err(anyhow!(
                     "chunk of size {} exceeds size limit of {} bytes",
                     len,
@@ -351,7 +350,7 @@ impl Client {
         Ok(())
     }
 
-    pub fn read_reply<'data, R>(&mut self) -> anyhow::Result<R>
+    pub fn read_reply<R>(&mut self) -> anyhow::Result<R>
     where
         R: serde::de::DeserializeOwned,
     {
@@ -411,7 +410,7 @@ impl Client {
                         }
                     };
 
-                    if chunk.buf.len() > 0 {
+                    if !chunk.buf.is_empty() {
                         debug!(
                             "chunk='{}' kind={:?} len={}",
                             String::from_utf8_lossy(chunk.buf),
@@ -512,7 +511,6 @@ impl Client {
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::io;
 
     #[test]
     fn chunk_round_trip() {

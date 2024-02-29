@@ -36,7 +36,7 @@ pub fn parse_compat<R: Read>(file: R) -> anyhow::Result<Vec<(String, String)>> {
                 // us!
                 let line: String = line.chars().take_while(|c| *c != '#').collect();
 
-                let parts: Vec<_> = line.splitn(2, "=").collect();
+                let parts: Vec<_> = line.splitn(2, '=').collect();
                 if parts.len() != 2 {
                     warn!("parsing /etc/environment: split failed (should be impossible)");
                     continue;
@@ -55,11 +55,11 @@ pub fn parse_compat<R: Read>(file: R) -> anyhow::Result<Vec<(String, String)>> {
                 // single quotes with double quotes and strip unmatched leading
                 // quotes while doing nothing for unmatched trailing quotes.
                 let has_leading_quote = val.starts_with('\'') || val.starts_with('"');
-                val = val.strip_prefix("'").unwrap_or(val);
-                val = val.strip_prefix("\"").unwrap_or(val);
+                val = val.strip_prefix('\'').unwrap_or(val);
+                val = val.strip_prefix('"').unwrap_or(val);
                 if has_leading_quote {
-                    val = val.strip_suffix("'").unwrap_or(val);
-                    val = val.strip_suffix("\"").unwrap_or(val);
+                    val = val.strip_suffix('\'').unwrap_or(val);
+                    val = val.strip_suffix('"').unwrap_or(val);
                 }
                 pairs.push((String::from(key), String::from(val)));
             }

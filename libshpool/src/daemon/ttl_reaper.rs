@@ -44,7 +44,7 @@ pub fn run(
 
     loop {
         // empty heap loop, just waiting for new sessions to watch
-        while heap.len() == 0 {
+        while heap.is_empty() {
             match new_sess.recv() {
                 Ok((session_name, reap_at)) => {
                     let gen_id = gen_ids.entry(session_name.clone()).or_insert(0);
@@ -62,9 +62,9 @@ pub fn run(
             }
         }
 
-        while heap.len() > 0 {
+        while !heap.is_empty() {
             let wake_at = if let Some(reapable) = heap.peek() {
-                reapable.reap_at.clone()
+                reapable.reap_at
             } else {
                 warn!("no reapable even with heap len {}, should be impossible", heap.len());
                 continue;
@@ -95,7 +95,7 @@ pub fn run(
                         .expect("there to be an entry in a non-empty heap");
                     info!("waking up to reap {:?}", reapable);
                     let current_gen = gen_ids.get(&reapable.session_name)
-                        .map(|g| *g).unwrap_or(0);
+                        .copied().unwrap_or(0);
                     if current_gen != reapable.gen_id {
                         info!("ignoring {}:{} because current gen is {:?}",
                               &reapable.session_name, reapable.gen_id, current_gen);
@@ -131,7 +131,7 @@ struct Reapable {
 
 impl cmp::PartialEq for Reapable {
     fn eq(&self, rhs: &Reapable) -> bool {
-        return self.reap_at == rhs.reap_at;
+        self.reap_at == rhs.reap_at
     }
 }
 impl cmp::Eq for Reapable {}

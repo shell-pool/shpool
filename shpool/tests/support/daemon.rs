@@ -29,18 +29,13 @@ pub struct Proc {
     pub hook_records: Option<Arc<Mutex<HookRecords>>>,
 }
 
+#[derive(Default)]
 pub struct AttachArgs {
     pub config: Option<String>,
     pub force: bool,
     pub extra_env: Vec<(String, String)>,
     pub ttl: Option<time::Duration>,
     pub cmd: Option<String>,
-}
-
-impl Default for AttachArgs {
-    fn default() -> Self {
-        AttachArgs { config: None, force: false, extra_env: vec![], ttl: None, cmd: None }
-    }
 }
 
 pub struct HooksRecorder {
@@ -141,7 +136,7 @@ impl Proc {
         // spin until we can dial the socket successfully
         let mut sleep_dur = time::Duration::from_millis(5);
         for _ in 0..12 {
-            if let Ok(_) = UnixStream::connect(&socket_path) {
+            if UnixStream::connect(&socket_path).is_ok() {
                 break;
             } else {
                 std::thread::sleep(sleep_dur);
@@ -233,7 +228,7 @@ impl Proc {
         // spin until we can dial the socket successfully
         let mut sleep_dur = time::Duration::from_millis(5);
         for _ in 0..12 {
-            if let Ok(_) = UnixStream::connect(&socket_path) {
+            if UnixStream::connect(&socket_path).is_ok() {
                 break;
             } else {
                 std::thread::sleep(sleep_dur);
@@ -355,7 +350,7 @@ impl Proc {
                 return Ok(false);
             }
             let list_stdout = String::from_utf8_lossy(&list_out.stdout[..]);
-            return Ok(pred(&list_stdout));
+            Ok(pred(&list_stdout))
         })
     }
 

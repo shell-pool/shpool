@@ -154,7 +154,7 @@ fn missing_ssh_auth_sock() -> anyhow::Result<()> {
         let mut waiter = daemon_proc.events.take().unwrap().waiter(["daemon-wrote-s2c-chunk"]);
 
         let fake_auth_sock_tgt = daemon_proc.tmp_dir.join("ssh-auth-sock-target.fake");
-        fs::File::create(&fake_auth_sock_tgt)?;
+        fs::File::create(fake_auth_sock_tgt)?;
 
         let mut attach_proc =
             daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
@@ -1007,7 +1007,7 @@ fn prompt_prefix_bash() -> anyhow::Result<()> {
         let mut stderr = child.stderr.take().context("missing stderr")?;
         let mut stderr_str = String::from("");
         stderr.read_to_string(&mut stderr_str).context("slurping stderr")?;
-        assert!(stderr_str.len() == 0);
+        assert!(stderr_str.is_empty());
 
         let mut stdout = child.stdout.take().context("missing stdout")?;
         let mut stdout_str = String::from("");
@@ -1047,7 +1047,7 @@ fn prompt_prefix_zsh() -> anyhow::Result<()> {
         let mut stderr = child.stderr.take().context("missing stderr")?;
         let mut stderr_str = String::from("");
         stderr.read_to_string(&mut stderr_str).context("slurping stderr")?;
-        assert!(stderr_str.len() == 0);
+        assert!(stderr_str.is_empty());
 
         let mut stdout = child.stdout.take().context("missing stdout")?;
         let mut stdout_str = String::from("");
@@ -1087,7 +1087,7 @@ fn prompt_prefix_fish() -> anyhow::Result<()> {
         let mut stderr = child.stderr.take().context("missing stderr")?;
         let mut stderr_str = String::from("");
         stderr.read_to_string(&mut stderr_str).context("slurping stderr")?;
-        assert!(stderr_str.len() == 0);
+        assert!(stderr_str.is_empty());
 
         let mut stdout = child.stdout.take().context("missing stdout")?;
         let mut stdout_str = String::from("");

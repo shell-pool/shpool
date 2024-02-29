@@ -53,7 +53,7 @@ where
         }
     }
 
-    return Err(anyhow!("pred never became true"));
+    Err(anyhow!("pred never became true"))
 }
 
 pub fn shpool_bin() -> anyhow::Result<PathBuf> {

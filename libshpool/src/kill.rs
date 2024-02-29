@@ -44,7 +44,7 @@ where
 
     let reply: KillReply = client.read_reply().context("reading reply")?;
 
-    if reply.not_found_sessions.len() > 0 {
+    if !reply.not_found_sessions.is_empty() {
         eprintln!("not found: {}", reply.not_found_sessions.join(" "));
         return Err(anyhow!("not found: {}", reply.not_found_sessions.join(" ")));
     }

@@ -162,7 +162,7 @@ impl Args {
     /// Version indicates if the wrapping binary must display the
     /// version then exit.
     pub fn version(&self) -> bool {
-        if let Commands::Version = self.command { true } else { false }
+        matches!(self.command, Commands::Version)
     }
 }
 

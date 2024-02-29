@@ -167,6 +167,17 @@ pub enum ClientConnectionMsg {
     Disconnect,
 }
 
+pub struct ReaderArgs {
+    pub conn_id: usize,
+    pub tty_size: tty::Size,
+    pub scrollback_lines: usize,
+    pub session_restore_mode: config::SessionRestoreMode,
+    pub client_connection: crossbeam_channel::Receiver<ClientConnectionMsg>,
+    pub client_connection_ack: crossbeam_channel::Sender<ClientConnectionStatus>,
+    pub tty_size_change: crossbeam_channel::Receiver<tty::Size>,
+    pub tty_size_change_ack: crossbeam_channel::Sender<()>,
+}
+
 impl SessionInner {
     /// Spawn the reader thread which continually reads from the pty
     /// and sends data both to the output spool and to the client,
@@ -174,27 +185,24 @@ impl SessionInner {
     #[instrument(skip_all, fields(s = self.name))]
     pub fn spawn_reader(
         &self,
-        conn_id: usize,
-        tty_size: tty::Size,
-        scrollback_lines: usize,
-        session_restore_mode: config::SessionRestoreMode,
-        client_connection: crossbeam_channel::Receiver<ClientConnectionMsg>,
-        client_connection_ack: crossbeam_channel::Sender<ClientConnectionStatus>,
-        tty_size_change: crossbeam_channel::Receiver<tty::Size>,
-        tty_size_change_ack: crossbeam_channel::Sender<()>,
+        args: ReaderArgs,
     ) -> anyhow::Result<thread::JoinHandle<anyhow::Result<()>>> {
         use nix::poll;
 
-        let mut pty_master = self.pty_master.is_parent()?.clone();
+        let mut pty_master = self.pty_master.is_parent()?;
         let name = self.name.clone();
         let mut closure = move || {
-            let _s = span!(Level::INFO, "reader", s = name, cid = conn_id).entered();
+            let _s = span!(Level::INFO, "reader", s = name, cid = args.conn_id).entered();
 
             let mut output_spool =
-                if matches!(session_restore_mode, config::SessionRestoreMode::Simple) {
+                if matches!(args.session_restore_mode, config::SessionRestoreMode::Simple) {
                     None
                 } else {
-                    Some(shpool_vt100::Parser::new(tty_size.rows, VTERM_WIDTH, scrollback_lines))
+                    Some(shpool_vt100::Parser::new(
+                        args.tty_size.rows,
+                        VTERM_WIDTH,
+                        args.scrollback_lines,
+                    ))
                 };
             let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
             let mut poll_fds = [poll::PollFd::new(
@@ -206,8 +214,8 @@ impl SessionInner {
             // the initial prompt on the floor
             info!("waiting for initial client connection");
             let mut client_conn: ClientConnectionMsg =
-                client_connection.recv().context("waiting for initial client connection")?;
-            client_connection_ack
+                args.client_connection.recv().context("waiting for initial client connection")?;
+            args.client_connection_ack
                 .send(ClientConnectionStatus::New)
                 .context("sending initial client connection ack")?;
             info!("got initial client connection");
@@ -221,7 +229,7 @@ impl SessionInner {
             loop {
                 let mut do_reattach = false;
                 crossbeam_channel::select! {
-                    recv(client_connection) -> new_connection => {
+                    recv(args.client_connection) -> new_connection => {
                         match new_connection {
                             Ok(ClientConnectionMsg::New(conn)) => {
                                 info!("got new connection (rows={}, cols={})", conn.size.rows, conn.size.cols);
@@ -244,15 +252,17 @@ impl SessionInner {
 
                                 // Always instantly resize the spool, since we don't
                                 // need to inject a delay into that.
-                                output_spool.as_mut().map(|s| s.screen_mut().set_size(
-                                    conn.size.rows, std::u16::MAX));
+                                if let Some(s) = output_spool.as_mut() {
+                                    s.screen_mut().set_size(
+                                        conn.size.rows, std::u16::MAX);
+                                }
                                 resize_cmd = Some(ResizeCmd {
                                     size: conn.size.clone(),
                                     when: time::Instant::now().add(REATTACH_RESIZE_DELAY),
                                 });
                                 client_conn = ClientConnectionMsg::New(conn);
 
-                                client_connection_ack.send(ack)
+                                args.client_connection_ack.send(ack)
                                     .context("sending client connection ack")?;
                             }
                             Ok(ClientConnectionMsg::Disconnect) => {
@@ -266,7 +276,7 @@ impl SessionInner {
                                 };
                                 client_conn = ClientConnectionMsg::Disconnect;
 
-                                client_connection_ack.send(ack)
+                                args.client_connection_ack.send(ack)
                                     .context("sending client connection ack")?;
                             }
                             Ok(ClientConnectionMsg::DisconnectExit(exit_status)) => {
@@ -302,7 +312,7 @@ impl SessionInner {
                                           exit_status);
                                     ClientConnectionStatus::DetachNone
                                 };
-                                client_connection_ack.send(ack)
+                                args.client_connection_ack.send(ack)
                                     .context("sending client connection ack")?;
 
                                 return Ok(());
@@ -315,19 +325,20 @@ impl SessionInner {
                             },
                         }
                     }
-                    recv(tty_size_change) -> new_size => {
+                    recv(args.tty_size_change) -> new_size => {
                         match new_size {
                             Ok(size) => {
                                 info!("resize size={:?}", size);
-                                output_spool.as_mut().map(|s| s.screen_mut()
-                                    .set_size(size.rows, std::u16::MAX));
+                                if let Some(s) = output_spool.as_mut() {
+                                    s.screen_mut().set_size(size.rows, std::u16::MAX);
+                                }
                                 resize_cmd = Some(ResizeCmd {
-                                    size: size,
+                                    size,
                                     // No delay needed for ordinary resizes, just
                                     // for reconnects.
                                     when: time::Instant::now(),
                                 });
-                                tty_size_change_ack.send(())
+                                args.tty_size_change_ack.send(())
                                     .context("sending size change ack")?;
                             }
                             Err(err) => {
@@ -364,8 +375,8 @@ impl SessionInner {
                 if do_reattach {
                     use config::SessionRestoreMode::*;
 
-                    info!("executing reattach protocol (mode={:?})", session_restore_mode);
-                    let restore_buf = match (output_spool.as_mut(), &session_restore_mode) {
+                    info!("executing reattach protocol (mode={:?})", args.session_restore_mode);
+                    let restore_buf = match (output_spool.as_mut(), &args.session_restore_mode) {
                         (Some(spool), Screen) => {
                             let (rows, cols) = spool.screen().size();
                             info!(
@@ -385,7 +396,7 @@ impl SessionInner {
                         (_, _) => vec![],
                     };
                     if let (true, ClientConnectionMsg::New(conn)) =
-                        (restore_buf.len() > 0, &client_conn)
+                        (!restore_buf.is_empty(), &client_conn)
                     {
                         trace!("restore chunk='{}'", String::from_utf8_lossy(&restore_buf[..]));
                         // send the restore buffer, broken up into chunks so that we don't make
@@ -435,8 +446,10 @@ impl SessionInner {
                 }
                 trace!("read pty master len={} '{}'", len, String::from_utf8_lossy(&buf[..len]));
 
-                if !matches!(session_restore_mode, config::SessionRestoreMode::Simple) {
-                    output_spool.as_mut().map(|s| s.process(&buf[..len]));
+                if !matches!(args.session_restore_mode, config::SessionRestoreMode::Simple) {
+                    if let Some(s) = output_spool.as_mut() {
+                        s.process(&buf[..len]);
+                    }
                 }
 
                 let mut reset_client_conn = false;
@@ -474,6 +487,7 @@ impl SessionInner {
         child_exit_notifier: Arc<ExitNotifier>,
     ) -> anyhow::Result<bool> {
         test_hooks::emit("daemon-bidi-stream-enter");
+        #[allow(clippy::let_unit_value)]
         let _bidi_stream_test_guard = test_hooks::scoped("daemon-bidi-stream-done");
 
         // we take the client stream so that it gets closed when this routine
@@ -644,7 +658,7 @@ impl SessionInner {
                     span!(Level::INFO, "client->shell", s = self.name, cid = conn_id).entered();
                 let mut bindings = bindings.context("compiling keybindings engine")?;
 
-                let mut master_writer = pty_master.clone();
+                let mut master_writer = *pty_master;
 
                 let mut snip_sections = vec![]; // (<len>, <end offset>)
                 let mut keep_sections = vec![]; // (<start offset>, <end offset>)
@@ -677,11 +691,12 @@ impl SessionInner {
                     // the data), but just doing it inline doesn't seem have have
                     // a major perf impact, and this way is simpler.
                     snip_sections.clear();
-                    for (i, byte) in buf[0..len].into_iter().enumerate() {
+                    for (i, byte) in buf[0..len].iter().enumerate() {
                         use keybindings::BindingResult::*;
                         match bindings.transition(*byte) {
                             NoMatch
-                                if partial_keybinding.len() > 0 && i < partial_keybinding.len() =>
+                                if !partial_keybinding.is_empty()
+                                    && i < partial_keybinding.len() =>
                             {
                                 // it turned out the partial keybinding match was not
                                 // a real match, so flush it to the output stream
@@ -727,7 +742,7 @@ impl SessionInner {
                             }
                         }
                     }
-                    if partial_keybinding.len() > 0 {
+                    if !partial_keybinding.is_empty() {
                         // we have a partial keybinding pending, so don't write
                         // it to the output stream immediately
                         let snip_chunk_len = if partial_keybinding.len() > len {
@@ -896,7 +911,7 @@ fn snip_buf(
     snip_sections: &[(usize, usize)],        // (<len>, <end offset>)
     keep_sections: &mut Vec<(usize, usize)>, // re-usable scratch
 ) -> usize {
-    if snip_sections.len() == 0 {
+    if snip_sections.is_empty() {
         return len;
     }
 

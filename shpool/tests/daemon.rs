@@ -50,7 +50,7 @@ fn start() -> anyhow::Result<()> {
         let mut stdout_str = String::from("");
         stdout.read_to_string(&mut stdout_str).context("slurping stdout")?;
 
-        if stdout_str != "" {
+        if !stdout_str.is_empty() {
             println!("{}", stdout_str);
             return Err(anyhow!("unexpected stdout output"));
         }
@@ -185,7 +185,7 @@ fn config() -> anyhow::Result<()> {
         let mut stdout_str = String::from("");
         stdout.read_to_string(&mut stdout_str).context("slurping stdout")?;
 
-        if stdout_str != "" {
+        if !stdout_str.is_empty() {
             println!("{}", stdout_str);
             return Err(anyhow!("unexpected stdout output"));
         }
@@ -233,7 +233,7 @@ fn hooks() -> anyhow::Result<()> {
 
         support::wait_until(|| {
             let hook_records = daemon_proc.hook_records.as_ref().unwrap().lock().unwrap();
-            Ok(hook_records.shell_disconnects.len() > 0)
+            Ok(!hook_records.shell_disconnects.is_empty())
         })?;
 
         let hook_records = daemon_proc.hook_records.as_ref().unwrap().lock().unwrap();

@@ -67,7 +67,7 @@ pub fn run(
                         .context("writing detach request header")?;
                     let detach_reply: protocol::DetachReply =
                         client.read_reply().context("reading reply")?;
-                    if detach_reply.not_found_sessions.len() > 0 {
+                    if !detach_reply.not_found_sessions.is_empty() {
                         warn!("could not find session '{}' to detach it", name);
                     }
 
@@ -107,7 +107,7 @@ fn do_attach(
     cmd: &Option<String>,
     socket: &PathBuf,
 ) -> anyhow::Result<()> {
-    let mut client = dial_client(&socket)?;
+    let mut client = dial_client(socket)?;
 
     let tty_size = match tty::Size::from_fd(0) {
         Ok(s) => s,
@@ -209,7 +209,7 @@ impl SignalHandler {
         use signal_hook::{consts::*, iterator::*};
 
         let sigs = vec![SIGWINCH];
-        let mut signals = Signals::new(&sigs).context("creating signal iterator")?;
+        let mut signals = Signals::new(sigs).context("creating signal iterator")?;
 
         thread::spawn(move || {
             for signal in &mut signals {

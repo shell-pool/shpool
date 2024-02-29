@@ -49,9 +49,7 @@ pub fn scoped(event: &str) -> ScopedEvent {
 }
 
 #[cfg(not(feature = "test_hooks"))]
-pub fn scoped(_event: &str) -> () {
-    ()
-}
+pub fn scoped(_event: &str) {}
 
 /// ScopedEvent emits an event when it goes out of scope
 pub struct ScopedEvent<'a> {

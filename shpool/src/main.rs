@@ -15,7 +15,6 @@
 /// aims to provide a simpler user experience. See [the
 /// README](https://github.com/shell-pool/shpool) for more
 /// info.
-
 use clap::Parser;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");

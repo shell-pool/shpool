@@ -44,11 +44,11 @@ where
 
     let reply: DetachReply = client.read_reply().context("reading reply")?;
 
-    if reply.not_found_sessions.len() > 0 {
+    if !reply.not_found_sessions.is_empty() {
         eprintln!("not found: {}", reply.not_found_sessions.join(" "));
         return Err(anyhow!("not found: {}", reply.not_found_sessions.join(" ")));
     }
-    if reply.not_attached_sessions.len() > 0 {
+    if !reply.not_attached_sessions.is_empty() {
         eprintln!("not attached: {}", reply.not_attached_sessions.join(" "));
         return Err(anyhow!("not attached: {}", reply.not_attached_sessions.join(" ")));
     }

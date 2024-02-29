@@ -104,7 +104,7 @@ impl Bindings {
         let mut chords = Trie::new();
         let mut sequences = Trie::new();
 
-        let mut chord_atom_counter = 0;
+        let mut chord_atom_counter: usize = 0;
         let mut chord_atom_tab = HashMap::new();
 
         let tokenizer = Lexer::new();
@@ -117,11 +117,11 @@ impl Bindings {
                 let code = chord.key_code()?;
 
                 let chord_atom = chord_atom_tab.entry(chord.clone()).or_insert_with(|| {
-                    let atom = ChordAtom(chord_atom_counter);
+                    let atom = ChordAtom(chord_atom_counter as u8);
                     chord_atom_counter += 1;
                     atom
                 });
-                if chord_atom_counter >= u8::MAX {
+                if chord_atom_counter >= u8::MAX as usize {
                     return Err(anyhow!(
                         "shpool only supports up to {} unique chords at a time",
                         u8::MAX
@@ -319,7 +319,7 @@ fn parse<T: IntoIterator<Item = Token>>(tokens: T) -> anyhow::Result<Sequence> {
         }
     }
 
-    if keys.len() > 0 {
+    if !keys.is_empty() {
         chords.push(Chord(keys));
     }
 
@@ -481,7 +481,7 @@ where
         }
     }
 
-    fn get<'trie>(&'trie self, cursor: TrieCursor) -> Option<&'trie V> {
+    fn get(&self, cursor: TrieCursor) -> Option<&V> {
         if let TrieCursor::Match { idx, .. } = cursor {
             self.nodes[idx].value.as_ref()
         } else {
@@ -532,7 +532,7 @@ impl TrieTab<u8> for Vec<Option<usize>> {
     }
 
     fn get(&self, index: u8) -> Option<&usize> {
-        (&self[index as usize]).as_ref()
+        self[index as usize].as_ref()
     }
 
     fn set(&mut self, index: u8, elem: usize) {
@@ -546,7 +546,7 @@ impl TrieTab<ChordAtom> for Vec<Option<usize>> {
     }
 
     fn get(&self, index: ChordAtom) -> Option<&usize> {
-        (&self[index.0 as usize]).as_ref()
+        self[index.0 as usize].as_ref()
     }
 
     fn set(&mut self, index: ChordAtom, elem: usize) {
@@ -622,24 +622,24 @@ mod test {
                 // the bindings mapping
                 vec![("a", Action::Detach)],
                 // the keypresses to scan over
-                vec!['a'].iter().map(|c| *c as u32 as u8).collect::<Vec<_>>(),
+                ['a'].iter().map(|c| *c as u32 as u8).collect::<Vec<_>>(),
                 BindingResult::Match(Action::Detach), // the final output from the engine
             ),
             (
                 // the bindings mapping
                 vec![("a", Action::Detach)],
                 // the keypresses to scan over
-                vec!['b', 'x', 'y', 'a'].iter().map(|c| *c as u32 as u8).collect::<Vec<_>>(),
+                ['b', 'x', 'y', 'a'].iter().map(|c| *c as u32 as u8).collect::<Vec<_>>(),
                 BindingResult::Match(Action::Detach), // the final output from the engine
             ),
             (
                 vec![("a", Action::Detach)],
-                vec!['b'].iter().map(|c| *c as u32 as u8).collect::<Vec<_>>(),
+                ['b'].iter().map(|c| *c as u32 as u8).collect::<Vec<_>>(),
                 BindingResult::NoMatch,
             ),
             (
                 vec![("a", Action::Detach)],
-                vec!['a', 'a', 'x', 'a', 'b'].iter().map(|c| *c as u32 as u8).collect::<Vec<_>>(),
+                ['a', 'a', 'x', 'a', 'b'].iter().map(|c| *c as u32 as u8).collect::<Vec<_>>(),
                 BindingResult::NoMatch,
             ),
             (vec![("Ctrl-a", Action::Detach)], vec![1], BindingResult::Match(Action::Detach)),
@@ -653,7 +653,7 @@ mod test {
             (vec![("Ctrl-Space Ctrl-d", Action::Detach)], vec![0, 4, 20], BindingResult::NoMatch),
             (
                 vec![("a b c", Action::Detach)],
-                vec!['a', 'b'].iter().map(|c| *c as u32 as u8).collect::<Vec<_>>(),
+                ['a', 'b'].iter().map(|c| *c as u32 as u8).collect::<Vec<_>>(),
                 BindingResult::Partial,
             ),
         ];
@@ -687,15 +687,13 @@ mod test {
             let seq = parse(tokens)?;
             let chord = seq.0[0].clone();
 
-            if errstr == "" {
+            if errstr.is_empty() {
                 chord.check_valid()?;
+            } else if let Err(e) = chord.check_valid() {
+                let got = format!("{:?}", e);
+                assert!(got.contains(errstr));
             } else {
-                if let Err(e) = chord.check_valid() {
-                    let got = format!("{:?}", e);
-                    assert!(got.contains(errstr));
-                } else {
-                    panic!("bad success, want err with: {}", errstr);
-                }
+                panic!("bad success, want err with: {}", errstr);
             }
         }
 
@@ -778,7 +776,7 @@ mod test {
                 let errstr = format!("{:?}", err);
                 assert!(errstr.contains(errsubstr));
             } else {
-                assert!(false, "expected an error")
+                panic!("expected an error")
             }
         }
 
