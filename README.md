@@ -21,6 +21,7 @@ sed -i "s|/usr|$HOME/.cargo|" .config/systemd/user/shpool.service
 curl -fLo "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/shpool.socket" --create-dirs https://raw.githubusercontent.com/shell-pool/shpool/master/systemd/shpool.socket
 systemctl --user enable shpool
 systemctl --user start shpool
+loginctl enable-linger
 ```
 
 ## Usage
