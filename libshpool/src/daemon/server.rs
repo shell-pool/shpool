@@ -249,10 +249,8 @@ impl Server {
 
                 shells.insert(header.name.clone(), Box::new(session));
                 // fallthrough to bidi streaming
-            } else {
-                if let Err(err) = self.hooks.on_reattach(&header.name) {
-                    warn!("reattach hook: {:?}", err);
-                }
+            } else if let Err(err) = self.hooks.on_reattach(&header.name) {
+                warn!("reattach hook: {:?}", err);
             }
 
             // return a reference to the inner session so that
@@ -316,10 +314,8 @@ impl Server {
                         .map_err(|e| anyhow!("joining reader after child exit: {:?}", e))?
                         .context("within reader thread after child exit")?;
                 }
-            } else {
-                if let Err(err) = self.hooks.on_client_disconnect(&header.name) {
-                    warn!("client_disconnect hook: {:?}", err);
-                }
+            } else if let Err(err) = self.hooks.on_client_disconnect(&header.name) {
+                warn!("client_disconnect hook: {:?}", err);
             }
 
             info!("finished attach streaming section");
@@ -393,7 +389,7 @@ impl Server {
                         not_attached_sessions.push(session);
                     }
                 } else {
-                    not_found_sessions.push(String::from(session));
+                    not_found_sessions.push(session);
                 }
             }
         }
@@ -433,7 +429,7 @@ impl Server {
             for session in to_remove.iter() {
                 shells.remove(session);
             }
-            if to_remove.len() > 0 {
+            if !to_remove.is_empty() {
                 test_hooks::emit("daemon-handle-kill-removed-shells");
             }
         }
@@ -541,9 +537,9 @@ impl Server {
         // stdout/stderr/stdin. The pty crate automatically `dup2`s the file
         // descriptors for us.
         let mut cmd = if let Some(cmd_str) = &header.cmd {
-            let cmd_parts = shell_words::split(&cmd_str).context("parsing cmd")?;
+            let cmd_parts = shell_words::split(cmd_str).context("parsing cmd")?;
             info!("running cmd: {:?}", cmd_parts);
-            if cmd_parts.len() < 1 {
+            if cmd_parts.is_empty() {
                 return Err(anyhow!("no command to run"));
             }
             let mut cmd = process::Command::new(&cmd_parts[0]);
@@ -632,7 +628,7 @@ impl Server {
         // inject the prompt prefix, if any
         let prompt_prefix = self.config.prompt_prefix.clone().unwrap_or(String::from(""));
         if let Some(shell_basename) = shell_basename {
-            if prompt_prefix.len() > 0 {
+            if !prompt_prefix.is_empty() {
                 if let Err(err) =
                     prompt::inject_prefix(&mut fork, shell_basename, &prompt_prefix, &header.name)
                 {
@@ -661,25 +657,23 @@ impl Server {
             reader_join_h: None,
         };
         let child_pid = session_inner.pty_master.child_pid().ok_or(anyhow!("no child pid"))?;
-        session_inner.reader_join_h = Some(
-            session_inner.spawn_reader(
-                conn_id,
-                header.local_tty_size.clone(),
-                match (self.config.output_spool_lines, &self.config.session_restore_mode) {
-                    (Some(l), _) => l,
-                    (None, Some(config::SessionRestoreMode::Lines(l))) => *l as usize,
-                    (None, _) => DEFAULT_OUTPUT_SPOOL_LINES,
-                },
-                self.config
-                    .session_restore_mode
-                    .clone()
-                    .unwrap_or(config::SessionRestoreMode::default()),
-                client_connection_rx,
-                client_connection_ack_tx,
-                tty_size_change_rx,
-                tty_size_change_ack_tx,
-            )?,
-        );
+        session_inner.reader_join_h = Some(session_inner.spawn_reader(shell::ReaderArgs {
+            conn_id,
+            tty_size: header.local_tty_size.clone(),
+            scrollback_lines: match (
+                self.config.output_spool_lines,
+                &self.config.session_restore_mode,
+            ) {
+                (Some(l), _) => l,
+                (None, Some(config::SessionRestoreMode::Lines(l))) => *l as usize,
+                (None, _) => DEFAULT_OUTPUT_SPOOL_LINES,
+            },
+            session_restore_mode: self.config.session_restore_mode.clone().unwrap_or_default(),
+            client_connection: client_connection_rx,
+            client_connection_ack: client_connection_ack_tx,
+            tty_size_change: tty_size_change_rx,
+            tty_size_change_ack: tty_size_change_ack_tx,
+        })?);
 
         if let Some(ttl_secs) = header.ttl_secs {
             info!("registering session with ttl with the reaper");
@@ -754,7 +748,7 @@ impl Server {
                 env
             };
 
-            if env.len() > 0 {
+            if !env.is_empty() {
                 cmd.envs(env);
             }
         }

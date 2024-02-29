@@ -1,0 +1,18 @@
+name: nightly
+on:
+  schedule:
+    - cron: '04 05 * * *'
+
+jobs:
+  deny:
+    name: cargo deny --all-features check
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+      - uses: moonrepo/setup-rust@b8edcc56aab474d90c7cf0bb8beeaf8334c15e9f
+        with:
+          bins: cargo-deny
+      - run: cargo deny --all-features check
+
+  postsubmit:
+    uses: ./.github/workflows/presubmit.yml

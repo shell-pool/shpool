@@ -40,7 +40,7 @@ impl Events {
         SI: IntoIterator<Item = S>,
     {
         let events: Vec<String> = events.into_iter().map(|s| s.into()).collect();
-        assert!(events.len() > 0);
+        assert!(!events.is_empty());
 
         let (tx, rx) = crossbeam_channel::bounded(events.len());
         let waiter = EventWaiter { matched: rx };
@@ -109,18 +109,18 @@ impl EventWaiter {
         eprintln!("waiting for event '{}'", event);
         match self.matched.recv()? {
             WaiterEvent::Event(e) => {
-                return if e == event {
+                if e == event {
                     Ok(())
                 } else {
                     Err(anyhow!("Got '{}' event, want '{}'", e, event))
-                };
+                }
             }
             WaiterEvent::Done((e, _)) => {
-                return if e == event {
+                if e == event {
                     Ok(())
                 } else {
                     Err(anyhow!("Got '{}' event, want '{}'", e, event))
-                };
+                }
             }
         }
     }
@@ -132,11 +132,11 @@ impl EventWaiter {
                 Err(anyhow!("Got non-fianl '{}' event, want final '{}'", e, event))
             }
             WaiterEvent::Done((e, lines)) => {
-                return if e == event {
+                if e == event {
                     Ok(Events { lines })
                 } else {
                     Err(anyhow!("Got '{}' event, want '{}'", e, event))
-                };
+                }
             }
         }
     }

@@ -20,7 +20,7 @@ use anyhow::{anyhow, bail, Context};
 use std::time;
 
 pub fn parse(src: &str) -> anyhow::Result<time::Duration> {
-    if src.contains(":") {
+    if src.contains(':') {
         parse_colon_duration(src)
     } else if src.chars().last().map(|c| c.is_alphabetic()).unwrap_or(false) {
         parse_suffix_duration(src)
@@ -31,9 +31,9 @@ pub fn parse(src: &str) -> anyhow::Result<time::Duration> {
 
 /// Parses dd:hh:mm:ss or any suffix
 fn parse_colon_duration(src: &str) -> anyhow::Result<time::Duration> {
-    let mut parts = src.split(":").collect::<Vec<_>>();
+    let mut parts = src.split(':').collect::<Vec<_>>();
     parts.reverse();
-    if parts.len() == 0 {
+    if parts.is_empty() {
         bail!("'{}' must have at least one part", src);
     }
     let mut secs = parts[0].parse::<u64>().context("parsing seconds part")?;
@@ -117,7 +117,7 @@ mod test {
 
         for (src, err_substring) in cases.into_iter() {
             if let Err(e) = parse(src) {
-                eprintln!("ERR: {}", e.to_string());
+                eprintln!("ERR: {}", e);
                 eprintln!("err_substring: {}", err_substring);
                 assert!(e.to_string().contains(err_substring));
             } else {
