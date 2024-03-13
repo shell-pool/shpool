@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ffi::CStr;
+use std::{ffi::CStr, io, ptr};
 
 use anyhow::anyhow;
 
@@ -24,26 +24,47 @@ pub struct Info {
 }
 
 pub fn info() -> anyhow::Result<Info> {
-    // Safety: we immediately copy the data into an owned buffer and don't
-    //         use it subsequently.
+    let mut passwd_str_buf: [libc::c_char; 1024 * 4] = [0; 1024 * 4];
+    let mut passwd = libc::passwd {
+        pw_name: ptr::null_mut(),
+        pw_passwd: ptr::null_mut(),
+        pw_uid: 0,
+        pw_gid: 0,
+        pw_gecos: ptr::null_mut(),
+        pw_dir: ptr::null_mut(),
+        pw_shell: ptr::null_mut(),
+    };
+    let mut passwd_res_ptr: *mut libc::passwd = ptr::null_mut();
     unsafe {
-        *libc::__errno_location() = 0;
-        let passwd = libc::getpwuid(libc::getuid());
-        let errno = nix::errno::errno();
-        if errno != 0 {
-            return Err(anyhow!("error getting passwd: {:?}", nix::errno::from_i32(errno)));
+        // Safety: pretty much pure ffi, passwd and passwd_str_buf correctly
+        //         have memory backing them.
+        let errno = libc::getpwuid_r(
+            libc::getuid(),
+            &mut passwd,
+            passwd_str_buf.as_mut_ptr(),
+            passwd_str_buf.len(),
+            &mut passwd_res_ptr as *mut *mut libc::passwd,
+        );
+        if passwd_res_ptr.is_null() {
+            if errno == 0 {
+                return Err(anyhow!("could not find current user, should be impossible"));
+            } else {
+                return Err(anyhow!(
+                    "error resolving user info: {}",
+                    io::Error::from_raw_os_error(errno)
+                ));
+            }
         }
 
+        // Safety: these pointers are all cstrings
         Ok(Info {
             default_shell: String::from(String::from_utf8_lossy(
-                CStr::from_ptr((*passwd).pw_shell).to_bytes(),
+                CStr::from_ptr(passwd.pw_shell).to_bytes(),
             )),
             home_dir: String::from(String::from_utf8_lossy(
-                CStr::from_ptr((*passwd).pw_dir).to_bytes(),
+                CStr::from_ptr(passwd.pw_dir).to_bytes(),
             )),
-            user: String::from(String::from_utf8_lossy(
-                CStr::from_ptr((*passwd).pw_name).to_bytes(),
-            )),
+            user: String::from(String::from_utf8_lossy(CStr::from_ptr(passwd.pw_name).to_bytes())),
         })
     }
 }
