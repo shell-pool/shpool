@@ -231,7 +231,7 @@ number. To do so, you can add a block of custom ssh config
 in the `~/.ssh/config` of your local machine like
 
 ```
-Host = remote
+Host = by-tty
     User remoteuser
     Hostname remote.host.example.com
 
