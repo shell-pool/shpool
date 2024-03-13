@@ -7,9 +7,15 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
-      - uses: moonrepo/setup-rust@b8edcc56aab474d90c7cf0bb8beeaf8334c15e9f
+      - uses: moonrepo/setup-rust@v1
+        with:
+          channel: '1.74.0'
       - run: sudo apt-get install zsh fish
       - run: cargo test --all-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: /tmp/shpool-test*/*.log
 
   # miri does not handle all the IO we do, disabled for now.
   # 
@@ -30,7 +36,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
-      - uses: moonrepo/setup-rust@b8edcc56aab474d90c7cf0bb8beeaf8334c15e9f
+      - uses: moonrepo/setup-rust@v1
         with:
           components: rustfmt
           channel: nightly
@@ -41,7 +47,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
-      - uses: moonrepo/setup-rust@b8edcc56aab474d90c7cf0bb8beeaf8334c15e9f
+      - uses: moonrepo/setup-rust@v1
         with:
           components: clippy
           bins: cargo-cranky@0.3.0
@@ -54,7 +60,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
-      - uses: moonrepo/setup-rust@b8edcc56aab474d90c7cf0bb8beeaf8334c15e9f
+      - uses: moonrepo/setup-rust@v1
         with:
+          channel: '1.74.0'
           bins: cargo-deny
       - run: cargo deny --all-features check licenses

@@ -13,6 +13,7 @@ disconnects.
 '''
 license = "Apache-2.0"
 keywords = ["tmux", "tty", "terminal", "shell", "persistence"]
+rust-version = "1.74"
 
 [features]
 test_hooks = [] # for internal testing only, don't enable this feature
