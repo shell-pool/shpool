@@ -9,8 +9,9 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
-      - uses: moonrepo/setup-rust@b8edcc56aab474d90c7cf0bb8beeaf8334c15e9f
+      - uses: moonrepo/setup-rust@v1
         with:
+          channel: '1.74.0'
           bins: cargo-deny
       - run: cargo deny --all-features check
 

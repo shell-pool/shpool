@@ -10,7 +10,6 @@ use std::{
 };
 
 use anyhow::{anyhow, Context};
-use rand::Rng;
 use tempfile::TempDir;
 
 use super::{attach, events::Events, shpool_bin, testdata_file, wait_until};
@@ -95,19 +94,7 @@ impl Proc {
             .rand_bytes(20)
             .tempdir()
             .context("creating tmp dir")?;
-        let tmp_dir = if let Ok(base) = std::env::var("KOKORO_ARTIFACTS_DIR") {
-            let mut dir = PathBuf::from(base);
-            let rand_blob: String = rand::thread_rng()
-                .sample_iter(&rand::distributions::Alphanumeric)
-                .take(20)
-                .map(char::from)
-                .collect();
-            dir.push(format!("shpool-test{}", rand_blob));
-            std::fs::create_dir(&dir)?;
-            dir
-        } else {
-            local_tmp_dir.path().to_path_buf()
-        };
+        let tmp_dir = local_tmp_dir.path().to_path_buf();
 
         let socket_path = tmp_dir.join("shpool.socket");
         let test_hook_socket_path = tmp_dir.join("shpool-daemon-test-hook.socket");
@@ -164,19 +151,7 @@ impl Proc {
             .rand_bytes(20)
             .tempdir()
             .context("creating tmp dir")?;
-        let tmp_dir = if let Ok(base) = std::env::var("KOKORO_ARTIFACTS_DIR") {
-            let mut dir = PathBuf::from(base);
-            let rand_blob: String = rand::thread_rng()
-                .sample_iter(&rand::distributions::Alphanumeric)
-                .take(20)
-                .map(char::from)
-                .collect();
-            dir.push(format!("shpool-test{}", rand_blob));
-            std::fs::create_dir(&dir)?;
-            dir
-        } else {
-            local_tmp_dir.path().to_path_buf()
-        };
+        let tmp_dir = local_tmp_dir.path().to_path_buf();
 
         let socket_path = tmp_dir.join("shpool.socket");
 
