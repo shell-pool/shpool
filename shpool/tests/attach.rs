@@ -1,7 +1,8 @@
 use std::{
-    fs,
+    env, fs,
     io::BufRead,
-    io::Read,
+    io::{Read, Write},
+    path::PathBuf,
     process::{Command, Stdio},
     thread, time,
 };
@@ -32,7 +33,7 @@ fn happy_path() -> anyhow::Result<()> {
         daemon_proc.await_event("daemon-about-to-listen")?;
 
         attach_proc.run_cmd("echo hi")?;
-        line_matcher.match_re("hi$")?;
+        line_matcher.scan_until_re("hi$")?;
 
         attach_proc.run_cmd("echo ping")?;
         line_matcher.match_re("ping$")?;
@@ -105,7 +106,7 @@ fn forward_env() -> anyhow::Result<()> {
         let mut line_matcher = attach_proc.line_matcher()?;
 
         attach_proc.run_cmd(r#"echo "$FOO:$BAR:$BAZ" "#)?;
-        line_matcher.match_re("foo:bar:$")?;
+        line_matcher.scan_until_re("foo:bar:$")?;
 
         Ok(())
     })
@@ -139,7 +140,8 @@ fn symlink_ssh_auth_sock() -> anyhow::Result<()> {
 
         waiter.wait_event("daemon-wrote-s2c-chunk")?; // resize prompt redraw
         attach_proc.run_cmd("ls -l $SSH_AUTH_SOCK")?;
-        line_matcher.match_re(r#".*sh1/ssh-auth-sock.socket ->.*ssh-auth-sock-target.fake$"#)?;
+        line_matcher
+            .scan_until_re(r#".*sh1/ssh-auth-sock.socket ->.*ssh-auth-sock-target.fake$"#)?;
 
         Ok(())
     })
@@ -163,7 +165,7 @@ fn missing_ssh_auth_sock() -> anyhow::Result<()> {
 
         waiter.wait_event("daemon-wrote-s2c-chunk")?; // resize prompt re-draw
         attach_proc.run_cmd("ls -l $SSH_AUTH_SOCK")?;
-        line_matcher.match_re(r#".*No such file or directory$"#)?;
+        line_matcher.scan_until_re(r#".*No such file or directory$"#)?;
 
         Ok(())
     })
@@ -220,7 +222,7 @@ fn config_disable_symlink_ssh_auth_sock() -> anyhow::Result<()> {
 
         waiter.wait_event("daemon-wrote-s2c-chunk")?; // resize prompt re-draw
         attach_proc.run_cmd("ls -l $SSH_AUTH_SOCK")?;
-        line_matcher.match_re(r#".*No such file or directory$"#)?;
+        line_matcher.scan_until_re(r#".*No such file or directory$"#)?;
 
         Ok(())
     })
@@ -244,7 +246,7 @@ fn bounce() -> anyhow::Result<()> {
 
             attach_proc.run_cmd("export MYVAR=1")?;
             attach_proc.run_cmd("echo $MYVAR")?;
-            line_matcher.match_re("1$")?;
+            line_matcher.scan_until_re("1$")?;
         } // falling out of scope kills attach_proc
 
         // wait until the daemon has noticed that the connection
@@ -281,10 +283,10 @@ fn two_at_once() -> anyhow::Result<()> {
         let mut line_matcher2 = attach_proc2.line_matcher()?;
 
         attach_proc1.run_cmd("echo proc1").context("proc1 echo")?;
-        line_matcher1.match_re("proc1$").context("proc1 match")?;
+        line_matcher1.scan_until_re("proc1$").context("proc1 match")?;
 
         attach_proc2.run_cmd("echo proc2").context("proc2 echo")?;
-        line_matcher2.match_re("proc2$").context("proc2 match")?;
+        line_matcher2.scan_until_re("proc2$").context("proc2 match")?;
 
         Ok(())
     })
@@ -308,7 +310,7 @@ fn explicit_exit() -> anyhow::Result<()> {
 
             attach_proc.run_cmd("export MYVAR=first")?;
             attach_proc.run_cmd("echo $MYVAR")?;
-            line_matcher.match_re("first$")?;
+            line_matcher.scan_until_re("first$")?;
 
             attach_proc.run_cmd("exit")?;
 
@@ -324,7 +326,7 @@ fn explicit_exit() -> anyhow::Result<()> {
             let mut line_matcher = attach_proc.line_matcher()?;
 
             attach_proc.run_cmd("echo ${MYVAR:-second}")?;
-            line_matcher.match_re("second$")?;
+            line_matcher.scan_until_re("second$")?;
         }
 
         Ok(())
@@ -426,7 +428,7 @@ fn force_attach() -> anyhow::Result<()> {
         tty1.run_cmd("echo $MYVAR")?;
         // read some output to make sure the var is set by the time
         // we force-attach
-        line_matcher1.match_re("set_from_tty1$")?;
+        line_matcher1.scan_until_re("set_from_tty1$")?;
 
         let mut tty2 = daemon_proc
             .attach("sh1", AttachArgs { force: true, ..Default::default() })
@@ -450,12 +452,12 @@ fn busy() -> anyhow::Result<()> {
             daemon_proc.attach("sh1", Default::default()).context("attaching from tty1")?;
         let mut line_matcher1 = tty1.line_matcher()?;
         tty1.run_cmd("echo foo")?; // make sure the shell is up and running
-        line_matcher1.match_re("foo$")?;
+        line_matcher1.scan_until_re("foo$")?;
 
         let mut tty2 =
             daemon_proc.attach("sh1", Default::default()).context("attaching from tty2")?;
         let mut line_matcher2 = tty2.stderr_line_matcher()?;
-        line_matcher2.match_re("already has a terminal attached$")?;
+        line_matcher2.scan_until_re("already has a terminal attached$")?;
 
         Ok(())
     })
@@ -473,7 +475,7 @@ fn daemon_hangup() -> anyhow::Result<()> {
         // make sure the shell is up and running
         let mut line_matcher = attach_proc.line_matcher()?;
         attach_proc.run_cmd("echo foo")?;
-        line_matcher.match_re("foo$")?;
+        line_matcher.scan_until_re("foo$")?;
 
         daemon_proc.proc_kill()?;
 
@@ -498,7 +500,7 @@ fn default_keybinding_detach() -> anyhow::Result<()> {
 
         a1.run_cmd("export MYVAR=someval")?;
         a1.run_cmd("echo $MYVAR")?;
-        lm1.match_re("someval$")?;
+        lm1.scan_until_re("someval$")?;
 
         a1.run_raw_cmd(vec![0, 17])?; // Ctrl-Space Ctrl-q
         a1.proc.wait()?;
@@ -510,7 +512,7 @@ fn default_keybinding_detach() -> anyhow::Result<()> {
         let mut lm2 = a2.line_matcher()?;
 
         a2.run_cmd("echo $MYVAR")?;
-        lm2.match_re("someval$")?;
+        lm2.scan_until_re("someval$")?;
 
         Ok(())
     })
@@ -532,7 +534,7 @@ fn keybinding_input_shear() -> anyhow::Result<()> {
 
         a1.run_cmd("export MYVAR=someval")?;
         a1.run_cmd("echo $MYVAR")?;
-        lm1.match_re("someval$")?;
+        lm1.scan_until_re("someval$")?;
 
         a1.run_raw(vec![0])?; // Ctrl-Space
         thread::sleep(time::Duration::from_millis(100));
@@ -546,7 +548,7 @@ fn keybinding_input_shear() -> anyhow::Result<()> {
         let mut lm2 = a2.line_matcher()?;
 
         a2.run_cmd("echo $MYVAR")?;
-        lm2.match_re("someval$")?;
+        lm2.scan_until_re("someval$")?;
 
         Ok(())
     })
@@ -564,7 +566,7 @@ fn keybinding_strip_keys() -> anyhow::Result<()> {
 
         // the keybinding is 5 'a' chars in a row, so they should get stripped out
         a1.run_cmd("echo baaaaad")?;
-        lm1.match_re("bd$")?;
+        lm1.scan_until_re("bd$")?;
 
         Ok(())
     })
@@ -586,7 +588,7 @@ fn keybinding_strip_keys_split() -> anyhow::Result<()> {
         a1.run_raw("aa".bytes().collect())?;
         thread::sleep(time::Duration::from_millis(50));
         a1.run_raw("aad\n".bytes().collect())?;
-        lm1.match_re("bd$")?;
+        lm1.scan_until_re("bd$")?;
 
         Ok(())
     })
@@ -604,7 +606,7 @@ fn keybinding_partial_match_nostrip() -> anyhow::Result<()> {
 
         // the keybinding is 5 'a' chars in a row, this has only 3
         a1.run_cmd("echo baaad")?;
-        lm1.match_re("baaad$")?;
+        lm1.scan_until_re("baaad$")?;
 
         Ok(())
     })
@@ -626,7 +628,7 @@ fn keybinding_partial_match_nostrip_split() -> anyhow::Result<()> {
         a1.run_raw("a".bytes().collect())?;
         thread::sleep(time::Duration::from_millis(50));
         a1.run_raw("ad\n".bytes().collect())?;
-        lm1.match_re("baaad$")?;
+        lm1.scan_until_re("baaad$")?;
 
         Ok(())
     })
@@ -646,7 +648,7 @@ fn custom_keybinding_detach() -> anyhow::Result<()> {
 
         a1.run_cmd("export MYVAR=someval")?;
         a1.run_cmd("echo $MYVAR")?;
-        lm1.match_re("someval$")?;
+        lm1.scan_until_re("someval$")?;
 
         a1.run_raw_cmd(vec![22, 23, 7])?; // Ctrl-v Ctrl-w Ctrl-g
         a1.proc.wait()?;
@@ -686,7 +688,7 @@ fn injects_term_even_with_env_config() -> anyhow::Result<()> {
 
         waiter.wait_event("daemon-wrote-s2c-chunk")?; // resize prompt redraw
         attach_proc.run_cmd("echo $SOME_CUSTOM_ENV_VAR")?;
-        line_matcher.match_re("customvalue$")?;
+        line_matcher.scan_until_re("customvalue$")?;
 
         attach_proc.run_cmd("echo $TERM")?;
         line_matcher.match_re("dumb$")?;
@@ -716,7 +718,7 @@ fn injects_local_env_vars() -> anyhow::Result<()> {
         let mut line_matcher = attach_proc.line_matcher()?;
 
         attach_proc.run_cmd("echo $DISPLAY")?;
-        line_matcher.match_re(":0$")?;
+        line_matcher.scan_until_re(":0$")?;
 
         attach_proc.run_cmd("echo $LANG")?;
         line_matcher.match_re("fakelang$")?;
@@ -737,7 +739,7 @@ fn has_right_default_path() -> anyhow::Result<()> {
         let mut line_matcher = attach_proc.line_matcher()?;
 
         attach_proc.run_cmd("echo $PATH")?;
-        line_matcher.match_re("/usr/bin:/bin:/usr/sbin:/sbin$")?;
+        line_matcher.scan_until_re("/usr/bin:/bin:/usr/sbin:/sbin$")?;
 
         Ok(())
     })
@@ -757,7 +759,7 @@ fn screen_restore() -> anyhow::Result<()> {
             let mut line_matcher = attach_proc.line_matcher()?;
 
             attach_proc.run_cmd("echo foo")?;
-            line_matcher.match_re("foo$")?;
+            line_matcher.scan_until_re("foo$")?;
         }
 
         // wait until the daemon has noticed that the connection
@@ -771,7 +773,7 @@ fn screen_restore() -> anyhow::Result<()> {
 
             // the re-attach should redraw the screen for us, so we should
             // get a line with "foo" as part of the re-drawn screen.
-            line_matcher.match_re("foo$")?;
+            line_matcher.scan_until_re("foo$")?;
         }
 
         Ok(())
@@ -792,7 +794,7 @@ fn screen_wide_restore() -> anyhow::Result<()> {
             let mut line_matcher = attach_proc.line_matcher()?;
 
             attach_proc.run_cmd("echo ooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooy")?;
-            line_matcher.match_re("ooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooy$")?;
+            line_matcher.scan_until_re("ooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooy$")?;
         }
 
         // wait until the daemon has noticed that the connection
@@ -806,7 +808,7 @@ fn screen_wide_restore() -> anyhow::Result<()> {
 
             // the re-attach should redraw the screen for us, so we should
             // get a line with the full echo result as part of the re-drawn screen.
-            line_matcher.match_re("ooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooy$")?;
+            line_matcher.scan_until_re("ooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooy$")?;
         }
 
         Ok(())
@@ -827,7 +829,8 @@ fn lines_restore() -> anyhow::Result<()> {
             let mut line_matcher = attach_proc.line_matcher()?;
 
             attach_proc.run_cmd("echo foo")?;
-            line_matcher.match_re("foo$")?;
+            attach_proc.run_cmd("echo")?;
+            line_matcher.scan_until_re("foo$")?;
         }
 
         // wait until the daemon has noticed that the connection
@@ -841,7 +844,7 @@ fn lines_restore() -> anyhow::Result<()> {
 
             // the re-attach should redraw the last 2 lines for us, so we should
             // get a line with "foo" as part of the re-drawn screen.
-            line_matcher.match_re("foo$")?;
+            line_matcher.scan_until_re("foo$")?;
         }
 
         Ok(())
@@ -871,7 +874,7 @@ fn lines_big_chunk_restore() -> anyhow::Result<()> {
             // for a single chunk
             let blob = format!("echo {}", (0..max_chunk_size).map(|_| "x").collect::<String>());
             attach_proc.run_cmd(blob.as_str())?;
-            line_matcher.match_re("xx$")?;
+            line_matcher.scan_until_re("xx$")?;
 
             attach_proc.run_cmd("echo food")?;
             line_matcher.match_re("food$")?;
@@ -939,7 +942,7 @@ fn ttl_hangup() -> anyhow::Result<()> {
         // ensure the shell is up and running
         let mut line_matcher = attach_proc.line_matcher()?;
         attach_proc.run_cmd("echo hi")?;
-        line_matcher.match_re("hi$")?;
+        line_matcher.scan_until_re("hi$")?;
 
         // sleep long enough for the reaper to clobber the thread
         thread::sleep(time::Duration::from_millis(1200));
@@ -967,7 +970,7 @@ fn ttl_no_hangup_yet() -> anyhow::Result<()> {
         // ensure the shell is up and running
         let mut line_matcher = attach_proc.line_matcher()?;
         attach_proc.run_cmd("echo hi")?;
-        line_matcher.match_re("hi$")?;
+        line_matcher.scan_until_re("hi$")?;
 
         let listout = daemon_proc.list()?;
         assert!(String::from_utf8_lossy(listout.stdout.as_slice()).contains("sh1"));
@@ -997,7 +1000,7 @@ fn prompt_prefix_bash() -> anyhow::Result<()> {
             .arg("attach")
             .arg("sh1")
             .spawn()
-            .context("spawning daemon process")?;
+            .context("spawning attach process")?;
 
         // The attach shell should be spawned and have read the
         // initial prompt after half a second.
@@ -1037,7 +1040,7 @@ fn prompt_prefix_zsh() -> anyhow::Result<()> {
             .arg("attach")
             .arg("sh1")
             .spawn()
-            .context("spawning daemon process")?;
+            .context("spawning attach process")?;
 
         // The attach shell should be spawned and have read the
         // initial prompt after half a second.
@@ -1077,7 +1080,7 @@ fn prompt_prefix_fish() -> anyhow::Result<()> {
             .arg("attach")
             .arg("sh1")
             .spawn()
-            .context("spawning daemon process")?;
+            .context("spawning attach process")?;
 
         // The attach shell should be spawned and have read the
         // initial prompt after half a second.
@@ -1093,6 +1096,73 @@ fn prompt_prefix_fish() -> anyhow::Result<()> {
         let mut stdout_str = String::from("");
         stdout.read_to_string(&mut stdout_str).context("slurping stdout")?;
         let stdout_re = Regex::new(".*session_name=sh1.*")?;
+        assert!(stdout_re.is_match(&stdout_str));
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
+fn motd_dump() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        // set up the config
+        let tmp_dir = tempfile::TempDir::with_prefix("shpool-test-config")?;
+        let tmp_dir_path = if env::var("SHPOOL_LEAVE_TEST_LOGS").is_ok() {
+            // leave the tmp files around for later inspection if we have been asked
+            // to leave the logs in place.
+            tmp_dir.into_path()
+        } else {
+            PathBuf::from(tmp_dir.path())
+        };
+        eprintln!("building config in {:?}", tmp_dir_path);
+        let motd_file = tmp_dir_path.join("motd.txt");
+        {
+            let mut f = fs::File::create(&motd_file)?;
+            f.write_all("MOTD_MSG\n".as_bytes())?;
+        }
+        let config_tmpl = fs::read_to_string(support::testdata_file("motd_dump.toml.tmpl"))?;
+        let config_contents = config_tmpl.replace("TMP_MOTD_MSG_FILE", motd_file.to_str().unwrap());
+        let config_file = tmp_dir_path.join("motd_dump.toml");
+        {
+            let mut f = fs::File::create(&config_file)?;
+            f.write_all(config_contents.as_bytes())?;
+        }
+
+        // spawn a daemon based on our custom config
+        let daemon_proc =
+            support::daemon::Proc::new(&config_file, true).context("starting daemon proc")?;
+
+        // We need to manually spawn our attach proc because
+        // the motd gets printed immediately, so we can't always
+        // attach a line matcher in time.
+        let mut child = Command::new(support::shpool_bin()?)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .arg("--socket")
+            .arg(&daemon_proc.socket_path)
+            .arg("--config-file")
+            .arg(config_file)
+            .arg("attach")
+            .arg("sh1")
+            .spawn()
+            .context("spawning attach process")?;
+
+        // The attach shell should be spawned and have read the
+        // initial prompt after half a second.
+        std::thread::sleep(time::Duration::from_millis(500));
+        child.kill().context("killing child")?;
+
+        let mut stderr = child.stderr.take().context("missing stderr")?;
+        let mut stderr_str = String::from("");
+        stderr.read_to_string(&mut stderr_str).context("slurping stderr")?;
+        assert!(stderr_str.is_empty());
+
+        let mut stdout = child.stdout.take().context("missing stdout")?;
+        let mut stdout_str = String::from("");
+        stdout.read_to_string(&mut stdout_str).context("slurping stdout")?;
+        let stdout_re = Regex::new(".*MOTD_MSG.*")?;
+        // eprintln!("stdout_str='{}'", stdout_str);
         assert!(stdout_re.is_match(&stdout_str));
 
         Ok(())

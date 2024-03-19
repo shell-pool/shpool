@@ -29,9 +29,10 @@ pub fn inject_prefix(
     shell: &str,
     prompt_prefix: &str,
     session_name: &str,
+    needs_default_term: bool,
 ) -> anyhow::Result<()> {
     let prompt_prefix = prompt_prefix.replace("$SHPOOL_SESSION_NAME", session_name);
-    let script = if shell.ends_with("bash") {
+    let mut script = if shell.ends_with("bash") {
         format!(
             r#"
             if [[ -z "${{PROMPT_COMMAND+x}}" ]]; then
@@ -46,7 +47,6 @@ pub fn inject_prefix(
                }}
                PROMPT_COMMAND=__shpool__prompt_command
             fi
-            clear
 "#
         )
     } else if shell.ends_with("zsh") {
@@ -62,7 +62,6 @@ pub fn inject_prefix(
                PROMPT="{prompt_prefix}${{PROMPT}}"
             }}
             precmd_functions+=(__shpool__prompt_command)
-            clear
 "#
         )
     } else if shell.ends_with("fish") {
@@ -70,12 +69,17 @@ pub fn inject_prefix(
             r#"
             functions --copy fish_prompt shpool__old_prompt
             function fish_prompt; echo -n "{prompt_prefix}"; shpool__old_prompt; end
-            clear
 "#
         )
     } else {
         return Err(anyhow!("don't know how to inject a prefix for shell '{}'", shell));
     };
+
+    if needs_default_term {
+        script.push_str("\nTERM=xterm clear\n");
+    } else {
+        script.push_str("\nclear\n");
+    }
 
     let mut pty_master = pty_master.is_parent().context("expected parent")?;
     pty_master.write_all(script.as_bytes()).context("running prefix script")?;

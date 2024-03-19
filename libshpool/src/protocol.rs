@@ -218,7 +218,7 @@ impl fmt::Display for SessionStatus {
 }
 
 /// AttachStatus indicates what happened during an attach attempt.
-#[derive(PartialEq, Eq, Serialize, Deserialize, Debug)]
+#[derive(PartialEq, Eq, Serialize, Deserialize, Debug, Clone)]
 pub enum AttachStatus {
     /// Attached indicates that there was an existing shell session with
     /// the given name, and `shpool attach` successfully connected to it.
