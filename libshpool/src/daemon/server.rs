@@ -14,7 +14,9 @@
 
 use std::{
     collections::HashMap,
-    env, fs, io, net,
+    env, fs, io,
+    io::Write,
+    net,
     ops::Add,
     os,
     os::unix::{
@@ -36,7 +38,7 @@ use tracing::{error, info, instrument, span, trace, warn, Level};
 
 use super::{
     super::{config, consts, protocol, test_hooks, tty, user},
-    etc_environment, hooks, prompt, shell, ttl_reaper,
+    etc_environment, hooks, prompt, shell, show_motd, ttl_reaper,
 };
 use crate::daemon::exit_notify::ExitNotifier;
 
@@ -56,6 +58,7 @@ pub struct Server {
     runtime_dir: PathBuf,
     register_new_reapable_session: crossbeam_channel::Sender<(String, Instant)>,
     hooks: Box<dyn hooks::Hooks + Send + Sync>,
+    motd_shower: Arc<show_motd::DailyMessenger>,
 }
 
 impl Server {
@@ -64,7 +67,7 @@ impl Server {
         config: config::Config,
         hooks: Box<dyn hooks::Hooks + Send + Sync>,
         runtime_dir: PathBuf,
-    ) -> Arc<Self> {
+    ) -> anyhow::Result<Arc<Self>> {
         let shells = Arc::new(Mutex::new(HashMap::new()));
         // buffered so that we are unlikely to block when setting up a
         // new session
@@ -76,13 +79,18 @@ impl Server {
             }
         });
 
-        Arc::new(Server {
+        let motd_shower = Arc::new(show_motd::DailyMessenger::new(
+            config.motd.clone().unwrap_or_default(),
+            config.motd_args.clone(),
+        )?);
+        Ok(Arc::new(Server {
             config,
             shells,
             runtime_dir,
             register_new_reapable_session: new_sess_tx,
             hooks,
-        })
+            motd_shower,
+        }))
     }
 
     #[instrument(skip_all)]
@@ -241,11 +249,19 @@ impl Server {
             }
 
             if matches!(status, protocol::AttachStatus::Created { .. }) {
+                use config::MotdDisplayMode;
+
                 info!("creating new subshell");
                 if let Err(err) = self.hooks.on_new_session(&header.name) {
                     warn!("new_session hook: {:?}", err);
                 }
-                let session = self.spawn_subshell(conn_id, stream, &header)?;
+                let motd = self.config.motd.clone().unwrap_or_default();
+                let session = self.spawn_subshell(
+                    conn_id,
+                    stream,
+                    &header,
+                    matches!(motd, MotdDisplayMode::Dump),
+                )?;
 
                 shells.insert(header.name.clone(), Box::new(session));
                 // fallthrough to bidi streaming
@@ -280,7 +296,8 @@ impl Server {
                 }
             };
 
-            let reply_status = write_reply(client_stream, protocol::AttachReplyHeader { status });
+            let reply_status =
+                write_reply(client_stream, protocol::AttachReplyHeader { status: status.clone() });
             if let Err(e) = reply_status {
                 error!("error writing reply status: {:?}", e);
             }
@@ -523,6 +540,7 @@ impl Server {
         conn_id: usize,
         client_stream: UnixStream,
         header: &protocol::AttachHeader,
+        dump_motd_on_new_session: bool,
     ) -> anyhow::Result<shell::Session> {
         let user_info = user::info()?;
         let shell = if let Some(s) = &self.config.shell {
@@ -563,7 +581,26 @@ impl Server {
             // to avoid breakage and vars the user has asked us to inject.
             .env_clear();
 
-        self.inject_env(&mut cmd, &user_info, header).context("setting up shell env")?;
+        let term = self.inject_env(&mut cmd, &user_info, header).context("setting up shell env")?;
+        let term_db = Arc::new(if let Some(term) = &term {
+            termini::TermInfo::from_name(term).context("resolving terminfo")?
+        } else {
+            warn!("no $TERM, using default terminfo");
+            match termini::TermInfo::from_env() {
+                Ok(db) => db,
+                Err(err) => {
+                    warn!("could not get terminfo from env: {:?}", err);
+                    match termini::TermInfo::from_name("xterm") {
+                        Ok(db) => db,
+                        Err(err) => {
+                            warn!("could not get xterm terminfo: {:?}", err);
+                            let empty_db = io::Cursor::new(vec![]);
+                            termini::TermInfo::parse(empty_db).context("getting terminfo db")?
+                        }
+                    }
+                }
+            }
+        });
 
         let shell_basename = if header.cmd.is_none() {
             // spawn the shell as a login shell by setting
@@ -625,15 +662,37 @@ impl Server {
             info!("reaped child shell: {:?}", waitable_child);
         });
 
+        let has_clear_screen =
+            term_db.raw_string_cap(termini::StringCapability::ClearScreen).is_some();
+        let needs_default_term = !has_clear_screen || term.is_none();
+
         // inject the prompt prefix, if any
+        info!("injecting prompt prefix");
         let prompt_prefix = self.config.prompt_prefix.clone().unwrap_or(String::from(""));
         if let Some(shell_basename) = shell_basename {
             if !prompt_prefix.is_empty() {
-                if let Err(err) =
-                    prompt::inject_prefix(&mut fork, shell_basename, &prompt_prefix, &header.name)
-                {
+                if let Err(err) = prompt::inject_prefix(
+                    &mut fork,
+                    shell_basename,
+                    &prompt_prefix,
+                    &header.name,
+                    needs_default_term,
+                ) {
                     warn!("issue injecting prefix: {:?}", err);
                 }
+            } else {
+                // issue a clear even if we don't have a prompt to inject for consistency
+                // and to simplify motd handling
+                let script = if needs_default_term {
+                    "clear\n"
+                } else {
+                    // If we don't have a $TERM value or we have some wacky $TERM value for which
+                    // there is no ClearScreen code, set TERM to xterm so that we won't get a
+                    // warning and will generate a code we can scan for.
+                    "TERM=xterm clear\n"
+                };
+                let mut pty_master = fork.is_parent().context("expected parent")?;
+                pty_master.write_all(script.as_bytes()).context("running initial clear")?;
             }
         }
 
@@ -655,6 +714,9 @@ impl Server {
             client_stream: Some(client_stream),
             config: self.config.clone(),
             reader_join_h: None,
+            term_db,
+            motd_shower: Arc::clone(&self.motd_shower),
+            needs_initial_motd_dump: dump_motd_on_new_session,
         };
         let child_pid = session_inner.pty_master.child_pid().ok_or(anyhow!("no child pid"))?;
         session_inner.reader_join_h = Some(session_inner.spawn_reader(shell::ReaderArgs {
@@ -691,13 +753,14 @@ impl Server {
         })
     }
 
+    /// Set up the environment for the shell, returning the right TERM value.
     #[instrument(skip_all)]
     fn inject_env(
         &self,
         cmd: &mut process::Command,
         user_info: &user::Info,
         header: &protocol::AttachHeader,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Option<String>> {
         cmd.env("HOME", &user_info.home_dir)
             .env(
                 "PATH",
@@ -753,7 +816,7 @@ impl Server {
             }
         }
         info!("injecting TERM into shell {:?}", term);
-        if let Some(t) = term {
+        if let Some(t) = &term {
             cmd.env("TERM", t);
         }
 
@@ -780,7 +843,7 @@ impl Server {
             }
         }
 
-        Ok(())
+        Ok(term)
     }
 
     fn ssh_auth_sock_symlink(&self, session_name: PathBuf) -> PathBuf {

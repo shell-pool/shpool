@@ -126,7 +126,7 @@ fn reattach() -> anyhow::Result<()> {
 
         let mut lm1 = sess1.line_matcher()?;
         sess1.run_cmd("export MYVAR=first ; echo hi")?;
-        lm1.match_re("hi$")?;
+        lm1.scan_until_re("hi$")?;
 
         let out = daemon_proc.detach(vec![String::from("sh1")])?;
         assert!(out.status.success(), "not successful");

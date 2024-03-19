@@ -102,6 +102,12 @@ impl Proc {
         let log_file = tmp_dir.join("daemon.log");
         eprintln!("spawning daemon proc with log {:?}", &log_file);
 
+        let resolved_config = if config.as_ref().exists() {
+            PathBuf::from(config.as_ref())
+        } else {
+            testdata_file(config)
+        };
+
         let mut cmd = Command::new(shpool_bin()?);
         cmd.stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -111,7 +117,7 @@ impl Proc {
             .arg("--socket")
             .arg(&socket_path)
             .arg("--config-file")
-            .arg(testdata_file(config))
+            .arg(resolved_config)
             .arg("daemon");
         if listen_events {
             cmd.env("SHPOOL_TEST_HOOK_SOCKET_PATH", &test_hook_socket_path);
