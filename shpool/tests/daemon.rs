@@ -215,7 +215,7 @@ fn hooks() -> anyhow::Result<()> {
             // sequencing
             let mut sh1_matcher = sh1_proc.line_matcher()?;
             sh1_proc.run_cmd("echo hi")?;
-            sh1_matcher.match_re("hi$")?;
+            sh1_matcher.scan_until_re("hi$")?;
 
             // 1 busy
             let mut busy_proc =

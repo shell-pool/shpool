@@ -1,5 +1,5 @@
 name: presubmit
-on: [push, pull_request, workflow_call, workflow_dispatch]
+on: [pull_request, workflow_call, workflow_dispatch]
 
 jobs:
   test:
@@ -7,18 +7,21 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
-      - uses: moonrepo/setup-rust@v1
+      - uses: moonrepo/setup-rust@b8edcc56aab474d90c7cf0bb8beeaf8334c15e9f
         with:
           channel: '1.74.0'
-      - run: sudo apt-get install zsh fish
-      - run: cargo test --all-features
-      - uses: actions/upload-artifact@v4
+      - run: sudo apt-get install zsh fish libpam0g-dev
+      - run: SHPOOL_LEAVE_TEST_LOGS=true cargo test --all-features
+      - name: Archive Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        id: artifact-upload-step
         with:
           name: test-logs
           path: /tmp/shpool-test*/*.log
 
   # miri does not handle all the IO we do, disabled for now.
-  # 
+  #
   # miri:
   #   name: cargo +nightly miri test
   #   runs-on: ubuntu-22.04
@@ -36,10 +39,11 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
-      - uses: moonrepo/setup-rust@v1
+      - uses: moonrepo/setup-rust@b8edcc56aab474d90c7cf0bb8beeaf8334c15e9f
         with:
           components: rustfmt
           channel: nightly
+      - run: sudo apt-get install libpam0g-dev
       - run: cargo +nightly fmt -- --check
 
   cranky:
@@ -47,12 +51,12 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
-      - uses: moonrepo/setup-rust@v1
+      - uses: moonrepo/setup-rust@b8edcc56aab474d90c7cf0bb8beeaf8334c15e9f
         with:
           components: clippy
           bins: cargo-cranky@0.3.0
           channel: nightly
-      - run: sudo apt-get install zsh fish
+      - run: sudo apt-get install zsh fish libpam0g-dev
       - run: cargo +nightly cranky --all-targets -- -D warnings
 
   deny:
@@ -60,8 +64,9 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
-      - uses: moonrepo/setup-rust@v1
+      - uses: moonrepo/setup-rust@b8edcc56aab474d90c7cf0bb8beeaf8334c15e9f
         with:
           channel: '1.74.0'
           bins: cargo-deny
+      - run: sudo apt-get install libpam0g-dev
       - run: cargo deny --all-features check licenses

@@ -110,6 +110,21 @@ pub struct Config {
     /// verbatim except that the string '$SHPOOL_SESSION_NAME' will
     /// get replaced with the actual name of the shpool session.
     pub prompt_prefix: Option<String>,
+
+    /// Control when and how shpool will display the message of the day.
+    pub motd: Option<MotdDisplayMode>,
+
+    /// Override arguments to pass to pam_motd.so when resolving the
+    /// message of the day. Normally, you want to leave this blank
+    /// so that shpool will scrape the default arguments used in
+    /// `/etc/pam.d/{ssh,login}` which typically produces the expected
+    /// result, but in some cases you may need to override the argument
+    /// list. You can also use this to make a custom message of the
+    /// day that is only displayed when using shpool.
+    ///
+    /// See https://man7.org/linux/man-pages/man8/pam_motd.8.html
+    /// for more info.
+    pub motd_args: Option<Vec<String>>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -138,6 +153,31 @@ pub enum SessionRestoreMode {
     /// Emit enough output data to restore the last n lines of
     /// history from the output spool.
     Lines(u16),
+}
+
+#[derive(Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum MotdDisplayMode {
+    /// Never display the message of the day.
+    #[default]
+    Never,
+
+    /// Display the message of the day using the given program
+    /// as the pager. The pager will be invoked like `pager /tmp/motd.txt`,
+    /// and normal connection will only proceed once the pager has
+    /// exited.
+    ///
+    /// Display the message of the day each time a user attaches
+    /// (wether to a new session or reattaching to an existing session).
+    ///
+    /// `less` by default.
+    // Pager(String),
+
+    /// Just dump the message of the day directly to the screen.
+    /// Dumps are only performed when a new session is created.
+    /// There is no safe way to dump directly when reattaching,
+    /// so we don't attempt it.
+    Dump,
 }
 
 #[cfg(test)]

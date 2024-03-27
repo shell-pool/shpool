@@ -32,7 +32,7 @@ use tracing::{debug, error, info, instrument, span, trace, warn, Level};
 
 use crate::{
     consts,
-    daemon::{config, exit_notify::ExitNotifier, keybindings},
+    daemon::{config, control_codes, exit_notify::ExitNotifier, keybindings, show_motd},
     protocol, test_hooks, tty,
 };
 
@@ -101,6 +101,9 @@ pub struct SessionInner {
     pub pty_master: shpool_pty::fork::Fork,
     pub client_stream: Option<UnixStream>,
     pub config: config::Config,
+    pub term_db: Arc<termini::TermInfo>,
+    pub motd_shower: Arc<show_motd::DailyMessenger>,
+    pub needs_initial_motd_dump: bool,
 
     /// The join handle for the always-on background reader thread.
     /// Only wrapped in an option so we can spawn the thread after
@@ -188,6 +191,13 @@ impl SessionInner {
         args: ReaderArgs,
     ) -> anyhow::Result<thread::JoinHandle<anyhow::Result<()>>> {
         use nix::poll;
+
+        let term_db = Arc::clone(&self.term_db);
+        let mut control_code_matcher =
+            control_codes::Matcher::new(&self.term_db).context("building control code matcher")?;
+
+        let motd_shower = Arc::clone(&self.motd_shower);
+        let mut needs_initial_motd_dump = self.needs_initial_motd_dump;
 
         let mut pty_master = self.pty_master.is_parent()?;
         let name = self.name.clone();
@@ -342,7 +352,7 @@ impl SessionInner {
                                     .context("sending size change ack")?;
                             }
                             Err(err) => {
-                                info!("size change: bailing due to: {:?}", err);
+                                warn!("size change: bailing due to: {:?}", err);
                                 return Ok(());
                             }
                         }
@@ -452,7 +462,55 @@ impl SessionInner {
                     }
                 }
 
+                // scan for control codes we need to handle
                 let mut reset_client_conn = false;
+                let mut snip_buf_to = None;
+                if needs_initial_motd_dump {
+                    for (i, byte) in buf[..len].iter().enumerate() {
+                        match control_code_matcher.transition(*byte) {
+                            Some(control_codes::Code::ClearScreen) if needs_initial_motd_dump => {
+                                debug!("detected initial ClearScreen code");
+                                if let ClientConnectionMsg::New(conn) = &client_conn {
+                                    let mut s = conn.sink.lock().unwrap();
+
+                                    // write the clear code ahead of time so we don't
+                                    // immediately clobber ourselves
+                                    let write_to = i + 1;
+                                    let chunk = protocol::Chunk {
+                                        kind: protocol::ChunkKind::Data,
+                                        buf: &buf[..write_to],
+                                    };
+                                    let write_result =
+                                        chunk.write_to(&mut *s).and_then(|_| s.flush());
+                                    if let Err(err) = write_result {
+                                        info!(
+                                            "while writing ClearScreen: client_stream write err, assuming hangup: {:?}",
+                                            err
+                                        );
+                                        reset_client_conn = true;
+                                    } else {
+                                        test_hooks::emit("daemon-wrote-s2c-chunk");
+                                    }
+                                    snip_buf_to = Some(write_to);
+
+                                    if let Err(e) = motd_shower.dump(&mut *s, &term_db) {
+                                        warn!("Error handling clear: {:?}", e);
+                                    }
+                                }
+                                needs_initial_motd_dump = false;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                if let Some(snip_to) = snip_buf_to {
+                    if snip_to < buf.len() {
+                        buf = Vec::from(&buf[snip_to..]);
+                    } else {
+                        buf.clear();
+                    }
+                }
+
                 if let ClientConnectionMsg::New(conn) = &client_conn {
                     let chunk =
                         protocol::Chunk { kind: protocol::ChunkKind::Data, buf: &buf[..len] };
@@ -718,7 +776,9 @@ impl SessionInner {
                             NoMatch => {
                                 partial_keybinding.clear();
                             }
-                            Partial => partial_keybinding.push(*byte),
+                            Partial => {
+                                partial_keybinding.push(*byte);
+                            }
                             Match(action) => {
                                 info!("{:?} keybinding action fired", action);
                                 let keybinding_len = partial_keybinding.len() + 1;
