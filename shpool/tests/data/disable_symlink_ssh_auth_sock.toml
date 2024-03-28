@@ -3,6 +3,7 @@ noecho = true
 shell = "/bin/bash"
 nosymlink_ssh_auth_sock = true
 session_restore_mode = "simple"
+prompt_prefix = ""
 
 [env]
 PS1 = "prompt> "
