@@ -43,6 +43,7 @@ use crate::daemon::exit_notify::ExitNotifier;
 const STDERR_FD: i32 = 2;
 const DEFAULT_INITIAL_SHELL_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
 const DEFAULT_OUTPUT_SPOOL_LINES: usize = 500;
+const DEFAULT_PROMPT_PREFIX: &str = "shpool:$SHPOOL_SESSION_NAME ";
 
 pub struct Server {
     config: config::Config,
@@ -626,7 +627,8 @@ impl Server {
         });
 
         // inject the prompt prefix, if any
-        let prompt_prefix = self.config.prompt_prefix.clone().unwrap_or(String::from(""));
+        let prompt_prefix =
+            self.config.prompt_prefix.clone().unwrap_or(String::from(DEFAULT_PROMPT_PREFIX));
         if let Some(shell_basename) = shell_basename {
             if !prompt_prefix.is_empty() {
                 if let Err(err) =

@@ -2,6 +2,7 @@ norc = true
 noecho = true
 shell = "/bin/bash"
 session_restore_mode = { lines = 2 }
+prompt_prefix = ""
 
 [env]
 PS1 = "prompt> "
