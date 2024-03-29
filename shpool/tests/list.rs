@@ -6,12 +6,17 @@ use regex::Regex;
 
 mod support;
 
+use crate::support::daemon::DaemonArgs;
+
 #[test]
 #[timeout(30000)]
 fn empty() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", false).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new(
+            "norc.toml",
+            DaemonArgs { listen_events: false, ..DaemonArgs::default() },
+        )
+        .context("starting daemon proc")?;
         let out = daemon_proc.list()?;
         assert!(out.status.success(), "list proc did not exit successfully");
 
@@ -50,8 +55,8 @@ fn no_daemon() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn one_session() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
         let bidi_enter_w = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-enter"]);
 
         let _sess1 = daemon_proc.attach("sh1", Default::default())?;
@@ -75,8 +80,8 @@ fn one_session() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn two_sessions() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
         let mut bidi_enter_w = daemon_proc.events.take().unwrap().waiter([
             "daemon-bidi-stream-enter",
             "daemon-bidi-stream-enter",

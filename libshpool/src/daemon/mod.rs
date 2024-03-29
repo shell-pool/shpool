@@ -23,6 +23,7 @@ mod control_codes;
 mod etc_environment;
 mod exit_notify;
 pub mod keybindings;
+mod pager;
 mod prompt;
 mod server;
 mod shell;

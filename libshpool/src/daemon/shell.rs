@@ -32,7 +32,9 @@ use tracing::{debug, error, info, instrument, span, trace, warn, Level};
 
 use crate::{
     consts,
-    daemon::{config, control_codes, exit_notify::ExitNotifier, keybindings, show_motd},
+    daemon::{
+        config, control_codes, exit_notify::ExitNotifier, keybindings, pager::PagerCtl, show_motd,
+    },
     protocol, test_hooks, tty,
 };
 
@@ -55,7 +57,7 @@ const REATTACH_RESIZE_DELAY: time::Duration = time::Duration::from_millis(50);
 // The reader thread should wake up relatively frequently so it can detect
 // reattach, but we don't need to go crazy since reattach is not part of
 // the inner loop.
-const READER_POLL_MS: libc::c_int = 100;
+const READER_POLL_MS: u16 = 100;
 
 /// Session represent a shell session
 #[derive(Debug)]
@@ -64,6 +66,7 @@ pub struct Session {
     pub child_pid: libc::pid_t,
     pub child_exit_notifier: Arc<ExitNotifier>,
     pub reader_ctl: Arc<Mutex<ReaderCtl>>,
+    pub pager_ctl: Arc<Mutex<Option<PagerCtl>>>,
     /// Mutable state with the lock held by the servicing handle_attach thread
     /// while a tty is attached to the session. Probing the mutex can be used
     /// to determine if someone is currently attached to the session.
@@ -102,7 +105,7 @@ pub struct SessionInner {
     pub client_stream: Option<UnixStream>,
     pub config: config::Config,
     pub term_db: Arc<termini::TermInfo>,
-    pub motd_shower: Arc<show_motd::DailyMessenger>,
+    pub daily_messenger: Arc<show_motd::DailyMessenger>,
     pub needs_initial_motd_dump: bool,
 
     /// The join handle for the always-on background reader thread.
@@ -196,10 +199,11 @@ impl SessionInner {
         let mut control_code_matcher =
             control_codes::Matcher::new(&self.term_db).context("building control code matcher")?;
 
-        let motd_shower = Arc::clone(&self.motd_shower);
+        let daily_messenger = Arc::clone(&self.daily_messenger);
         let mut needs_initial_motd_dump = self.needs_initial_motd_dump;
 
         let mut pty_master = self.pty_master.is_parent()?;
+        let watchable_master = pty_master;
         let name = self.name.clone();
         let mut closure = move || {
             let _s = span!(Level::INFO, "reader", s = name, cid = args.conn_id).entered();
@@ -216,7 +220,7 @@ impl SessionInner {
                 };
             let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
             let mut poll_fds = [poll::PollFd::new(
-                pty_master.raw_fd().ok_or(anyhow!("no master fd"))?,
+                watchable_master.borrow_fd().ok_or(anyhow!("no master fd"))?,
                 poll::PollFlags::POLLIN,
             )];
 
@@ -493,7 +497,7 @@ impl SessionInner {
                                     }
                                     snip_buf_to = Some(write_to);
 
-                                    if let Err(e) = motd_shower.dump(&mut *s, &term_db) {
+                                    if let Err(e) = daily_messenger.dump(&mut *s, &term_db) {
                                         warn!("Error handling clear: {:?}", e);
                                     }
                                 }
@@ -731,8 +735,8 @@ impl SessionInner {
 
                     // N.B. we don't need to muck about with chunking or anything
                     // in this direction, because there is only one input stream
-                    // to the shell subprocess, vs the two output streams we need
-                    // to handle coming back the other way.
+                    // to the shell subprocess and we don't need to worry about
+                    // heartbeating to detect hangup or anything like that.
                     //
                     // Also, note that we don't access through the mutex because reads
                     // don't need to be excluded from trampling on writes.

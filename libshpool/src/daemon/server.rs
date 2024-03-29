@@ -21,7 +21,6 @@ use std::{
     os,
     os::unix::{
         fs::PermissionsExt,
-        io::AsRawFd,
         net::{UnixListener, UnixStream},
         process::CommandExt,
     },
@@ -33,16 +32,20 @@ use std::{
 };
 
 use anyhow::{anyhow, Context};
-use nix::unistd::Pid;
+use nix::unistd;
 use tracing::{error, info, instrument, span, trace, warn, Level};
 
-use super::{
-    super::{config, consts, protocol, test_hooks, tty, user},
-    etc_environment, hooks, prompt, shell, show_motd, ttl_reaper,
+use crate::{
+    config,
+    config::MotdDisplayMode,
+    consts,
+    daemon::{
+        etc_environment, exit_notify::ExitNotifier, hooks, pager::PagerError, prompt, shell,
+        show_motd, ttl_reaper,
+    },
+    protocol, test_hooks, tty, user,
 };
-use crate::daemon::exit_notify::ExitNotifier;
 
-const STDERR_FD: i32 = 2;
 const DEFAULT_INITIAL_SHELL_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
 const DEFAULT_OUTPUT_SPOOL_LINES: usize = 500;
 const DEFAULT_PROMPT_PREFIX: &str = "shpool:$SHPOOL_SESSION_NAME ";
@@ -59,7 +62,7 @@ pub struct Server {
     runtime_dir: PathBuf,
     register_new_reapable_session: crossbeam_channel::Sender<(String, Instant)>,
     hooks: Box<dyn hooks::Hooks + Send + Sync>,
-    motd_shower: Arc<show_motd::DailyMessenger>,
+    daily_messenger: Arc<show_motd::DailyMessenger>,
 }
 
 impl Server {
@@ -80,7 +83,7 @@ impl Server {
             }
         });
 
-        let motd_shower = Arc::new(show_motd::DailyMessenger::new(
+        let daily_messenger = Arc::new(show_motd::DailyMessenger::new(
             config.motd.clone().unwrap_or_default(),
             config.motd_args.clone(),
         )?);
@@ -90,7 +93,7 @@ impl Server {
             runtime_dir,
             register_new_reapable_session: new_sess_tx,
             hooks,
-            motd_shower,
+            daily_messenger,
         }))
     }
 
@@ -170,7 +173,7 @@ impl Server {
         // want to in the future, so it is not worth breaking the protocol over.
         let warnings = vec![];
 
-        let (child_exit_notifier, inner_to_stream, status) = {
+        let (child_exit_notifier, inner_to_stream, pager_ctl_slot, status) = {
             // we unwrap to propagate the poison as an unwind
             let mut shells = self.shells.lock().unwrap();
             info!("locked shells table");
@@ -277,17 +280,20 @@ impl Server {
                 (
                     Some(Arc::clone(&session.child_exit_notifier)),
                     Some(Arc::clone(&session.inner)),
+                    Some(Arc::clone(&session.pager_ctl)),
                     status,
                 )
             } else {
-                (None, None, status)
+                (None, None, None, status)
             }
         };
         info!("released lock on shells table");
 
         self.link_ssh_auth_sock(&header).context("linking SSH_AUTH_SOCK")?;
 
-        if let (Some(child_exit_notifier), Some(inner)) = (child_exit_notifier, inner_to_stream) {
+        if let (Some(child_exit_notifier), Some(inner), Some(pager_ctl_slot)) =
+            (child_exit_notifier, inner_to_stream, pager_ctl_slot)
+        {
             let mut child_done = false;
             let mut inner = inner.lock().unwrap();
             let client_stream = match inner.client_stream.as_mut() {
@@ -303,8 +309,36 @@ impl Server {
                 error!("error writing reply status: {:?}", e);
             }
 
+            // If in pager motd mode, launch the pager and block until it is
+            // done, picking up any tty size change that happened while the
+            // user was examining the motd.
+            let motd_mode = self.config.motd.clone().unwrap_or_default();
+            let init_tty_size = if matches!(motd_mode, MotdDisplayMode::Pager { .. }) {
+                match self.daily_messenger.display_in_pager(
+                    client_stream,
+                    pager_ctl_slot,
+                    header.local_tty_size.clone(),
+                ) {
+                    Ok(new_size) => {
+                        info!("motd pager finished, reporting new tty size: {:?}", new_size);
+                        new_size
+                    }
+                    Err(e) => match e.downcast::<PagerError>() {
+                        Ok(PagerError::ClientHangup) => {
+                            info!("client hung up while talking to pager, bailing");
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            return Err(e).context("showing motd in pager")?;
+                        }
+                    },
+                }
+            } else {
+                header.local_tty_size.clone()
+            };
+
             info!("starting bidi stream loop");
-            match inner.bidi_stream(conn_id, header.local_tty_size.clone(), child_exit_notifier) {
+            match inner.bidi_stream(conn_id, init_tty_size, child_exit_notifier) {
                 Ok(done) => {
                     child_done = done;
                 }
@@ -325,7 +359,7 @@ impl Server {
                 // The child shell has exited, so the reader thread should
                 // attempt to read from its stdout and get an error, causing
                 // it to exit. That means we should be safe to join. We use
-                // a seperate if statement to avoid holding the shells lock
+                // a separate if statement to avoid holding the shells lock
                 // while we join the old thread.
                 if let Some(h) = inner.reader_join_h.take() {
                     h.join()
@@ -498,12 +532,28 @@ impl Server {
             if let Some(session) = shells.get(&header.session_name) {
                 match header.payload {
                     protocol::SessionMessageRequestPayload::Resize(resize_request) => {
-                        let reader_ctl = session.reader_ctl.lock().unwrap();
-                        reader_ctl
-                            .tty_size_change
-                            .send(resize_request.tty_size)
-                            .context("sending tty size change to reader")?;
-                        reader_ctl.tty_size_change_ack.recv().context("recving tty size ack")?;
+                        let pager_ctl = session.pager_ctl.lock().unwrap();
+                        if let Some(pager_ctl) = pager_ctl.as_ref() {
+                            pager_ctl
+                                .tty_size_change
+                                .send(resize_request.tty_size.clone())
+                                .context("sending tty size change to pager")?;
+                            pager_ctl
+                                .tty_size_change_ack
+                                .recv()
+                                .context("recving tty size change ack from pager")?;
+                        } else {
+                            let reader_ctl = session.reader_ctl.lock().unwrap();
+                            reader_ctl
+                                .tty_size_change
+                                .send(resize_request.tty_size)
+                                .context("sending tty size change to reader")?;
+                            reader_ctl
+                                .tty_size_change_ack
+                                .recv()
+                                .context("recving tty size ack")?;
+                        }
+
                         protocol::SessionMessageReply::Resize(protocol::ResizeReply::Ok)
                     }
                     protocol::SessionMessageRequestPayload::Detach => {
@@ -625,11 +675,11 @@ impl Server {
         let mut fork = shpool_pty::fork::Fork::from_ptmx().context("forking pty")?;
         if let Ok(slave) = fork.is_child() {
             if noecho {
-                if let Some(fd) = slave.raw_fd() {
-                    tty::disable_echo(*fd).context("disabling echo on pty")?;
+                if let Some(fd) = slave.borrow_fd() {
+                    tty::disable_echo(fd).context("disabling echo on pty")?;
                 }
             }
-            for fd in STDERR_FD + 1..(nix::unistd::SysconfVar::OPEN_MAX as i32) {
+            for fd in consts::STDERR_FD + 1..(nix::unistd::SysconfVar::OPEN_MAX as i32) {
                 let _ = nix::unistd::close(fd);
             }
             let err = cmd.exec();
@@ -717,7 +767,7 @@ impl Server {
             config: self.config.clone(),
             reader_join_h: None,
             term_db,
-            motd_shower: Arc::clone(&self.motd_shower),
+            daily_messenger: Arc::clone(&self.daily_messenger),
             needs_initial_motd_dump: dump_motd_on_new_session,
         };
         let child_pid = session_inner.pty_master.child_pid().ok_or(anyhow!("no child pid"))?;
@@ -748,6 +798,7 @@ impl Server {
 
         Ok(shell::Session {
             reader_ctl,
+            pager_ctl: Arc::new(Mutex::new(None)),
             child_pid,
             child_exit_notifier,
             started_at: time::SystemTime::now(),
@@ -880,18 +931,18 @@ where
 /// control socket has the same UID as the current user and that
 /// both have the same executable path.
 fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
-    use nix::{sys::socket, unistd};
+    use nix::sys::socket;
 
-    let peer_creds = socket::getsockopt(sock.as_raw_fd(), socket::sockopt::PeerCredentials)
+    let peer_creds = socket::getsockopt(sock, socket::sockopt::PeerCredentials)
         .context("could not get peer creds from socket")?;
     let peer_uid = unistd::Uid::from_raw(peer_creds.uid());
-    let self_uid = unistd::getuid();
+    let self_uid = unistd::Uid::current();
     if peer_uid != self_uid {
         return Err(anyhow!("shpool prohibits connections across users"));
     }
 
     let peer_pid = unistd::Pid::from_raw(peer_creds.pid());
-    let self_pid = unistd::getpid();
+    let self_pid = unistd::Pid::this();
     let peer_exe = exe_for_pid(peer_pid).context("could not resolve exe from the pid")?;
     let self_exe = exe_for_pid(self_pid).context("could not resolve our own exe")?;
     if peer_exe != self_exe {
@@ -901,7 +952,7 @@ fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn exe_for_pid(pid: Pid) -> anyhow::Result<PathBuf> {
+fn exe_for_pid(pid: unistd::Pid) -> anyhow::Result<PathBuf> {
     let path = std::fs::read_link(format!("/proc/{}/exe", pid))?;
     Ok(path)
 }

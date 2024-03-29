@@ -14,7 +14,10 @@
 
 use std::{
     io,
-    os::unix::io::{AsRawFd, RawFd},
+    os::{
+        fd::BorrowedFd,
+        unix::io::{AsRawFd, RawFd},
+    },
 };
 
 use anyhow::Context;
@@ -27,6 +30,8 @@ use nix::{
 };
 use serde_derive::{Deserialize, Serialize};
 use tracing::error;
+
+use crate::consts;
 
 // see `man ioctl_tty` for info on these ioctl commands
 nix::ioctl_read_bad!(tiocgwinsz, libc::TIOCGWINSZ, libc::winsize);
@@ -66,7 +71,7 @@ impl Size {
     }
 }
 
-pub fn disable_echo(fd: RawFd) -> anyhow::Result<()> {
+pub fn disable_echo(fd: BorrowedFd<'_>) -> anyhow::Result<()> {
     let mut term = termios::tcgetattr(fd).context("grabbing term flags")?;
     term.local_flags &= !LocalFlags::ECHO;
 
@@ -75,8 +80,9 @@ pub fn disable_echo(fd: RawFd) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn set_attach_flags() -> anyhow::Result<AttachFlagsGuard> {
-    let fd = 0;
+pub fn set_attach_flags() -> anyhow::Result<AttachFlagsGuard<'static>> {
+    // Safety: stdin is live for the whole program duration
+    let fd = unsafe { BorrowedFd::borrow_raw(consts::STDIN_FD) };
 
     if !isatty(io::stdin().as_raw_fd())?
         || !isatty(io::stdout().as_raw_fd())?
@@ -113,12 +119,12 @@ pub fn set_attach_flags() -> anyhow::Result<AttachFlagsGuard> {
     Ok(AttachFlagsGuard { fd, old: Some(old) })
 }
 
-pub struct AttachFlagsGuard {
-    fd: RawFd,
+pub struct AttachFlagsGuard<'fd> {
+    fd: BorrowedFd<'fd>,
     old: Option<termios::Termios>,
 }
 
-impl std::ops::Drop for AttachFlagsGuard {
+impl<'fd> std::ops::Drop for AttachFlagsGuard<'fd> {
     fn drop(&mut self) {
         if let Some(old) = &self.old {
             if let Err(e) = termios::tcsetattr(self.fd, SetArg::TCSANOW, old) {

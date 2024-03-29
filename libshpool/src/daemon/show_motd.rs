@@ -12,11 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io;
+use std::{
+    io,
+    os::unix::net::UnixStream,
+    sync::{Arc, Mutex},
+};
 
 use anyhow::{anyhow, Context};
+use tracing::info;
 
-use super::super::{config, protocol};
+use crate::{
+    config,
+    daemon::pager::{Pager, PagerCtl},
+    protocol, tty,
+};
 
 /// Showers know how to show the message of the day.
 #[derive(Debug, Clone)]
@@ -44,7 +53,7 @@ impl DailyMessenger {
     ) -> anyhow::Result<()> {
         assert!(matches!(self.mode, config::MotdDisplayMode::Dump));
 
-        let raw_motd_value = self.get_raw_motd_value(term_db)?;
+        let raw_motd_value = self.raw_motd_value(term_db)?;
 
         let chunk =
             protocol::Chunk { kind: protocol::ChunkKind::Data, buf: raw_motd_value.as_slice() };
@@ -52,9 +61,35 @@ impl DailyMessenger {
         chunk.write_to(&mut stream).context("dumping motd")
     }
 
-    fn get_raw_motd_value(&self, term_db: &termini::TermInfo) -> anyhow::Result<Vec<u8>> {
-        let motd_value = self
-            .motd_resolver
+    /// Display the motd in a pager. Callers should do a downcast error
+    /// check for PagerError::ClientHangup as if they had called
+    /// Pager::display directly.
+    pub fn display_in_pager(
+        &self,
+        // The client connection on which to display the pager.
+        client_stream: &mut UnixStream,
+        // The session to associate this pager with for SIGWINCH purposes.
+        ctl_slot: Arc<Mutex<Option<PagerCtl>>>,
+        // The size of the tty to start off with
+        init_tty_size: tty::Size,
+    ) -> anyhow::Result<tty::Size> {
+        let pager_bin = if let config::MotdDisplayMode::Pager { bin } = &self.mode {
+            bin
+        } else {
+            return Err(anyhow!("internal error: wrong mode to display in pager"));
+        };
+
+        info!("displaying motd in pager '{}'", pager_bin);
+
+        let motd_value = self.motd_value()?;
+
+        let pager = Pager::new(pager_bin.to_string());
+
+        pager.display(client_stream, ctl_slot, init_tty_size, motd_value.as_str())
+    }
+
+    fn motd_value(&self) -> anyhow::Result<String> {
+        self.motd_resolver
             .value(match &self.args {
                 Some(args) => {
                     let mut args = args.clone();
@@ -67,7 +102,11 @@ impl DailyMessenger {
                 }
                 None => motd::ArgResolutionStrategy::Auto,
             })
-            .context("resolving motd")?;
+            .context("resolving motd")
+    }
+
+    fn raw_motd_value(&self, term_db: &termini::TermInfo) -> anyhow::Result<Vec<u8>> {
+        let motd_value = self.motd_value()?;
         Self::convert_to_raw(term_db, &motd_value)
     }
 

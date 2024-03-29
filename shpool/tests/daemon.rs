@@ -21,6 +21,8 @@ use regex::Regex;
 
 mod support;
 
+use crate::support::daemon::DaemonArgs;
+
 #[test]
 #[timeout(30000)]
 fn start() -> anyhow::Result<()> {
@@ -251,8 +253,11 @@ fn hooks() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn cleanup_socket() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", false).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new(
+            "norc.toml",
+            DaemonArgs { listen_events: false, ..DaemonArgs::default() },
+        )
+        .context("starting daemon proc")?;
 
         signal::kill(
             Pid::from_raw(daemon_proc.proc.as_ref().unwrap().id() as i32),
