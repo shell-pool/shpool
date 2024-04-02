@@ -120,7 +120,7 @@ fn reattach_after_kill() -> anyhow::Result<()> {
         let mut lm1 = sess1.line_matcher()?;
         sess1.run_cmd("export MYVAR=first")?;
         sess1.run_cmd("echo $MYVAR")?;
-        lm1.match_re("first$")?;
+        lm1.scan_until_re("first$")?;
 
         let out = daemon_proc.kill(vec![String::from("sh1")])?;
         assert!(out.status.success());
@@ -138,7 +138,7 @@ fn reattach_after_kill() -> anyhow::Result<()> {
             daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
         let mut lm2 = sess2.line_matcher()?;
         sess2.run_cmd("echo ${MYVAR:-second}")?;
-        lm2.match_re("second$")?;
+        lm2.scan_until_re("second$")?;
 
         Ok(())
     })

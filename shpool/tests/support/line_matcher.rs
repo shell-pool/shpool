@@ -14,6 +14,51 @@ impl<R> LineMatcher<R>
 where
     R: std::io::Read,
 {
+    /// Scan lines until one matches the given regex
+    pub fn scan_until_re(&mut self, re: &str) -> anyhow::Result<()> {
+        let compiled_re = Regex::new(re)?;
+        let start = time::Instant::now();
+        loop {
+            let mut line = String::new();
+            match self.out.read_line(&mut line) {
+                Ok(0) => {
+                    return Err(anyhow!("LineMatcher: EOF"));
+                }
+                Err(e) => {
+                    if e.kind() == io::ErrorKind::WouldBlock {
+                        if start.elapsed() > CMD_READ_TIMEOUT {
+                            return Err(io::Error::new(
+                                io::ErrorKind::TimedOut,
+                                "timed out reading line",
+                            ))?;
+                        }
+
+                        std::thread::sleep(CMD_READ_SLEEP_DUR);
+                        continue;
+                    }
+
+                    return Err(e).context("reading line from shell output")?;
+                }
+                Ok(_) => {
+                    if line.ends_with('\n') {
+                        line.pop();
+                        if line.ends_with('\r') {
+                            line.pop();
+                        }
+                    }
+                }
+            }
+
+            eprint!("scanning for /{}/... ", re);
+            if compiled_re.is_match(&line) {
+                eprintln!(" match");
+                return Ok(());
+            } else {
+                eprintln!(" no match");
+            }
+        }
+    }
+
     pub fn match_re(&mut self, re: &str) -> anyhow::Result<()> {
         match self.capture_re(re) {
             Ok(_) => Ok(()),
