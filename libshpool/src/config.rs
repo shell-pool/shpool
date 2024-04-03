@@ -170,8 +170,8 @@ pub enum MotdDisplayMode {
     /// Display the message of the day each time a user attaches
     /// (wether to a new session or reattaching to an existing session).
     ///
-    /// `less` by default.
-    // Pager(String),
+    /// Typically bin is set to `"less"` if you want to use this option.
+    Pager { bin: String },
 
     /// Just dump the message of the day directly to the screen.
     /// Dumps are only performed when a new session is created.

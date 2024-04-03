@@ -13,14 +13,14 @@ use regex::Regex;
 
 mod support;
 
-use crate::support::daemon::AttachArgs;
+use crate::support::daemon::{AttachArgs, DaemonArgs};
 
 #[test]
 #[timeout(30000)]
 fn happy_path() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
         let mut attach_proc =
             daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
 
@@ -54,8 +54,8 @@ fn happy_path() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn custom_cmd() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
         let script = support::testdata_file("echo_stop.sh");
         let mut attach_proc = daemon_proc
             .attach(
@@ -86,8 +86,8 @@ fn custom_cmd() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn forward_env() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("forward_env.toml", true).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new("forward_env.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
         let mut attach_proc = daemon_proc
             .attach(
                 "sh1",
@@ -116,8 +116,8 @@ fn forward_env() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn symlink_ssh_auth_sock() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
         let mut waiter = daemon_proc.events.take().unwrap().waiter(["daemon-wrote-s2c-chunk"]);
 
         let fake_auth_sock_tgt = daemon_proc.tmp_dir.join("ssh-auth-sock-target.fake");
@@ -151,8 +151,8 @@ fn symlink_ssh_auth_sock() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn missing_ssh_auth_sock() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
         let mut waiter = daemon_proc.events.take().unwrap().waiter(["daemon-wrote-s2c-chunk"]);
 
         let fake_auth_sock_tgt = daemon_proc.tmp_dir.join("ssh-auth-sock-target.fake");
@@ -175,8 +175,8 @@ fn missing_ssh_auth_sock() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn fresh_shell_draws_prompt() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
 
         let mut attach_proc =
             daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
@@ -198,7 +198,7 @@ fn fresh_shell_draws_prompt() -> anyhow::Result<()> {
 fn config_disable_symlink_ssh_auth_sock() -> anyhow::Result<()> {
     support::dump_err(|| {
         let mut daemon_proc =
-            support::daemon::Proc::new("disable_symlink_ssh_auth_sock.toml", true)
+            support::daemon::Proc::new("disable_symlink_ssh_auth_sock.toml", DaemonArgs::default())
                 .context("starting daemon proc")?;
         let mut waiter = daemon_proc.events.take().unwrap().waiter(["daemon-wrote-s2c-chunk"]);
 
@@ -234,8 +234,8 @@ fn config_disable_symlink_ssh_auth_sock() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn bounce() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
 
         let bidi_done_w = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
         {
@@ -271,8 +271,8 @@ fn bounce() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn two_at_once() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", false).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
 
         let mut attach_proc1 =
             daemon_proc.attach("sh1", Default::default()).context("starting sh1")?;
@@ -298,8 +298,8 @@ fn two_at_once() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn explicit_exit() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
 
         let bidi_done_w = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
         {
@@ -340,8 +340,8 @@ fn explicit_exit() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn exit_immediate_drop() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
 
         let mut waiter = daemon_proc.events.take().unwrap().waiter([
             "daemon-read-c2s-chunk",
@@ -395,8 +395,11 @@ fn exit_immediate_drop() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn output_flood() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", false).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new(
+            "norc.toml",
+            DaemonArgs { listen_events: false, ..DaemonArgs::default() },
+        )
+        .context("starting daemon proc")?;
         let mut attach_proc =
             daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
 
@@ -418,8 +421,11 @@ fn output_flood() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn force_attach() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", false).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new(
+            "norc.toml",
+            DaemonArgs { listen_events: false, ..DaemonArgs::default() },
+        )
+        .context("starting daemon proc")?;
 
         let mut tty1 =
             daemon_proc.attach("sh1", Default::default()).context("attaching from tty1")?;
@@ -445,8 +451,11 @@ fn force_attach() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn busy() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", false).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new(
+            "norc.toml",
+            DaemonArgs { listen_events: false, ..DaemonArgs::default() },
+        )
+        .context("starting daemon proc")?;
 
         let mut tty1 =
             daemon_proc.attach("sh1", Default::default()).context("attaching from tty1")?;
@@ -467,8 +476,11 @@ fn busy() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn daemon_hangup() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", false).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new(
+            "norc.toml",
+            DaemonArgs { listen_events: false, ..DaemonArgs::default() },
+        )
+        .context("starting daemon proc")?;
         let mut attach_proc =
             daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
 
@@ -490,8 +502,8 @@ fn daemon_hangup() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn default_keybinding_detach() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
         let mut waiter = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
 
         let mut a1 =
@@ -524,8 +536,8 @@ fn default_keybinding_detach() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn keybinding_input_shear() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
         let mut waiter = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
 
         let mut a1 =
@@ -558,8 +570,11 @@ fn keybinding_input_shear() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn keybinding_strip_keys() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc = support::daemon::Proc::new("long_noop_keybinding.toml", false)
-            .context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new(
+            "long_noop_keybinding.toml",
+            DaemonArgs { listen_events: false, ..DaemonArgs::default() },
+        )
+        .context("starting daemon proc")?;
         let mut a1 =
             daemon_proc.attach("sess", Default::default()).context("starting attach proc")?;
         let mut lm1 = a1.line_matcher()?;
@@ -576,8 +591,11 @@ fn keybinding_strip_keys() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn keybinding_strip_keys_split() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc = support::daemon::Proc::new("long_noop_keybinding.toml", false)
-            .context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new(
+            "long_noop_keybinding.toml",
+            DaemonArgs { listen_events: false, ..DaemonArgs::default() },
+        )
+        .context("starting daemon proc")?;
         let mut a1 =
             daemon_proc.attach("sess", Default::default()).context("starting attach proc")?;
         let mut lm1 = a1.line_matcher()?;
@@ -598,8 +616,11 @@ fn keybinding_strip_keys_split() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn keybinding_partial_match_nostrip() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc = support::daemon::Proc::new("long_noop_keybinding.toml", false)
-            .context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new(
+            "long_noop_keybinding.toml",
+            DaemonArgs { listen_events: false, ..DaemonArgs::default() },
+        )
+        .context("starting daemon proc")?;
         let mut a1 =
             daemon_proc.attach("sess", Default::default()).context("starting attach proc")?;
         let mut lm1 = a1.line_matcher()?;
@@ -616,8 +637,11 @@ fn keybinding_partial_match_nostrip() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn keybinding_partial_match_nostrip_split() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc = support::daemon::Proc::new("long_noop_keybinding.toml", false)
-            .context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new(
+            "long_noop_keybinding.toml",
+            DaemonArgs { listen_events: false, ..DaemonArgs::default() },
+        )
+        .context("starting daemon proc")?;
         let mut a1 =
             daemon_proc.attach("sess", Default::default()).context("starting attach proc")?;
         let mut lm1 = a1.line_matcher()?;
@@ -638,8 +662,9 @@ fn keybinding_partial_match_nostrip_split() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn custom_keybinding_detach() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc = support::daemon::Proc::new("custom_detach_keybinding.toml", true)
-            .context("starting daemon proc")?;
+        let mut daemon_proc =
+            support::daemon::Proc::new("custom_detach_keybinding.toml", DaemonArgs::default())
+                .context("starting daemon proc")?;
         let mut waiter = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
 
         let mut a1 =
@@ -670,8 +695,8 @@ fn custom_keybinding_detach() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn injects_term_even_with_env_config() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("user_env.toml", true).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new("user_env.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
         let mut waiter = daemon_proc.events.take().unwrap().waiter(["daemon-wrote-s2c-chunk"]);
 
         let mut attach_proc = daemon_proc
@@ -701,8 +726,8 @@ fn injects_term_even_with_env_config() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn injects_local_env_vars() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
         let mut attach_proc = daemon_proc
             .attach(
                 "sh1",
@@ -731,8 +756,9 @@ fn injects_local_env_vars() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn has_right_default_path() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc = support::daemon::Proc::new("no_etc_environment.toml", true)
-            .context("starting daemon proc")?;
+        let mut daemon_proc =
+            support::daemon::Proc::new("no_etc_environment.toml", DaemonArgs::default())
+                .context("starting daemon proc")?;
         let mut attach_proc =
             daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
 
@@ -749,8 +775,9 @@ fn has_right_default_path() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn screen_restore() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc = support::daemon::Proc::new("restore_screen.toml", true)
-            .context("starting daemon proc")?;
+        let mut daemon_proc =
+            support::daemon::Proc::new("restore_screen.toml", DaemonArgs::default())
+                .context("starting daemon proc")?;
         let bidi_done_w = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
 
         {
@@ -784,8 +811,9 @@ fn screen_restore() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn screen_wide_restore() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc = support::daemon::Proc::new("restore_screen.toml", true)
-            .context("starting daemon proc")?;
+        let mut daemon_proc =
+            support::daemon::Proc::new("restore_screen.toml", DaemonArgs::default())
+                .context("starting daemon proc")?;
         let bidi_done_w = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
 
         {
@@ -819,8 +847,9 @@ fn screen_wide_restore() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn lines_restore() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc = support::daemon::Proc::new("restore_lines.toml", true)
-            .context("starting daemon proc")?;
+        let mut daemon_proc =
+            support::daemon::Proc::new("restore_lines.toml", DaemonArgs::default())
+                .context("starting daemon proc")?;
         let bidi_done_w = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
 
         {
@@ -858,8 +887,9 @@ fn lines_restore() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn lines_big_chunk_restore() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc = support::daemon::Proc::new("restore_many_lines.toml", true)
-            .context("starting daemon proc")?;
+        let mut daemon_proc =
+            support::daemon::Proc::new("restore_many_lines.toml", DaemonArgs::default())
+                .context("starting daemon proc")?;
         let bidi_done_w = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
 
         // BUF_SIZE from src/consts.rs
@@ -905,8 +935,8 @@ fn lines_big_chunk_restore() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn exits_with_same_status_as_shell() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
         let mut attach_proc =
             daemon_proc.attach("sh", Default::default()).context("starting attach proc")?;
 
@@ -930,8 +960,8 @@ fn exits_with_same_status_as_shell() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn ttl_hangup() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
         let mut attach_proc = daemon_proc
             .attach(
                 "sh1",
@@ -958,8 +988,8 @@ fn ttl_hangup() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn ttl_no_hangup_yet() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let mut daemon_proc =
-            support::daemon::Proc::new("norc.toml", true).context("starting daemon proc")?;
+        let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
         let mut attach_proc = daemon_proc
             .attach(
                 "sh1",
@@ -983,8 +1013,9 @@ fn ttl_no_hangup_yet() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn prompt_prefix_bash() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let daemon_proc = support::daemon::Proc::new("prompt_prefix_bash.toml", true)
-            .context("starting daemon proc")?;
+        let daemon_proc =
+            support::daemon::Proc::new("prompt_prefix_bash.toml", DaemonArgs::default())
+                .context("starting daemon proc")?;
 
         // we have to manually spawn the child proc rather than using the support
         // util because the line matcher gets bound only after the process gets
@@ -1026,8 +1057,9 @@ fn prompt_prefix_bash() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn prompt_prefix_zsh() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let daemon_proc = support::daemon::Proc::new("prompt_prefix_zsh.toml", true)
-            .context("starting daemon proc")?;
+        let daemon_proc =
+            support::daemon::Proc::new("prompt_prefix_zsh.toml", DaemonArgs::default())
+                .context("starting daemon proc")?;
 
         // see the bash case for why
         let mut child = Command::new(support::shpool_bin()?)
@@ -1066,8 +1098,9 @@ fn prompt_prefix_zsh() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn prompt_prefix_fish() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let daemon_proc = support::daemon::Proc::new("prompt_prefix_fish.toml", true)
-            .context("starting daemon proc")?;
+        let daemon_proc =
+            support::daemon::Proc::new("prompt_prefix_fish.toml", DaemonArgs::default())
+                .context("starting daemon proc")?;
 
         // see the bash case for why
         let mut child = Command::new(support::shpool_bin()?)
@@ -1130,8 +1163,8 @@ fn motd_dump() -> anyhow::Result<()> {
         }
 
         // spawn a daemon based on our custom config
-        let daemon_proc =
-            support::daemon::Proc::new(&config_file, true).context("starting daemon proc")?;
+        let daemon_proc = support::daemon::Proc::new(&config_file, DaemonArgs::default())
+            .context("starting daemon proc")?;
 
         // We need to manually spawn our attach proc because
         // the motd gets printed immediately, so we can't always
@@ -1162,8 +1195,86 @@ fn motd_dump() -> anyhow::Result<()> {
         let mut stdout_str = String::from("");
         stdout.read_to_string(&mut stdout_str).context("slurping stdout")?;
         let stdout_re = Regex::new(".*MOTD_MSG.*")?;
-        // eprintln!("stdout_str='{}'", stdout_str);
         assert!(stdout_re.is_match(&stdout_str));
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
+fn motd_pager() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        // set up the config
+        let tmp_dir = tempfile::TempDir::with_prefix("shpool-test-config")?;
+        let tmp_dir_path = if env::var("SHPOOL_LEAVE_TEST_LOGS").is_ok() {
+            // leave the tmp files around for later inspection if we have been asked
+            // to leave the logs in place.
+            tmp_dir.into_path()
+        } else {
+            PathBuf::from(tmp_dir.path())
+        };
+        eprintln!("building config in {:?}", tmp_dir_path);
+        let motd_file = tmp_dir_path.join("motd.txt");
+        {
+            let mut f = fs::File::create(&motd_file)?;
+            f.write_all("MOTD_MSG\n".as_bytes())?;
+        }
+        let config_tmpl = fs::read_to_string(support::testdata_file("motd_pager.toml.tmpl"))?;
+        let config_contents = config_tmpl.replace("TMP_MOTD_MSG_FILE", motd_file.to_str().unwrap());
+        let config_file = tmp_dir_path.join("motd_pager.toml");
+        {
+            let mut f = fs::File::create(&config_file)?;
+            f.write_all(config_contents.as_bytes())?;
+        }
+
+        // spawn a daemon based on our custom config
+        let daemon_proc = support::daemon::Proc::new(
+            &config_file,
+            DaemonArgs {
+                extra_env: vec![(String::from("TERM"), String::from("xterm"))],
+                ..DaemonArgs::default()
+            },
+        )
+        .context("starting daemon proc")?;
+
+        // We need to manually spawn our attach proc because
+        // the motd gets printed immediately, so we can't always
+        // attach a line matcher in time.
+        let mut child = Command::new(support::shpool_bin()?)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .arg("--socket")
+            .arg(&daemon_proc.socket_path)
+            .arg("--config-file")
+            .arg(config_file)
+            .arg("attach")
+            .arg("sh1")
+            .spawn()
+            .context("spawning attach process")?;
+
+        // The attach shell should be spawned and have read the
+        // initial prompt after half a second.
+        std::thread::sleep(time::Duration::from_millis(500));
+        child.kill().context("killing child")?;
+
+        let mut stderr = child.stderr.take().context("missing stderr")?;
+        let mut stderr_str = String::from("");
+        stderr.read_to_string(&mut stderr_str).context("slurping stderr")?;
+        assert!(stderr_str.is_empty());
+
+        let mut stdout = child.stdout.take().context("missing stdout")?;
+        let mut stdout_str = String::from("");
+        stdout.read_to_string(&mut stdout_str).context("slurping stdout")?;
+        let stdout_msg_re = Regex::new(".*MOTD_MSG.*")?;
+        eprintln!("stdout_str: {}", stdout_str);
+        assert!(stdout_msg_re.is_match(&stdout_str));
+
+        // Less includes the name of the file in its output, so we test
+        // for the presence of the stem used to contrust the tmp file
+        // passed to the pager.
+        let stdout_file_re = Regex::new(".*\\(END\\).*")?;
+        assert!(stdout_file_re.is_match(&stdout_str));
 
         Ok(())
     })
@@ -1172,8 +1283,11 @@ fn motd_dump() -> anyhow::Result<()> {
 #[ignore] // TODO: re-enable, this test if flaky
 #[test]
 fn up_arrow_no_crash() -> anyhow::Result<()> {
-    let mut daemon_proc =
-        support::daemon::Proc::new("norc.toml", false).context("starting daemon proc")?;
+    let mut daemon_proc = support::daemon::Proc::new(
+        "norc.toml",
+        DaemonArgs { listen_events: false, ..DaemonArgs::default() },
+    )
+    .context("starting daemon proc")?;
     let mut attach_proc =
         daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
 

@@ -28,6 +28,17 @@ pub struct Proc {
     pub hook_records: Option<Arc<Mutex<HookRecords>>>,
 }
 
+pub struct DaemonArgs {
+    pub listen_events: bool,
+    pub extra_env: Vec<(String, String)>,
+}
+
+impl std::default::Default for DaemonArgs {
+    fn default() -> Self {
+        DaemonArgs { listen_events: true, extra_env: vec![] }
+    }
+}
+
 #[derive(Default)]
 pub struct AttachArgs {
     pub config: Option<String>,
@@ -88,7 +99,7 @@ pub struct HookRecords {
 }
 
 impl Proc {
-    pub fn new<P: AsRef<Path>>(config: P, listen_events: bool) -> anyhow::Result<Proc> {
+    pub fn new<P: AsRef<Path>>(config: P, args: DaemonArgs) -> anyhow::Result<Proc> {
         let local_tmp_dir = tempfile::Builder::new()
             .prefix("shpool-test")
             .rand_bytes(20)
@@ -119,12 +130,16 @@ impl Proc {
             .arg("--config-file")
             .arg(resolved_config)
             .arg("daemon");
-        if listen_events {
+        if args.listen_events {
             cmd.env("SHPOOL_TEST_HOOK_SOCKET_PATH", &test_hook_socket_path);
+        }
+        for (key, val) in args.extra_env.into_iter() {
+            cmd.env(key, val);
         }
         let proc = cmd.spawn().context("spawning daemon process")?;
 
-        let events = if listen_events { Some(Events::new(&test_hook_socket_path)?) } else { None };
+        let events =
+            if args.listen_events { Some(Events::new(&test_hook_socket_path)?) } else { None };
 
         // spin until we can dial the socket successfully
         let mut sleep_dur = time::Duration::from_millis(5);

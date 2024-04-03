@@ -20,3 +20,6 @@ pub const JOIN_POLL_DURATION: time::Duration = time::Duration::from_millis(100);
 pub const BUF_SIZE: usize = 1024 * 16;
 
 pub const HEARTBEAT_DURATION: time::Duration = time::Duration::from_millis(500);
+
+pub const STDIN_FD: i32 = 0;
+pub const STDERR_FD: i32 = 2;

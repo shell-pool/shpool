@@ -27,8 +27,7 @@ serde_derive = "1" # config parsing, connection header formatting
 toml = "0.7" # config parsing
 byteorder = "1" # endianness
 signal-hook = "0.3" # signal handling
-nix = { version = "0.26", features = ["poll", "ioctl"] } # rusty wrapper for unix apis
-shpool_pty = "0.3.0" # spawning shells in ptys
+shpool_pty = "0.3.1" # spawning shells in ptys
 lazy_static = "1" # globals
 crossbeam-channel = "0.5" # channels
 libc = "0.2" # basic libc types
@@ -39,6 +38,13 @@ shpool_vt100 = "0.1.2" # terminal emulation for the scrollback buffer
 shell-words = "1" # parsing the -c/--cmd argument
 motd = "0.2.0" # getting the message-of-the-day
 termini = "1.0.0" # terminfo database
+tempfile = "3" # RAII tmp files
+strip-ansi-escapes = "0.2.0" # cleaning up strings for pager display
+
+# rusty wrapper for unix apis
+[dependencies.nix]
+version = "0.28"
+features = ["poll", "ioctl", "socket", "user", "process", "signal", "term", "fs"]
 
 [dependencies.tracing-subscriber]
 version = "0.3"
