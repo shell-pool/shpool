@@ -1,3 +1,16 @@
+shpool (0.6.0) unstable; urgency=low
+
+  * Add new 'motd' config option for displaying the motd
+  * Add 'dump' motd mode
+  * Add 'pager' motd mode
+  * [BREAKING] Add requirment to register a motd reexec handler in main
+  * [BREAKING] Set default prompt prefix
+  * Upgrade deps
+  * README fixes
+  * Fix how user info is collected
+  * Github migration toil
+
+ -- Ethan Pailes <pailes@google.com>  Thu, 03 Apr 2024 09:02:00 -0400
 shpool (0.5.0) unstable; urgency=low
 
   * Add fish support to prompt_prefix
