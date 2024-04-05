@@ -1,6 +1,6 @@
 [package]
 name = "libshpool"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 repository = "https://github.com/shell-pool/shpool"
 authors = ["Ethan Pailes <pailes@google.com>"]
