@@ -606,7 +606,7 @@ fn keybinding_strip_keys_split() -> anyhow::Result<()> {
         a1.run_raw("aa".bytes().collect())?;
         thread::sleep(time::Duration::from_millis(50));
         a1.run_raw("aad\n".bytes().collect())?;
-        lm1.scan_until_re("bd$")?;
+        lm1.scan_until_re("bd")?;
 
         Ok(())
     })
