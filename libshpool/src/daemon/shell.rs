@@ -267,8 +267,7 @@ impl SessionInner {
                                 // Always instantly resize the spool, since we don't
                                 // need to inject a delay into that.
                                 if let Some(s) = output_spool.as_mut() {
-                                    s.screen_mut().set_size(
-                                        conn.size.rows, std::u16::MAX);
+                                    s.screen_mut().set_size(conn.size.rows, u16::MAX);
                                 }
                                 resize_cmd = Some(ResizeCmd {
                                     size: conn.size.clone(),
@@ -344,7 +343,7 @@ impl SessionInner {
                             Ok(size) => {
                                 info!("resize size={:?}", size);
                                 if let Some(s) = output_spool.as_mut() {
-                                    s.screen_mut().set_size(size.rows, std::u16::MAX);
+                                    s.screen_mut().set_size(size.rows, u16::MAX);
                                 }
                                 resize_cmd = Some(ResizeCmd {
                                     size,
