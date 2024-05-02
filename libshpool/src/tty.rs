@@ -41,6 +41,8 @@ nix::ioctl_write_ptr_bad!(tiocswinsz, libc::TIOCSWINSZ, libc::winsize);
 pub struct Size {
     pub rows: u16,
     pub cols: u16,
+    pub xpixel: u16,
+    pub ypixel: u16,
 }
 
 impl Size {
@@ -54,15 +56,25 @@ impl Size {
             tiocgwinsz(fd, &mut term_size).context("fetching term size")?;
         }
 
-        Ok(Size { rows: term_size.ws_row, cols: term_size.ws_col })
+        Ok(Size {
+            rows: term_size.ws_row,
+            cols: term_size.ws_col,
+            xpixel: term_size.ws_xpixel,
+            ypixel: term_size.ws_ypixel,
+        })
     }
 
     /// set_fd sets the tty indicated by the given file descriptor
     /// to have this size.
     pub fn set_fd(&self, fd: RawFd) -> anyhow::Result<()> {
-        let term_size =
-            libc::winsize { ws_row: self.rows, ws_col: self.cols, ws_xpixel: 0, ws_ypixel: 0 };
+        let term_size = libc::winsize {
+            ws_row: self.rows,
+            ws_col: self.cols,
+            ws_xpixel: self.xpixel,
+            ws_ypixel: self.ypixel,
+        };
 
+        // Safety: term_size is live for the whole call.
         unsafe {
             tiocswinsz(fd, &term_size).context("setting term size")?;
         }

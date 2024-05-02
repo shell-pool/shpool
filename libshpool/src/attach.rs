@@ -113,7 +113,7 @@ fn do_attach(
         Ok(s) => s,
         Err(e) => {
             warn!("stdin is not a tty, using default size (err: {:?})", e);
-            tty::Size { rows: 24, cols: 80 }
+            tty::Size { rows: 24, cols: 80, xpixel: 0, ypixel: 0 }
         }
     };
 
