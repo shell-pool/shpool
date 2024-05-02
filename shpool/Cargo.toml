@@ -19,7 +19,6 @@ rust-version = "1.74"
 clap = { version = "4", features = ["derive"] } # cli parsing
 anyhow = "1" # dynamic, unstructured errors
 libshpool = { version = "0.6.0", path = "../libshpool" }
-motd = "0.2.0" # getting the message-of-the-day
 
 [dev-dependencies]
 lazy_static = "1" # globals

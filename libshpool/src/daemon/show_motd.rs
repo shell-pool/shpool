@@ -39,8 +39,7 @@ impl DailyMessenger {
     /// Make a new Shower.
     pub fn new(mode: config::MotdDisplayMode, args: Option<Vec<String>>) -> anyhow::Result<Self> {
         Ok(DailyMessenger {
-            motd_resolver: motd::Resolver::new(motd::PamMotdResolutionStrategy::Auto)
-                .context("creating motd resolver")?,
+            motd_resolver: motd::Resolver::new().context("creating motd resolver")?,
             mode,
             args,
         })

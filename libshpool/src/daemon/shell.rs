@@ -261,6 +261,8 @@ impl SessionInner {
                                 let oversize = tty::Size {
                                     rows: conn.size.rows + 1,
                                     cols: conn.size.cols + 1,
+                                    xpixel: conn.size.xpixel,
+                                    ypixel: conn.size.ypixel,
                                 };
                                 oversize.set_fd(pty_master.raw_fd().ok_or(anyhow!("no master fd"))?)?;
 

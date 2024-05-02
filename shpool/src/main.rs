@@ -20,8 +20,6 @@ use clap::Parser;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() -> anyhow::Result<()> {
-    motd::handle_reexec();
-
     let args = libshpool::Args::parse();
 
     if args.version() {
