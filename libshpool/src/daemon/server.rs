@@ -40,8 +40,8 @@ use crate::{
     config::MotdDisplayMode,
     consts,
     daemon::{
-        etc_environment, exit_notify::ExitNotifier, hooks, pager::PagerError, prompt, shell,
-        show_motd, ttl_reaper,
+        control_codes, etc_environment, exit_notify::ExitNotifier, hooks, pager::PagerError,
+        prompt, shell, show_motd, ttl_reaper,
     },
     protocol, test_hooks, tty, user,
 };
@@ -69,6 +69,7 @@ pub struct Server {
     register_new_reapable_session: crossbeam_channel::Sender<(String, Instant)>,
     hooks: Box<dyn hooks::Hooks + Send + Sync>,
     daily_messenger: Arc<show_motd::DailyMessenger>,
+    control_code_matcher_factory: Arc<Mutex<control_codes::MatcherFactory>>,
 }
 
 impl Server {
@@ -100,6 +101,9 @@ impl Server {
             register_new_reapable_session: new_sess_tx,
             hooks,
             daily_messenger,
+            control_code_matcher_factory: Arc::new(
+                Mutex::new(control_codes::MatcherFactory::new()),
+            ),
         }))
     }
 
@@ -780,6 +784,7 @@ impl Server {
             config: self.config.clone(),
             reader_join_h: None,
             term_db,
+            control_code_matcher_factory: Arc::clone(&self.control_code_matcher_factory),
             daily_messenger: Arc::clone(&self.daily_messenger),
             needs_initial_motd_dump: dump_motd_on_new_session,
         };
@@ -800,6 +805,7 @@ impl Server {
             client_connection_ack: client_connection_ack_tx,
             tty_size_change: tty_size_change_rx,
             tty_size_change_ack: tty_size_change_ack_tx,
+            term: term.clone(),
         })?);
 
         if let Some(ttl_secs) = header.ttl_secs {

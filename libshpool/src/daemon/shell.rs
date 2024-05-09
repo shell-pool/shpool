@@ -105,6 +105,7 @@ pub struct SessionInner {
     pub client_stream: Option<UnixStream>,
     pub config: config::Config,
     pub term_db: Arc<termini::TermInfo>,
+    pub control_code_matcher_factory: Arc<Mutex<control_codes::MatcherFactory>>,
     pub daily_messenger: Arc<show_motd::DailyMessenger>,
     pub needs_initial_motd_dump: bool,
 
@@ -182,6 +183,7 @@ pub struct ReaderArgs {
     pub client_connection_ack: crossbeam_channel::Sender<ClientConnectionStatus>,
     pub tty_size_change: crossbeam_channel::Receiver<tty::Size>,
     pub tty_size_change_ack: crossbeam_channel::Sender<()>,
+    pub term: Option<String>,
 }
 
 impl SessionInner {
@@ -196,8 +198,18 @@ impl SessionInner {
         use nix::poll;
 
         let term_db = Arc::clone(&self.term_db);
-        let mut control_code_matcher =
-            control_codes::Matcher::new(&self.term_db).context("building control code matcher")?;
+        let mut control_code_matcher = {
+            let mut matcher_factory = self.control_code_matcher_factory.lock().unwrap();
+            match matcher_factory.new_matcher(args.term.as_deref().unwrap_or("xterm")) {
+                Ok(m) => m,
+                Err(e) => {
+                    warn!("Error creating matcher with TERM={:?}: {:?}", args.term, e);
+                    matcher_factory
+                        .new_matcher("xterm")
+                        .context("creating fallback xterm control code matcher")?
+                }
+            }
+        };
 
         let daily_messenger = Arc::clone(&self.daily_messenger);
         let mut needs_initial_motd_dump = self.needs_initial_motd_dump;
@@ -459,7 +471,8 @@ impl SessionInner {
                 if len == 0 {
                     continue;
                 }
-                trace!("read pty master len={} '{}'", len, String::from_utf8_lossy(&buf[..len]));
+                let mut buf = &buf[..len];
+                trace!("read pty master len={} '{}'", len, String::from_utf8_lossy(buf));
 
                 if !matches!(args.session_restore_mode, config::SessionRestoreMode::Simple) {
                     if let Some(s) = output_spool.as_mut() {
@@ -471,7 +484,7 @@ impl SessionInner {
                 let mut reset_client_conn = false;
                 let mut snip_buf_to = None;
                 if needs_initial_motd_dump {
-                    for (i, byte) in buf[..len].iter().enumerate() {
+                    for (i, byte) in buf.iter().enumerate() {
                         match control_code_matcher.transition(*byte) {
                             Some(control_codes::Code::ClearScreen) if needs_initial_motd_dump => {
                                 debug!("detected initial ClearScreen code");
@@ -508,15 +521,16 @@ impl SessionInner {
                         }
                     }
                 }
+                let mut write_buf = true;
                 if let Some(snip_to) = snip_buf_to {
                     if snip_to < buf.len() {
-                        buf = Vec::from(&buf[snip_to..]);
+                        buf = &buf[snip_to..];
                     } else {
-                        buf.clear();
+                        write_buf = false;
                     }
                 }
 
-                if let ClientConnectionMsg::New(conn) = &client_conn {
+                if let (ClientConnectionMsg::New(conn), true) = (&client_conn, write_buf) {
                     let chunk =
                         protocol::Chunk { kind: protocol::ChunkKind::Data, buf: &buf[..len] };
                     let mut s = conn.sink.lock().unwrap();
