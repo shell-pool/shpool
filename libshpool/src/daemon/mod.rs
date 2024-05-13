@@ -42,8 +42,8 @@ pub fn run(
 ) -> anyhow::Result<()> {
     info!("\n\n======================== STARTING DAEMON ============================\n\n");
 
-    let config = config::read_config(&config_file)?;
-    let server = server::Server::new(config, hooks, runtime_dir)?;
+    let config_manager = config::Manager::new(config_file.as_deref())?;
+    let server = server::Server::new(config_manager, hooks, runtime_dir)?;
 
     let (cleanup_socket, listener) = match systemd::activation_socket() {
         Ok(l) => {

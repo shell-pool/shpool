@@ -12,36 +12,119 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::fs;
-use std::path::PathBuf;
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+    sync::{Arc, RwLock, RwLockReadGuard},
+};
 
 use anyhow::Context;
+use notify::Watcher;
 use serde_derive::Deserialize;
-use tracing::{info, instrument};
+use tracing::{info, warn};
 
 use super::{daemon::keybindings, user};
 
-#[instrument(skip_all)]
-pub fn read_config(config_file: &Option<String>) -> anyhow::Result<Config> {
-    let mut config = Config::default();
-    if let Some(config_path) = config_file {
-        info!("parsing explicitly passed in config ({})", config_path);
-        let config_str = fs::read_to_string(config_path).context("reading config toml (1)")?;
-        config = toml::from_str(&config_str).context("parsing config file (1)")?;
-    } else {
+/// Exposes the shpool config file, watching for file updates
+/// so that the user does not need to restart the daemon when
+/// they edit their config.
+///
+/// Users should never cache the config value directly and always
+/// access the config through the manager. The config may change
+/// at any time, so any cached config value could become stale.
+pub struct Manager {
+    /// The config value.
+    config: Arc<RwLock<Config>>,
+    watcher: Option<Arc<notify::RecommendedWatcher>>,
+}
+
+impl Manager {
+    // Create a new config manager.
+    pub fn new(config_file: Option<&str>) -> anyhow::Result<Self> {
         let user_info = user::info()?;
-        let mut config_path = PathBuf::from(user_info.home_dir);
-        config_path.push(".config");
-        config_path.push("shpool");
-        config_path.push("config.toml");
-        if config_path.exists() {
-            let config_str = fs::read_to_string(config_path).context("reading config toml (2)")?;
-            config = toml::from_str(&config_str).context("parsing config file (2)")?;
+        let mut default_config_path = PathBuf::from(user_info.home_dir);
+
+        let (config, config_path) = if let Some(config_path) = config_file {
+            info!("parsing explicitly passed in config ({})", config_path);
+            let config_str = fs::read_to_string(config_path).context("reading config toml (1)")?;
+            let config = toml::from_str(&config_str).context("parsing config file (1)")?;
+
+            (config, Some(String::from(config_path)))
+        } else {
+            default_config_path.push(".config");
+            default_config_path.push("shpool");
+            default_config_path.push("config.toml");
+            if default_config_path.exists() {
+                let config_str =
+                    fs::read_to_string(&default_config_path).context("reading config toml (2)")?;
+                let config = toml::from_str(&config_str).context("parsing config file (2)")?;
+
+                (config, default_config_path.clone().to_str().map(String::from))
+            } else {
+                (Config::default(), None)
+            }
+        };
+
+        let mut manager = Manager { config: Arc::new(RwLock::new(config)), watcher: None };
+
+        if let Some(watch_path) = config_path {
+            let config_slot = Arc::clone(&manager.config);
+            let reload_path = watch_path.clone();
+            let mut watcher = notify::recommended_watcher(move |res| match res {
+                Ok(event) => {
+                    info!("config file modify event: {:?}", event);
+
+                    let config_str = match fs::read_to_string(&reload_path) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            warn!("error reading config file: {:?}", e);
+                            return;
+                        }
+                    };
+
+                    let config = match toml::from_str(&config_str) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            warn!("error parsing config file: {:?}", e);
+                            return;
+                        }
+                    };
+
+                    let mut manager_config = config_slot.write().unwrap();
+                    *manager_config = config;
+                }
+                Err(e) => warn!("config file watch err: {:?}", e),
+            })
+            .context("building watcher")?;
+            watcher
+                .watch(Path::new(&watch_path), notify::RecursiveMode::NonRecursive)
+                .context("registering config file for watching")?;
+            manager.watcher = Some(Arc::new(watcher));
         }
+
+        Ok(manager)
     }
 
-    Ok(config)
+    // Get the current config value.
+    pub fn get(&self) -> RwLockReadGuard<'_, Config> {
+        self.config.read().unwrap()
+    }
+}
+
+impl std::clone::Clone for Manager {
+    fn clone(&self) -> Self {
+        Manager { config: Arc::clone(&self.config), watcher: self.watcher.as_ref().map(Arc::clone) }
+    }
+}
+
+impl std::fmt::Debug for Manager {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        let config = self.config.read().unwrap();
+        write!(f, "{:?}", config)?;
+
+        Ok(())
+    }
 }
 
 #[derive(Deserialize, Default, Debug, Clone)]

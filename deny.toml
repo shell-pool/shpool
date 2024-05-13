@@ -11,6 +11,8 @@ ignore = [
 
 [licenses]
 allow = [
+    "CC0-1.0", # unencumbered
+    "ISC", # notice
     "Apache-2.0",
     "MIT",
     "Unicode-DFS-2016",
