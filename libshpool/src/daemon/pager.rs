@@ -183,6 +183,7 @@ impl Pager {
             // since pagers don't stick around when the client hangs up
             // it is not really that importaint. Let's KISS.
             while let Ok(size) = tty_size_change_rx.recv() {
+                info!("recvd new size: {:?}", size);
                 if let Err(e) = size.set_fd(pty_master_fd) {
                     warn!("setting pager size: {:?}", e);
                 }
