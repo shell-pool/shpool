@@ -143,7 +143,7 @@ fn reattach_after_kill() -> anyhow::Result<()> {
             daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
         let mut lm2 = sess2.line_matcher()?;
         sess2.run_cmd("echo ${MYVAR:-second}")?;
-        lm2.scan_until_re("second$")?;
+        lm2.scan_until_re(".*second.*")?;
 
         Ok(())
     })

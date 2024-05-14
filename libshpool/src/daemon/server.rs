@@ -50,6 +50,12 @@ const DEFAULT_INITIAL_SHELL_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
 const DEFAULT_OUTPUT_SPOOL_LINES: usize = 500;
 const DEFAULT_PROMPT_PREFIX: &str = "shpool:$SHPOOL_SESSION_NAME ";
 
+// Half a second should be more than enough time to handle any resize or
+// or detach. If things are taking longer, we can't afford to keep waiting
+// for the reader thread since session message calls are made with the
+// global session table lock held.
+const SESSION_MSG_TIMEOUT: time::Duration = time::Duration::from_millis(500);
+
 pub struct Server {
     config: config::Config,
     /// A map from shell session names to session descriptors.
@@ -519,7 +525,7 @@ impl Server {
         Ok(())
     }
 
-    #[instrument(skip_all)]
+    #[instrument(skip_all, fields(s = &header.session_name))]
     fn handle_session_message(
         &self,
         mut stream: UnixStream,
@@ -532,39 +538,46 @@ impl Server {
             if let Some(session) = shells.get(&header.session_name) {
                 match header.payload {
                     protocol::SessionMessageRequestPayload::Resize(resize_request) => {
+                        info!("handling resize msg");
                         let pager_ctl = session.pager_ctl.lock().unwrap();
                         if let Some(pager_ctl) = pager_ctl.as_ref() {
+                            info!("resizing pager");
                             pager_ctl
                                 .tty_size_change
-                                .send(resize_request.tty_size.clone())
+                                .send_timeout(resize_request.tty_size.clone(), SESSION_MSG_TIMEOUT)
                                 .context("sending tty size change to pager")?;
                             pager_ctl
                                 .tty_size_change_ack
-                                .recv()
+                                .recv_timeout(SESSION_MSG_TIMEOUT)
                                 .context("recving tty size change ack from pager")?;
                         } else {
+                            info!("resizing reader");
                             let reader_ctl = session.reader_ctl.lock().unwrap();
                             reader_ctl
                                 .tty_size_change
-                                .send(resize_request.tty_size)
+                                .send_timeout(resize_request.tty_size, SESSION_MSG_TIMEOUT)
                                 .context("sending tty size change to reader")?;
                             reader_ctl
                                 .tty_size_change_ack
-                                .recv()
+                                .recv_timeout(SESSION_MSG_TIMEOUT)
                                 .context("recving tty size ack")?;
                         }
 
                         protocol::SessionMessageReply::Resize(protocol::ResizeReply::Ok)
                     }
                     protocol::SessionMessageRequestPayload::Detach => {
+                        info!("handling detach msg");
                         let reader_ctl = session.reader_ctl.lock().unwrap();
                         reader_ctl
                             .client_connection
-                            .send(shell::ClientConnectionMsg::Disconnect)
+                            .send_timeout(
+                                shell::ClientConnectionMsg::Disconnect,
+                                SESSION_MSG_TIMEOUT,
+                            )
                             .context("sending client detach to reader")?;
                         let status = reader_ctl
                             .client_connection_ack
-                            .recv()
+                            .recv_timeout(SESSION_MSG_TIMEOUT)
                             .context("getting client conn ack")?;
                         info!("detached session({}), status = {:?}", header.session_name, status);
                         protocol::SessionMessageReply::Detach(
