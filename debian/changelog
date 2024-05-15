@@ -1,3 +1,11 @@
+shpool (0.6.1) unstable; urgency=low
+
+  * Start automatically reloading config file
+  * Fix motd = "dump" mode to stop mangling initial prompt
+  * Add timeouts to prevent session message deadlocks
+  * Start correctly forwarding {x,y}pixel in term size
+
+ -- Ethan Pailes <pailes@google.com>  Wed, 15 May 2024 12:07:00 -0400
 shpool (0.6.0) unstable; urgency=low
 
   * Add new 'motd' config option for displaying the motd
