@@ -19,9 +19,64 @@
 //! code. We need to scan for this to avoid a race that can lead to
 //! the motd getting clobbered when in dump mode.
 
+use std::{collections::HashMap, process::Command};
+
 use anyhow::{anyhow, Context};
 
 use super::trie::{Trie, TrieCursor};
+
+/// Contains metadata used to create new matchers.
+#[derive(Debug)]
+pub struct MatcherFactory {
+    /// A table mapping TERM values to the output that the `clear`
+    /// command produces when run with that TERM value. Really,
+    /// it would be nice to do this with some judicious queries
+    /// to to termini::TermInfo, but unfortunately I can't figure
+    /// out the right query to get the second control code that
+    /// `clear` emits. The first is `termini::StringCapability::ClearScreen`.
+    clear_codes: HashMap<String, Vec<u8>>,
+}
+
+impl MatcherFactory {
+    /// Create a new factory.
+    pub fn new() -> Self {
+        MatcherFactory { clear_codes: HashMap::new() }
+    }
+
+    /// Create a new matcher for the given TERM value.
+    pub fn new_matcher(&mut self, term: &str) -> anyhow::Result<Matcher> {
+        let clear_code = match self.clear_codes.get(term) {
+            Some(c) => c,
+            None => {
+                let code = Self::clear_code_for_term(term)?;
+                self.clear_codes.insert(String::from(term), code);
+                self.clear_codes.get(term).unwrap()
+            }
+        };
+
+        Matcher::new(clear_code)
+    }
+
+    fn clear_code_for_term(term: &str) -> anyhow::Result<Vec<u8>> {
+        let output = Command::new("clear")
+            .env("TERM", term)
+            .output()
+            .context("execing clear to get output")?;
+        if !output.status.success() {
+            return Err(anyhow!("bad clear exit status: {:?}", output.status));
+        }
+        if !output.stderr.is_empty() {
+            return Err(anyhow!(
+                "got clear stderr (want none): {}",
+                String::from_utf8_lossy(output.stderr.as_slice())
+            ));
+        }
+        if output.stdout.is_empty() {
+            return Err(anyhow!("got empty clear stdout"));
+        }
+        Ok(output.stdout)
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum Code {
@@ -35,22 +90,7 @@ pub struct Matcher {
 }
 
 impl Matcher {
-    pub fn new(term_db: &termini::TermInfo) -> anyhow::Result<Self> {
-        let clear_code_bytes = match term_db.raw_string_cap(termini::StringCapability::ClearScreen)
-        {
-            Some(code) => Vec::from(code),
-            None => {
-                // If we somehow have a wacky terminfo db with no clear code, we fall
-                // back on xterm clear since we still need something to scan for.
-                let xterm_db =
-                    termini::TermInfo::from_name("xterm").context("building fallback xterm db")?;
-                let code = xterm_db
-                    .raw_string_cap(termini::StringCapability::ClearScreen)
-                    .ok_or(anyhow!("no fallback clear screen code"))?;
-                Vec::from(code)
-            }
-        };
-
+    fn new(clear_code_bytes: &[u8]) -> anyhow::Result<Self> {
         let raw_bindings = vec![
             // We need to scan for the clear code that gets emitted by the prompt prefix
             // shell injection code so that we can make sure that the message of the day
@@ -59,7 +99,7 @@ impl Matcher {
         ];
         let mut codes = Trie::new();
         for (raw_bytes, code) in raw_bindings.into_iter() {
-            codes.insert(raw_bytes.into_iter(), code);
+            codes.insert(raw_bytes.iter().copied(), code);
         }
 
         Ok(Matcher { codes, codes_cursor: TrieCursor::Start })
