@@ -57,7 +57,7 @@ const DEFAULT_PROMPT_PREFIX: &str = "shpool:$SHPOOL_SESSION_NAME ";
 const SESSION_MSG_TIMEOUT: time::Duration = time::Duration::from_millis(500);
 
 pub struct Server {
-    config: config::Config,
+    config: config::Manager,
     /// A map from shell session names to session descriptors.
     /// We wrap this in Arc<Mutex<_>> so that we can get at the
     /// table from different threads such as the SIGWINCH thread
@@ -75,7 +75,7 @@ pub struct Server {
 impl Server {
     #[instrument(skip_all)]
     pub fn new(
-        config: config::Config,
+        config: config::Manager,
         hooks: Box<dyn hooks::Hooks + Send + Sync>,
         runtime_dir: PathBuf,
     ) -> anyhow::Result<Arc<Self>> {
@@ -91,8 +91,8 @@ impl Server {
         });
 
         let daily_messenger = Arc::new(show_motd::DailyMessenger::new(
-            config.motd.clone().unwrap_or_default(),
-            config.motd_args.clone(),
+            config.get().motd.clone().unwrap_or_default(),
+            config.get().motd_args.clone(),
         )?);
         Ok(Arc::new(Server {
             config,
@@ -269,7 +269,7 @@ impl Server {
                 if let Err(err) = self.hooks.on_new_session(&header.name) {
                     warn!("new_session hook: {:?}", err);
                 }
-                let motd = self.config.motd.clone().unwrap_or_default();
+                let motd = self.config.get().motd.clone().unwrap_or_default();
                 let session = self.spawn_subshell(
                     conn_id,
                     stream,
@@ -322,7 +322,7 @@ impl Server {
             // If in pager motd mode, launch the pager and block until it is
             // done, picking up any tty size change that happened while the
             // user was examining the motd.
-            let motd_mode = self.config.motd.clone().unwrap_or_default();
+            let motd_mode = self.config.get().motd.clone().unwrap_or_default();
             let init_tty_size = if matches!(motd_mode, MotdDisplayMode::Pager { .. }) {
                 match self.daily_messenger.display_in_pager(
                     client_stream,
@@ -390,7 +390,7 @@ impl Server {
 
     #[instrument(skip_all)]
     fn link_ssh_auth_sock(&self, header: &protocol::AttachHeader) -> anyhow::Result<()> {
-        if self.config.nosymlink_ssh_auth_sock.unwrap_or(false) {
+        if self.config.get().nosymlink_ssh_auth_sock.unwrap_or(false) {
             return Ok(());
         }
 
@@ -611,7 +611,7 @@ impl Server {
         dump_motd_on_new_session: bool,
     ) -> anyhow::Result<shell::Session> {
         let user_info = user::info()?;
-        let shell = if let Some(s) = &self.config.shell {
+        let shell = if let Some(s) = &self.config.get().shell {
             s.clone()
         } else {
             user_info.default_shell.clone()
@@ -633,7 +633,7 @@ impl Server {
             cmd
         } else {
             let mut cmd = process::Command::new(&shell);
-            if self.config.norc.unwrap_or(false) && shell == "/bin/bash" {
+            if self.config.get().norc.unwrap_or(false) && shell == "/bin/bash" {
                 cmd.arg("--norc").arg("--noprofile");
             }
             cmd
@@ -687,7 +687,7 @@ impl Server {
             None
         };
 
-        let noecho = self.config.noecho.unwrap_or(false);
+        let noecho = self.config.get().noecho.unwrap_or(false);
         info!("about to fork subshell noecho={}", noecho);
         let mut fork = shpool_pty::fork::Fork::from_ptmx().context("forking pty")?;
         if let Ok(slave) = fork.is_child() {
@@ -737,7 +737,7 @@ impl Server {
         // inject the prompt prefix, if any
         info!("injecting prompt prefix");
         let prompt_prefix =
-            self.config.prompt_prefix.clone().unwrap_or(String::from(DEFAULT_PROMPT_PREFIX));
+            self.config.get().prompt_prefix.clone().unwrap_or(String::from(DEFAULT_PROMPT_PREFIX));
         if let Some(shell_basename) = shell_basename {
             if !prompt_prefix.is_empty() {
                 if let Err(err) = prompt::inject_prefix(
@@ -793,14 +793,15 @@ impl Server {
             conn_id,
             tty_size: header.local_tty_size.clone(),
             scrollback_lines: match (
-                self.config.output_spool_lines,
-                &self.config.session_restore_mode,
+                self.config.get().output_spool_lines,
+                &self.config.get().session_restore_mode,
             ) {
                 (Some(l), _) => l,
                 (None, Some(config::SessionRestoreMode::Lines(l))) => *l as usize,
                 (None, _) => DEFAULT_OUTPUT_SPOOL_LINES,
             },
-            session_restore_mode: self.config.session_restore_mode.clone().unwrap_or_default(),
+            session_restore_mode:
+                self.config.get().session_restore_mode.clone().unwrap_or_default(),
             client_connection: client_connection_rx,
             client_connection_ack: client_connection_ack_tx,
             tty_size_change: tty_size_change_rx,
@@ -837,6 +838,7 @@ impl Server {
             .env(
                 "PATH",
                 self.config
+                    .get()
                     .initial_path
                     .as_ref()
                     .map(|x| x.as_ref())
@@ -860,7 +862,7 @@ impl Server {
         if let Some(t) = header.local_env_get("TERM") {
             term = Some(String::from(t));
         }
-        if let Some(env) = self.config.env.as_ref() {
+        if let Some(env) = self.config.get().env.as_ref() {
             term = match env.get("TERM") {
                 None => term,
                 Some(t) if t.is_empty() => None,
@@ -901,7 +903,7 @@ impl Server {
         }
 
         // parse and load /etc/environment unless we've been asked not to
-        if !self.config.noread_etc_environment.unwrap_or(false) {
+        if !self.config.get().noread_etc_environment.unwrap_or(false) {
             match fs::File::open("/etc/environment") {
                 Ok(f) => {
                     let pairs = etc_environment::parse_compat(io::BufReader::new(f))?;

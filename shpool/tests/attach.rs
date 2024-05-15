@@ -1254,6 +1254,48 @@ fn motd_pager() -> anyhow::Result<()> {
     })
 }
 
+#[test]
+#[timeout(30000)]
+fn dynamic_config_change() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let tmp_dir = tempfile::TempDir::with_prefix("shpool-test-config")?;
+        let tmp_dir_path = if env::var("SHPOOL_LEAVE_TEST_LOGS").is_ok() {
+            // leave the tmp files around for later inspection if we have been asked
+            // to leave the logs in place.
+            tmp_dir.into_path()
+        } else {
+            PathBuf::from(tmp_dir.path())
+        };
+        eprintln!("building config in {:?}", tmp_dir_path);
+        let config_tmpl = fs::read_to_string(support::testdata_file("dynamic_config.toml.tmpl"))?;
+        let config_file = tmp_dir_path.join("motd_pager.toml");
+        fs::write(&config_file, &config_tmpl)?;
+
+        let mut daemon_proc =
+            support::daemon::Proc::new(&config_file, DaemonArgs { ..DaemonArgs::default() })
+                .context("starting daemon proc")?;
+
+        let mut attach_proc =
+            daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+        let mut line_matcher = attach_proc.line_matcher()?;
+        attach_proc.run_cmd("echo $CHANGING_VAR")?;
+        line_matcher.scan_until_re("REPLACE_ME$")?;
+
+        // change the config contents on the fly
+        let config_contents = config_tmpl.replace("REPLACE_ME", "NEW_VALUE");
+        fs::write(&config_file, config_contents)?;
+
+        // When we spawn a new session, it should pick up the new value
+        let mut attach_proc =
+            daemon_proc.attach("sh2", Default::default()).context("starting attach proc")?;
+        let mut line_matcher = attach_proc.line_matcher()?;
+        attach_proc.run_cmd("echo $CHANGING_VAR")?;
+        line_matcher.scan_until_re("NEW_VALUE$")?;
+
+        Ok(())
+    })
+}
+
 #[ignore] // TODO: re-enable, this test if flaky
 #[test]
 fn up_arrow_no_crash() -> anyhow::Result<()> {

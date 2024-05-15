@@ -37,7 +37,7 @@ pub fn run(
     test_hooks::emit("attach-startup");
     SignalHandler::new(name.clone(), socket.clone()).spawn()?;
 
-    let config = config::read_config(&config_file)?;
+    let config_manager = config::Manager::new(config_file.as_deref())?;
 
     let ttl = match &ttl {
         Some(src) => match duration::parse(src.as_str()) {
@@ -51,7 +51,7 @@ pub fn run(
 
     let mut detached = false;
     let mut tries = 0;
-    while let Err(err) = do_attach(&config, name.as_str(), &ttl, &cmd, &socket) {
+    while let Err(err) = do_attach(&config_manager, name.as_str(), &ttl, &cmd, &socket) {
         match err.downcast() {
             Ok(BusyError) if !force => {
                 eprintln!("session '{}' already has a terminal attached", name);
@@ -101,7 +101,7 @@ impl fmt::Display for BusyError {
 impl std::error::Error for BusyError {}
 
 fn do_attach(
-    config: &config::Config,
+    config: &config::Manager,
     name: &str,
     ttl: &Option<time::Duration>,
     cmd: &Option<String>,
@@ -117,9 +117,10 @@ fn do_attach(
         }
     };
 
+    let forward_env = config.get().forward_env.clone();
     let mut local_env_keys = vec!["TERM", "DISPLAY", "LANG", "SSH_AUTH_SOCK"];
-    if let Some(forward_env) = &config.forward_env {
-        for var in forward_env.iter() {
+    if let Some(fenv) = &forward_env {
+        for var in fenv.iter() {
             local_env_keys.push(var);
         }
     }

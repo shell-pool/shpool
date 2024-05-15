@@ -103,7 +103,7 @@ pub struct SessionInner {
     pub reader_ctl: Arc<Mutex<ReaderCtl>>,
     pub pty_master: shpool_pty::fork::Fork,
     pub client_stream: Option<UnixStream>,
-    pub config: config::Config,
+    pub config: config::Manager,
     pub term_db: Arc<termini::TermInfo>,
     pub control_code_matcher_factory: Arc<Mutex<control_codes::MatcherFactory>>,
     pub daily_messenger: Arc<show_motd::DailyMessenger>,
@@ -721,6 +721,7 @@ impl SessionInner {
         }];
         let bindings = keybindings::Bindings::new(
             self.config
+                .get()
                 .keybinding
                 .as_ref()
                 .unwrap_or(&empty_bindings)
