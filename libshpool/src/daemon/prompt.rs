@@ -42,7 +42,10 @@ pub fn inject_prefix(
                SHPOOL__OLD_PS1="${{PS1}}"
                function __shpool__prompt_command() {{
                   PS1="${{SHPOOL__OLD_PS1}}"
-                  ${{SHPOOL__OLD_PROMPT_COMMAND}}
+                  for prompt_hook in ${{SHPOOL__OLD_PROMPT_COMMAND}}
+                  do
+                    ${{prompt_hook}}
+                  done
                   PS1="{prompt_prefix}${{PS1}}"
                }}
                PROMPT_COMMAND=__shpool__prompt_command
