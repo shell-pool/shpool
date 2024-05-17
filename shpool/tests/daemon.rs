@@ -21,7 +21,7 @@ use regex::Regex;
 
 mod support;
 
-use crate::support::daemon::DaemonArgs;
+use crate::support::daemon::{AttachArgs, DaemonArgs};
 
 #[test]
 #[timeout(30000)]
@@ -211,8 +211,12 @@ fn hooks() -> anyhow::Result<()> {
 
         {
             // 1 new session
-            let mut sh1_proc =
-                daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+            let mut sh1_proc = daemon_proc
+                .attach(
+                    "sh1",
+                    AttachArgs { cmd: Some(String::from("/bin/bash")), ..Default::default() },
+                )
+                .context("starting attach proc")?;
 
             // sequencing
             let mut sh1_matcher = sh1_proc.line_matcher()?;
@@ -220,8 +224,12 @@ fn hooks() -> anyhow::Result<()> {
             sh1_matcher.scan_until_re("hi$")?;
 
             // 1 busy
-            let mut busy_proc =
-                daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+            let mut busy_proc = daemon_proc
+                .attach(
+                    "sh1",
+                    AttachArgs { cmd: Some(String::from("/bin/bash")), ..Default::default() },
+                )
+                .context("starting attach proc")?;
             busy_proc.proc.wait()?;
         } // 1 client disconnect
 
@@ -229,8 +237,12 @@ fn hooks() -> anyhow::Result<()> {
         daemon_proc.wait_until_list_matches(|listout| sh1_detached_re.is_match(listout))?;
 
         // 1 reattach
-        let mut sh1_proc =
-            daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+        let mut sh1_proc = daemon_proc
+            .attach(
+                "sh1",
+                AttachArgs { cmd: Some(String::from("/bin/bash")), ..Default::default() },
+            )
+            .context("starting attach proc")?;
         sh1_proc.run_cmd("exit")?; // 1 shell disconnect
 
         support::wait_until(|| {
@@ -239,6 +251,7 @@ fn hooks() -> anyhow::Result<()> {
         })?;
 
         let hook_records = daemon_proc.hook_records.as_ref().unwrap().lock().unwrap();
+        eprintln!("hook_records: {:?}", hook_records);
         assert_eq!(hook_records.new_sessions[0], "sh1");
         assert_eq!(hook_records.reattaches[0], "sh1");
         assert_eq!(hook_records.busys[0], "sh1");

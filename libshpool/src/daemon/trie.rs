@@ -105,8 +105,8 @@ where
 }
 
 /// The backing table the trie uses to associate symbols with state
-/// indexes. This is basically std::ops::IndexMut plus a new function.
-/// We can't just make this a sub-trait of IndexMut because u8 does
+/// indexes. This is basically `std::ops::IndexMut` plus a `new` function.
+/// We can't just make this a sub-trait of `IndexMut` because u8 does
 /// not implement IndexMut for vectors.
 pub trait TrieTab<Idx> {
     fn new() -> Self;

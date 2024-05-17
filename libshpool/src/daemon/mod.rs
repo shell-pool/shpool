@@ -19,7 +19,6 @@ use tracing::{info, instrument};
 
 use super::{config, hooks};
 
-mod control_codes;
 mod etc_environment;
 mod exit_notify;
 pub mod keybindings;

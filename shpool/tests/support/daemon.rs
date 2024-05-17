@@ -166,6 +166,10 @@ impl Proc {
 
     // Start a daemon process using a background thread rather than forking an
     // actual subprocess. Include a custom hooks impl for tracking events.
+    //
+    // You must use a custom command passed to the attach command to avoid
+    // some self-exec issues with the fact that this daemon runs inside the
+    // test binary.
     pub fn new_instrumented<P: AsRef<Path>>(config: P) -> anyhow::Result<Proc> {
         let local_tmp_dir = tempfile::Builder::new()
             .prefix("shpool-test")
