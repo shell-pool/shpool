@@ -14,9 +14,7 @@
 
 use std::{
     collections::HashMap,
-    env, fs, io,
-    io::Write,
-    net,
+    env, fs, io, net,
     ops::Add,
     os,
     os::unix::{
@@ -40,8 +38,8 @@ use crate::{
     config::MotdDisplayMode,
     consts,
     daemon::{
-        control_codes, etc_environment, exit_notify::ExitNotifier, hooks, pager::PagerError,
-        prompt, shell, show_motd, ttl_reaper,
+        etc_environment, exit_notify::ExitNotifier, hooks, pager::PagerError, prompt, shell,
+        show_motd, ttl_reaper,
     },
     protocol, test_hooks, tty, user,
 };
@@ -69,7 +67,6 @@ pub struct Server {
     register_new_reapable_session: crossbeam_channel::Sender<(String, Instant)>,
     hooks: Box<dyn hooks::Hooks + Send + Sync>,
     daily_messenger: Arc<show_motd::DailyMessenger>,
-    control_code_matcher_factory: Arc<Mutex<control_codes::MatcherFactory>>,
 }
 
 impl Server {
@@ -101,9 +98,6 @@ impl Server {
             register_new_reapable_session: new_sess_tx,
             hooks,
             daily_messenger,
-            control_code_matcher_factory: Arc::new(
-                Mutex::new(control_codes::MatcherFactory::new()),
-            ),
         }))
     }
 
@@ -730,38 +724,21 @@ impl Server {
             info!("reaped child shell: {:?}", waitable_child);
         });
 
-        let has_clear_screen =
-            term_db.raw_string_cap(termini::StringCapability::ClearScreen).is_some();
-        let needs_default_term = !has_clear_screen || term.is_none();
-
-        // inject the prompt prefix, if any
-        info!("injecting prompt prefix");
-        let prompt_prefix =
-            self.config.get().prompt_prefix.clone().unwrap_or(String::from(DEFAULT_PROMPT_PREFIX));
-        if let Some(shell_basename) = shell_basename {
-            if !prompt_prefix.is_empty() {
-                if let Err(err) = prompt::inject_prefix(
-                    &mut fork,
-                    shell_basename,
-                    &prompt_prefix,
-                    &header.name,
-                    needs_default_term,
-                ) {
-                    warn!("issue injecting prefix: {:?}", err);
-                }
-            } else {
-                // issue a clear even if we don't have a prompt to inject for consistency
-                // and to simplify motd handling
-                let script = if needs_default_term {
-                    // If we don't have a $TERM value or we have some wacky $TERM value for which
-                    // there is no ClearScreen code, set TERM to xterm so that we won't get a
-                    // warning and will generate a code we can scan for.
-                    "TERM=xterm clear\n"
-                } else {
-                    "clear\n"
-                };
-                let mut pty_master = fork.is_parent().context("expected parent")?;
-                pty_master.write_all(script.as_bytes()).context("running initial clear")?;
+        // Inject the prompt prefix, if any. For custom commands, avoid doing this
+        // since we have no idea what the command is so the shell code probably won't
+        // work.
+        if header.cmd.is_none() {
+            info!("injecting prompt prefix");
+            let prompt_prefix = self
+                .config
+                .get()
+                .prompt_prefix
+                .clone()
+                .unwrap_or(String::from(DEFAULT_PROMPT_PREFIX));
+            if let Err(err) =
+                prompt::inject_prefix(&mut fork, shell_basename, &prompt_prefix, &header.name)
+            {
+                warn!("issue injecting prefix: {:?}", err);
             }
         }
 
@@ -784,9 +761,9 @@ impl Server {
             config: self.config.clone(),
             reader_join_h: None,
             term_db,
-            control_code_matcher_factory: Arc::clone(&self.control_code_matcher_factory),
             daily_messenger: Arc::clone(&self.daily_messenger),
             needs_initial_motd_dump: dump_motd_on_new_session,
+            custom_cmd: header.cmd.is_some(),
         };
         let child_pid = session_inner.pty_master.child_pid().ok_or(anyhow!("no child pid"))?;
         session_inner.reader_join_h = Some(session_inner.spawn_reader(shell::ReaderArgs {
@@ -806,7 +783,6 @@ impl Server {
             client_connection_ack: client_connection_ack_tx,
             tty_size_change: tty_size_change_rx,
             tty_size_change_ack: tty_size_change_ack_tx,
-            term: term.clone(),
         })?);
 
         if let Some(ttl_secs) = header.ttl_secs {

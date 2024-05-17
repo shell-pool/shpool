@@ -23,3 +23,6 @@ pub const HEARTBEAT_DURATION: time::Duration = time::Duration::from_millis(500);
 
 pub const STDIN_FD: i32 = 0;
 pub const STDERR_FD: i32 = 2;
+
+pub const PROMPT_SENTINEL: &str = "SHPOOL_PROMPT_SETUP_SENTINEL";
+pub const PROMPT_SENTINEL_FLAG_VAR: &str = "SHPOOL__PRINT_PROMPT_SETUP_SENTINEL";

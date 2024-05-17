@@ -169,6 +169,14 @@ impl Args {
 /// Run the shpool tool with the given arguments. If hooks is provided,
 /// inject the callbacks into the daemon.
 pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> anyhow::Result<()> {
+    if matches!(
+        (&args.command, env::var(consts::PROMPT_SENTINEL_FLAG_VAR).as_deref()),
+        (Commands::Daemon, Ok("yes"))
+    ) {
+        println!("{}", consts::PROMPT_SENTINEL);
+        std::process::exit(0);
+    }
+
     let trace_level = if args.verbose == 0 {
         tracing::Level::INFO
     } else if args.verbose == 1 {

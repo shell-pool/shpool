@@ -1296,6 +1296,28 @@ fn dynamic_config_change() -> anyhow::Result<()> {
     })
 }
 
+#[test]
+#[timeout(30000)]
+fn fresh_shell_does_not_have_prompt_setup_code() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
+
+        let mut attach_proc =
+            daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+        let mut reader = std::io::BufReader::new(
+            attach_proc.proc.stdout.take().ok_or(anyhow!("missing stdout"))?,
+        );
+
+        let mut output = vec![];
+        reader.read_until(b'>', &mut output)?;
+        let chunk = String::from_utf8_lossy(&output[..]);
+        assert!(!chunk.contains("SHPOOL__OLD_PROMPT_COMMAND"));
+
+        Ok(())
+    })
+}
+
 #[ignore] // TODO: re-enable, this test if flaky
 #[test]
 fn up_arrow_no_crash() -> anyhow::Result<()> {

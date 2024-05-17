@@ -65,6 +65,7 @@ impl Manager {
                 (Config::default(), None)
             }
         };
+        info!("starting with config: {:?}", config);
 
         let mut manager = Manager { config: Arc::new(RwLock::new(config)), watcher: None };
 
@@ -90,6 +91,7 @@ impl Manager {
                             return;
                         }
                     };
+                    info!("new config: {:?}", config);
 
                     let mut manager_config = config_slot.write().unwrap();
                     *manager_config = config;

@@ -32,9 +32,7 @@ use tracing::{debug, error, info, instrument, span, trace, warn, Level};
 
 use crate::{
     consts,
-    daemon::{
-        config, control_codes, exit_notify::ExitNotifier, keybindings, pager::PagerCtl, show_motd,
-    },
+    daemon::{config, exit_notify::ExitNotifier, keybindings, pager::PagerCtl, prompt, show_motd},
     protocol, test_hooks, tty,
 };
 
@@ -105,9 +103,9 @@ pub struct SessionInner {
     pub client_stream: Option<UnixStream>,
     pub config: config::Manager,
     pub term_db: Arc<termini::TermInfo>,
-    pub control_code_matcher_factory: Arc<Mutex<control_codes::MatcherFactory>>,
     pub daily_messenger: Arc<show_motd::DailyMessenger>,
     pub needs_initial_motd_dump: bool,
+    pub custom_cmd: bool,
 
     /// The join handle for the always-on background reader thread.
     /// Only wrapped in an option so we can spawn the thread after
@@ -183,7 +181,6 @@ pub struct ReaderArgs {
     pub client_connection_ack: crossbeam_channel::Sender<ClientConnectionStatus>,
     pub tty_size_change: crossbeam_channel::Receiver<tty::Size>,
     pub tty_size_change_ack: crossbeam_channel::Sender<()>,
-    pub term: Option<String>,
 }
 
 impl SessionInner {
@@ -198,18 +195,11 @@ impl SessionInner {
         use nix::poll;
 
         let term_db = Arc::clone(&self.term_db);
-        let mut control_code_matcher = {
-            let mut matcher_factory = self.control_code_matcher_factory.lock().unwrap();
-            match matcher_factory.new_matcher(args.term.as_deref().unwrap_or("xterm")) {
-                Ok(m) => m,
-                Err(e) => {
-                    warn!("Error creating matcher with TERM={:?}: {:?}", args.term, e);
-                    matcher_factory
-                        .new_matcher("xterm")
-                        .context("creating fallback xterm control code matcher")?
-                }
-            }
-        };
+        let mut prompt_sentinel_scanner = prompt::SentinelScanner::new();
+
+        // We only scan for the prompt sentinel if the user has not set up a
+        // custom command.
+        let mut has_seen_prompt_sentinel = self.custom_cmd;
 
         let daily_messenger = Arc::clone(&self.daily_messenger);
         let mut needs_initial_motd_dump = self.needs_initial_motd_dump;
@@ -476,64 +466,43 @@ impl SessionInner {
 
                 if !matches!(args.session_restore_mode, config::SessionRestoreMode::Simple) {
                     if let Some(s) = output_spool.as_mut() {
-                        s.process(&buf[..len]);
+                        s.process(buf);
                     }
                 }
 
                 // scan for control codes we need to handle
                 let mut reset_client_conn = false;
-                let mut snip_buf_to = None;
-                if needs_initial_motd_dump {
+                if !has_seen_prompt_sentinel {
                     for (i, byte) in buf.iter().enumerate() {
-                        match control_code_matcher.transition(*byte) {
-                            Some(control_codes::Code::ClearScreen) if needs_initial_motd_dump => {
-                                debug!("detected initial ClearScreen code");
-                                if let ClientConnectionMsg::New(conn) = &client_conn {
-                                    let mut s = conn.sink.lock().unwrap();
+                        if prompt_sentinel_scanner.transition(*byte) {
+                            info!("saw prompt sentinel");
+                            // This will cause us to start actually sending data frames back to
+                            // the client.
+                            has_seen_prompt_sentinel = true;
 
-                                    // write the clear code ahead of time so we don't
-                                    // immediately clobber ourselves
-                                    let write_to = i + 1;
-                                    let chunk = protocol::Chunk {
-                                        kind: protocol::ChunkKind::Data,
-                                        buf: &buf[..write_to],
-                                    };
-                                    let write_result =
-                                        chunk.write_to(&mut *s).and_then(|_| s.flush());
-                                    if let Err(err) = write_result {
-                                        info!(
-                                            "while writing ClearScreen: client_stream write err, assuming hangup: {:?}",
-                                            err
-                                        );
-                                        reset_client_conn = true;
-                                    } else {
-                                        test_hooks::emit("daemon-wrote-s2c-chunk");
-                                    }
-                                    snip_buf_to = Some(write_to);
-
-                                    if let Err(e) = daily_messenger.dump(&mut *s, &term_db) {
-                                        warn!("Error handling clear: {:?}", e);
-                                    }
-                                }
-                                needs_initial_motd_dump = false;
-                            }
-                            _ => {}
+                            // drop everything up to and including the sentinel
+                            buf = &buf[i + 1..];
                         }
                     }
                 }
-                let mut write_buf = true;
-                if let Some(snip_to) = snip_buf_to {
-                    if snip_to < buf.len() {
-                        buf = &buf[snip_to..];
-                    } else {
-                        write_buf = false;
-                    }
-                }
 
-                if let (ClientConnectionMsg::New(conn), true) = (&client_conn, write_buf) {
-                    let chunk =
-                        protocol::Chunk { kind: protocol::ChunkKind::Data, buf: &buf[..len] };
+                if let (ClientConnectionMsg::New(conn), true) =
+                    (&client_conn, has_seen_prompt_sentinel)
+                {
+                    let chunk = protocol::Chunk { kind: protocol::ChunkKind::Data, buf };
+
                     let mut s = conn.sink.lock().unwrap();
+
+                    // If we still need to do an initial motd dump, it means we have just finished
+                    // dropping all the prompt setup stuff, we should dump the motd now before we
+                    // write the first chunk.
+                    if needs_initial_motd_dump {
+                        needs_initial_motd_dump = false;
+                        if let Err(e) = daily_messenger.dump(&mut *s, &term_db) {
+                            warn!("Error handling clear: {:?}", e);
+                        }
+                    }
+
                     let write_result = chunk.write_to(&mut *s).and_then(|_| s.flush());
                     if let Err(err) = write_result {
                         info!("client_stream write err, assuming hangup: {:?}", err);
