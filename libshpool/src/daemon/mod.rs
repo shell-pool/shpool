@@ -55,7 +55,6 @@ pub fn run(
             (Some(socket.clone()), UnixListener::bind(&socket).context("binding to socket")?)
         }
     };
-    info!("daemon::run 4");
     // spawn the signal handler thread in the background
     signals::Handler::new(cleanup_socket.clone()).spawn()?;
 
