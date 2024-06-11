@@ -291,7 +291,7 @@ fn echo_sentinel() -> anyhow::Result<()> {
         let output = Command::new(support::shpool_bin()?)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .env("SHPOOL__PRINT_PROMPT_SETUP_SENTINEL", "yes")
+            .env("SHPOOL__INTERNAL__PRINT_SENTINEL", "prompt")
             .arg("daemon")
             .output()?;
 

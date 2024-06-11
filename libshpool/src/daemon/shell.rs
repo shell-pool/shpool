@@ -195,7 +195,7 @@ impl SessionInner {
         use nix::poll;
 
         let term_db = Arc::clone(&self.term_db);
-        let mut prompt_sentinel_scanner = prompt::SentinelScanner::new();
+        let mut prompt_sentinel_scanner = prompt::SentinelScanner::new(consts::PROMPT_SENTINEL);
 
         // We only scan for the prompt sentinel if the user has not set up a
         // custom command.
