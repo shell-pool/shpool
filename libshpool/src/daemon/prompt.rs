@@ -99,6 +99,8 @@ pub fn inject_prefix(
         format!("\n{}=yes /proc/{}/exe daemon\n", PROMPT_SENTINEL_FLAG_VAR, std::process::id());
     script.push_str(sentinel_cmd.as_str());
 
+    debug!("injecting prefix script '{}'", script);
+
     let mut pty_master = pty_master.is_parent().context("expected parent")?;
     pty_master.write_all(script.as_bytes()).context("running prefix script")?;
 

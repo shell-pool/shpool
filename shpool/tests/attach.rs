@@ -1098,7 +1098,6 @@ fn prompt_prefix_zsh() -> anyhow::Result<()> {
 // change or something.
 #[test]
 #[timeout(30000)]
-#[ignore]
 fn prompt_prefix_fish() -> anyhow::Result<()> {
     support::dump_err(|| {
         let daemon_proc =
@@ -1122,6 +1121,7 @@ fn prompt_prefix_fish() -> anyhow::Result<()> {
         // initial prompt after half a second.
         std::thread::sleep(time::Duration::from_millis(500));
         child.kill().context("killing child")?;
+
 
         let mut stderr = child.stderr.take().context("missing stderr")?;
         let mut stderr_str = String::from("");
