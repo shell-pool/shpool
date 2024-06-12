@@ -39,7 +39,7 @@ host and re-attach to the same named session by running `shpool attach main`
 again.
 
 If your terminal gets stuck and you forcibly close the window, you
-might find that shpool still think a terminal is connected to
+might find that `shpool` still think a terminal is connected to
 your session when you attempt to reattach. This is likely because
 an ssh proxy is holding the connection open in the vain hope that
 it will get some traffic again. You can just run `shpool detach main`
@@ -56,7 +56,7 @@ are a few common things you may wish to tweak.
 #### Detach Keybinding
 
 You may wish to configure your detach keybinding.
-By default, shpool will detach from the current user session when you
+By default, `shpool` will detach from the current user session when you
 press the sequence `Ctrl-Space Ctrl-q` (press `Ctrl-Space` then release
 it and press `Ctrl-q`, don't try to hold down all three keys at once),
 but you can configure a different binding by adding an entry
@@ -82,11 +82,11 @@ configuration option.
 
 ##### `"screen"` (default) - restore a screenful of history
 
-The `"screen"` option causes shpool to re-draw sufficient output to fill the
+The `"screen"` option causes `shpool` to re-draw sufficient output to fill the
 entire screen of the client terminal as well as using the SIGWINCH trick
 described in the `"simple"` section below. This will help restore
 context for interactive terminal sessions that are not full blown ncurses
-apps. `"screen"` is the default reattach behavior for shpool.
+apps. `"screen"` is the default reattach behavior for `shpool`.
 You can choose this option explicitly by adding
 
 ```
@@ -97,7 +97,7 @@ to your `~/.config/shpool/config.toml`.
 
 ##### `"simple"` - only ask child processes to redraw
 
-The `"simple"` option avoids restoring any output. In this reconnect mode, shpool will
+The `"simple"` option avoids restoring any output. In this reconnect mode, `shpool` will
 issue some SIGWINCH signals to try to convince full screen ncurses apps
 such as vim or emacs to re-draw the screen, but will otherwise do nothing.
 Any shell output produced when there was no client connected to the session
@@ -133,7 +133,7 @@ If you use bash, you may want to ensure that the `huponexit` option
 is set to make sure that child processes exit when you leave a
 shell. Without this setting, background processes you have
 spawned over the course of your shell session will stick around
-in the shpool daemon's process tree and eat up memory. To set
+in the `shpool` daemon's process tree and eat up memory. To set
 this option add
 
 ```
@@ -146,7 +146,7 @@ to your `~/.bashrc`.
 
 #### shpool daemon
 
-The `daemon` subcommand causes shpool to run in daemon mode. When running in
+The `daemon` subcommand causes `shpool` to run in daemon mode. When running in
 this mode, `shpool` listens for incoming connections and opens up subshells,
 retaining ownership of them in a table. In general, this subcommand will not
 be invoked directly by users, but will instead be called from a systemd unit
@@ -167,7 +167,7 @@ Lists all the current shell sessions.
 #### shpool detach
 
 Detach from a one or more sessions without stopping them.
-Will detach the current session if run from inside a shpool
+Will detach the current session if run from inside a `shpool`
 session with no session name arguments.
 
 #### shpool kill
@@ -225,7 +225,7 @@ to your `.bashrc` then invoke it like
 #### Local tty based
 
 Rather than specify an explicit name when you connect, you
-can set up your system to automatically generate a shpool
+can set up your system to automatically generate a `shpool`
 session name based on your local terminal emulator's tty
 number. To do so, you can add a block of custom ssh config
 in the `~/.ssh/config` of your local machine like
@@ -247,6 +247,93 @@ The local-tty based approach has the advantage that you don't
 need to specify a session name, but it can run into problems
 if you have to close the local window and open a new terminal,
 which can come up if your connection freezes rather than drops.
+
+## Comparison with other tools
+
+### `tmux` and GNU `screen`
+
+`tmux` is probably the best known session persistence tool, and
+GNU `screen` has a similar feature set, so in comparison to `shpool`
+it can be thought of as belonging to the same category.
+
+The main way that `shpool` differs from `tmux` is that `tmux` is a
+terminal multiplexer which necessarily means that it offers session
+persistence features, while `shpool` only aims to be a session
+persistence tool. In contrast to `tmux` the philosophy of `shpool`
+is that managing different terminals is the job of your display or
+window manager, not your session persistence tool. Every operating
+system has its own idioms for switching between applications, and
+there is no reason to switch to different idioms when switching
+between terminals. Especially for users of tiling window managers
+such as `i3`, `sway` or `xmonad`, tmux's multiplexing features are
+redundant.
+
+While `tmux` renders terminal contents remotely and only paints
+the current view to the screen, `shpool` just directly sends
+all shell output back to the user's local terminal. This means
+that all rendering is handled by a single terminal state machine
+rather than going through `tmux`s internal in-memory terminal
+before getting formatted and re-rendered by the local terminal.
+This has performance implications, and probably most
+importantly means that a terminal using `shpool` will feel
+completely native. Scrollback and copy-paste will work exactly
+as they do in your native terminal, while they can behave differently
+when using `tmux`.
+
+### [`mosh`](https://github.com/mobile-shell/mosh)
+
+`mosh` is another tool focused on providing persistent remote shell
+sessions. It differs from the other tools discussed here in that it
+has its own network protocol, which it bootstraps off of regular
+ssh. Like `tmux`, it renders the screen contents remotely and sends
+just the current view back. It is somewhat unique in trying to
+predicatively guess the right output to display to the user if
+there is a network lag.
+
+`shpool` differs from `mosh` in that it has nothing to do with
+the network, remaining confined to a single machine like most of
+these other tools. Just like in the case of `tmux`, `mosh` will
+impact the way scrollback and copy-paste work, while `shpool`
+keeps them feeling entirely native.
+
+### [`dtach`](https://github.com/crigler/dtach), [`abduco`](https://github.com/martanne/abduco), and [`diss`](https://github.com/yazgoo/diss)
+
+These tools have the most in common with `shpool`. Just like `shpool`, they
+eschew multiplexing and just send the raw bytes back to you for your local
+terminal to render. While you could say that `shpool` aims to be a
+simpler version of `tmux`, these tools follow the same philosophy with
+an even greater laser focus on simplicity and doing one thing well.
+
+`shpool` aims to be an easy and pleasant experience for people
+who just want session persistence without having to care about
+it too much, so it has a few more "cushy" features that would
+not be as good a fit for the focus on simplicity of these
+tools.
+
+The most obvious of these features is the difference between
+how `shpool` and these programs handle re-attaches. Though under normal operation,
+`shpool` does not do any rendering and subsetting of the shell
+output, it continually maintains an in-memory render of the
+terminal state via the [`shpool_vt100`](https://crates.io/crates/shpool_vt100)
+crate. On reattach, `shpool` will use this in-memory render to
+re-draw the screen, so you can easily see where you were when
+your connection dropped. This even allows you to see output
+generated after your connection dropped.
+
+Another such feature is the automatic prompt prefix. `shpool`
+will detect when you are using a known shell (currently
+`bash`, `zsh`, or `fish`) and automatically inject a prefix
+into your prompt to let you know the name of the `shpool` session
+you are in. This adds some nice context so you don't lose
+track of your terminals and have some hint about the current
+terminal state.
+
+There are also some features `shpool` is missing which these
+programs have. In particular, it seems that `dtach` and `abduco`
+support shared sessions, while `shpool` only allows a single
+client to be connected to a particular session at a time.
+There may be more since I don't know these tools as well
+as `shpool`.
 
 ## Hacking
 
