@@ -41,6 +41,7 @@ termini = "1.0.0" # terminfo database
 tempfile = "3" # RAII tmp files
 strip-ansi-escapes = "0.2.0" # cleaning up strings for pager display
 notify = "6" # watch config file for updates
+libproc = "0.14.8" # sniffing shells by examining the subprocess
 
 # rusty wrapper for unix apis
 [dependencies.nix]

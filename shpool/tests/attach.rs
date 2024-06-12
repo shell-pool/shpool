@@ -1098,7 +1098,6 @@ fn prompt_prefix_zsh() -> anyhow::Result<()> {
 // change or something.
 #[test]
 #[timeout(30000)]
-#[ignore]
 fn prompt_prefix_fish() -> anyhow::Result<()> {
     support::dump_err(|| {
         let daemon_proc =

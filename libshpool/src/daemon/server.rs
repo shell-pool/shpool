@@ -627,8 +627,14 @@ impl Server {
             cmd
         } else {
             let mut cmd = process::Command::new(&shell);
-            if self.config.get().norc.unwrap_or(false) && shell == "/bin/bash" {
-                cmd.arg("--norc").arg("--noprofile");
+            if self.config.get().norc.unwrap_or(false) {
+                if shell.ends_with("bash") {
+                    cmd.arg("--norc").arg("--noprofile");
+                } else if shell.ends_with("zsh") {
+                    cmd.arg("--no-rcs");
+                } else if shell.ends_with("fish") {
+                    cmd.arg("--no-config");
+                }
             }
             cmd
         };
@@ -664,7 +670,7 @@ impl Server {
             }
         });
 
-        let shell_basename = if header.cmd.is_none() {
+        if header.cmd.is_none() {
             // spawn the shell as a login shell by setting
             // arg0 to be the basename of the shell path
             // proceeded with a "-". You can see sshd doing the
@@ -676,9 +682,6 @@ impl Server {
                 .to_str()
                 .ok_or(anyhow!("error parsing shell name as utf8"))?;
             cmd.arg0(format!("-{}", shell_basename));
-            Some(shell_basename)
-        } else {
-            None
         };
 
         let noecho = self.config.get().noecho.unwrap_or(false);
@@ -735,9 +738,7 @@ impl Server {
                 .prompt_prefix
                 .clone()
                 .unwrap_or(String::from(DEFAULT_PROMPT_PREFIX));
-            if let Err(err) =
-                prompt::inject_prefix(&mut fork, shell_basename, &prompt_prefix, &header.name)
-            {
+            if let Err(err) = prompt::inject_prefix(&mut fork, &prompt_prefix, &header.name) {
                 warn!("issue injecting prefix: {:?}", err);
             }
         }

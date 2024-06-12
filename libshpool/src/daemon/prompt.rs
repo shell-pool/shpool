@@ -15,15 +15,22 @@
 // This file contains the logic for injecting the `prompt_annotation`
 // config option into a user's prompt for known shells.
 
-use std::io::Write;
+use std::io::{Read, Write};
 
-use anyhow::Context;
-use tracing::{debug, instrument, warn};
+use anyhow::{anyhow, Context};
+use tracing::{debug, info, instrument, warn};
 
 use crate::{
-    consts::{PROMPT_SENTINEL, PROMPT_SENTINEL_FLAG_VAR},
+    consts::{SENTINEL_FLAG_VAR, STARTUP_SENTINEL},
     daemon::trie::{Trie, TrieCursor},
 };
+
+#[derive(Debug, Clone)]
+enum KnownShell {
+    Bash,
+    Zsh,
+    Fish,
+}
 
 /// Inject the given prefix into the given shell subprocess, using
 /// the shell path in `shell` to decide the right way to go about
@@ -31,17 +38,26 @@ use crate::{
 #[instrument(skip_all)]
 pub fn inject_prefix(
     pty_master: &mut shpool_pty::fork::Fork,
-    shell: Option<&str>,
     prompt_prefix: &str,
     session_name: &str,
 ) -> anyhow::Result<()> {
+    let shell_pid = pty_master.child_pid().ok_or(anyhow!("no child pid"))?;
+    // scan for the startup sentinel so we know it is safe to sniff the shell
+    let mut pty_master = pty_master.is_parent().context("expected parent")?;
+    wait_for_startup(&mut pty_master)?;
+
+    let shell_type = sniff_shell(shell_pid);
+    debug!("sniffed shell type: {:?}", shell_type);
+
+    // now actually inject the prompt
     let prompt_prefix = prompt_prefix.replace("$SHPOOL_SESSION_NAME", session_name);
-    let mut script = if prompt_prefix.is_empty() {
-        // We still need to emit the sentinel for consistency
-        // even when we don't have a prompt prefix to inject.
-        String::new()
-    } else if shell.map(|s| s.ends_with("bash")).unwrap_or(false) {
-        format!(
+
+    let mut script = match (prompt_prefix.as_str(), shell_type) {
+        // if the prompt prefix is empty, we don't need to bother with setup
+        // code, though we will still need to add the prompt setup sentinel
+        // for consistency.
+        ("", _) => String::new(),
+        (_, Ok(KnownShell::Bash)) => format!(
             r#"
             if [[ -z "${{PROMPT_COMMAND+x}}" ]]; then
                PS1="{prompt_prefix}${{PS1}}"
@@ -58,10 +74,9 @@ pub fn inject_prefix(
                }}
                PROMPT_COMMAND=__shpool__prompt_command
             fi
-"#
-        )
-    } else if shell.map(|s| s.ends_with("zsh")).unwrap_or(false) {
-        format!(
+        "#
+        ),
+        (_, Ok(KnownShell::Zsh)) => format!(
             r#"
             typeset -a precmd_functions
             SHPOOL__OLD_PROMPT="${{PROMPT}}"
@@ -73,20 +88,20 @@ pub fn inject_prefix(
                PROMPT="{prompt_prefix}${{PROMPT}}"
             }}
             precmd_functions+=(__shpool__prompt_command)
-"#
-        )
-    } else if shell.map(|s| s.ends_with("fish")).unwrap_or(false) {
-        format!(
+        "#
+        ),
+        (_, Ok(KnownShell::Fish)) => format!(
             r#"
             functions --copy fish_prompt shpool__old_prompt
             function fish_prompt; echo -n "{prompt_prefix}"; shpool__old_prompt; end
-"#
-        )
-    } else {
-        warn!("don't know how to inject a prefix for shell '{:?}'", shell);
-        // We still need to emit the sentinel for consistency
-        // even when we don't have a prompt prefix to inject.
-        String::new()
+        "#
+        ),
+        (_, Err(e)) => {
+            warn!("could not sniff shell: {}", e);
+
+            // not the end of the world, we will just not inject a prompt prefix
+            String::new()
+        }
     };
 
     // With this magic env var set, `shpool daemon` will just
@@ -96,13 +111,62 @@ pub fn inject_prefix(
     // hard to make the scanner work right.
     // TODO(julien): this will probably not work on mac
     let sentinel_cmd =
-        format!("\n{}=yes /proc/{}/exe daemon\n", PROMPT_SENTINEL_FLAG_VAR, std::process::id());
+        format!("\n{}=prompt /proc/{}/exe daemon\n", SENTINEL_FLAG_VAR, std::process::id());
     script.push_str(sentinel_cmd.as_str());
 
-    let mut pty_master = pty_master.is_parent().context("expected parent")?;
+    debug!("injecting prefix script '{}'", script);
     pty_master.write_all(script.as_bytes()).context("running prefix script")?;
 
     Ok(())
+}
+
+#[instrument(skip_all)]
+fn wait_for_startup(pty_master: &mut shpool_pty::fork::Master) -> anyhow::Result<()> {
+    let mut startup_sentinel_scanner = SentinelScanner::new(STARTUP_SENTINEL);
+    let startup_sentinel_cmd =
+        format!("\n{}=startup /proc/{}/exe daemon\n", SENTINEL_FLAG_VAR, std::process::id());
+
+    pty_master
+        .write_all(startup_sentinel_cmd.as_bytes())
+        .context("running startup sentinel script")?;
+
+    let mut buf: [u8; 2048] = [0; 2048];
+    loop {
+        let len = pty_master.read(&mut buf).context("reading chunk to scan for startup")?;
+        if len == 0 {
+            continue;
+        }
+        let buf = &buf[..len];
+        debug!("buf='{}'", String::from_utf8_lossy(buf));
+        for byte in buf.iter() {
+            if startup_sentinel_scanner.transition(*byte) {
+                // This might drop trailing data from the chunk we just read, but
+                // it should be fine since we are about to inject the prompt setup
+                // stuff anyway, and shell.rs will scan for the prompt setup sentinel
+                // in order to handle the smooth handoff.
+                return Ok(());
+            }
+        }
+    }
+}
+
+/// Determine the shell process running under the given pid by examining
+/// `/proc/<pid>/exe`.
+#[instrument(skip_all)]
+fn sniff_shell(pid: libc::pid_t) -> anyhow::Result<KnownShell> {
+    let shell_proc_name =
+        libproc::proc_pid::name(pid).map_err(|e| anyhow!("determining subproc name: {:?}", e))?;
+    info!("shell_proc_name: {}", shell_proc_name);
+
+    if shell_proc_name.ends_with("bash") {
+        Ok(KnownShell::Bash)
+    } else if shell_proc_name.ends_with("zsh") {
+        Ok(KnownShell::Zsh)
+    } else if shell_proc_name.ends_with("fish") {
+        Ok(KnownShell::Fish)
+    } else {
+        Err(anyhow!("unknown shell: {:?}", shell_proc_name))
+    }
 }
 
 /// A trie for scanning through shell output to look for the sentinel.
@@ -114,9 +178,9 @@ pub struct SentinelScanner {
 
 impl SentinelScanner {
     /// Create a new sentinel scanner.
-    pub fn new() -> Self {
+    pub fn new(sentinal: &str) -> Self {
         let mut scanner = Trie::new();
-        scanner.insert(PROMPT_SENTINEL.bytes(), ());
+        scanner.insert(sentinal.bytes(), ());
 
         SentinelScanner { scanner, cursor: TrieCursor::Start, num_matches: 0 }
     }
