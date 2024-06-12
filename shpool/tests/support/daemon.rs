@@ -278,10 +278,12 @@ impl Proc {
             .arg("--socket")
             .arg(&self.socket_path)
             .env_clear()
-            .env("XDG_RUNTIME_DIR", env::var("XDG_RUNTIME_DIR")?)
             .env("SHPOOL_TEST_HOOK_SOCKET_PATH", &test_hook_socket_path)
             .envs(args.extra_env)
             .arg("attach");
+        if let Ok(xdg_runtime_dir) = env::var("XDG_RUNTIME_DIR") {
+            cmd.env("XDG_RUNTIME_DIR", xdg_runtime_dir);
+        }
         if args.force {
             cmd.arg("-f");
         }
