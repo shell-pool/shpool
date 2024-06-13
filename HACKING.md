@@ -116,7 +116,7 @@ pretty good.
 The `rr` tool allows you to record and replay executions under a debugger,
 which allows you to do fun stuff like step backwards. Additionally, when
 `rr` records a trace, it records the trace for the whole process tree, so
-you can debug events that happen in subprocesses. `rr` only works on linux,
+you can debug events that happen in subprocesses. `rr` only works on Linux,
 and requires certain performance counters, so it does not work well in
 many virtualized environments.
 
