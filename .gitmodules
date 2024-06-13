@@ -1,3 +1,0 @@
-[submodule "android-rust"]
-	path = android-rust
-	url = sso://android/platform/prebuilts/rust
