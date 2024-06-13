@@ -68,7 +68,7 @@ binding = "Ctrl-a d"
 action = "Detach"
 ```
 
-to you `~/.config/shpool/config.toml`.
+to your `~/.config/shpool/config.toml`.
 
 For the moment, control is the only modifier key supported, but the keybinding
 engine is designed to be able to handle more, so if you want a different one,
