@@ -194,6 +194,11 @@ pub struct Config {
     /// The prefix will get included in the shell's prompt variable
     /// verbatim except that the string '$SHPOOL_SESSION_NAME' will
     /// get replaced with the actual name of the shpool session.
+    ///
+    /// To disable the prompt prefix entirely, simply set a blank
+    /// prompt prefix (`prompt_prefix = ""`). You can then optionally
+    /// make your own prompt shpool aware by examining the SHPOOL_SESSION_NAME
+    /// environment variable.
     pub prompt_prefix: Option<String>,
 
     /// Control when and how shpool will display the message of the day.
