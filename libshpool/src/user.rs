@@ -26,6 +26,9 @@ pub struct Info {
 pub fn info() -> anyhow::Result<Info> {
     let mut passwd_str_buf: [libc::c_char; 1024 * 4] = [0; 1024 * 4];
     let mut passwd = libc::passwd {
+        pw_change: 0,
+        pw_class: ptr::null_mut(),
+        pw_expire: 0,
         pw_name: ptr::null_mut(),
         pw_passwd: ptr::null_mut(),
         pw_uid: 0,

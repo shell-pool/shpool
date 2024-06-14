@@ -13,22 +13,11 @@
 // limitations under the License.
 
 use std::{
-    collections::HashMap,
-    env, fs, io,
-    io::Write,
-    net,
-    ops::Add,
-    os,
-    os::unix::{
+    any::Any, collections::HashMap, env, fs, io::{self, Write}, net, ops::Add, os::{self, unix::{
         fs::PermissionsExt,
         net::{UnixListener, UnixStream},
         process::CommandExt,
-    },
-    path::{Path, PathBuf},
-    process,
-    sync::{Arc, Mutex},
-    thread, time,
-    time::{Duration, Instant},
+    }}, path::{Path, PathBuf}, process, sync::{Arc, Mutex}, thread, time::{self, Duration, Instant}
 };
 
 use anyhow::{anyhow, Context};
@@ -264,7 +253,8 @@ impl Server {
                     conn_id,
                     stream,
                     &header,
-                    matches!(motd, MotdDisplayMode::Dump),
+                    false,
+                    //matches!(motd, MotdDisplayMode::Dump),
                 )?;
 
                 shells.insert(header.name.clone(), Box::new(session));
@@ -312,8 +302,9 @@ impl Server {
             // If in pager motd mode, launch the pager and block until it is
             // done, picking up any tty size change that happened while the
             // user was examining the motd.
-            let motd_mode = self.config.motd.clone().unwrap_or_default();
-            let init_tty_size = if matches!(motd_mode, MotdDisplayMode::Pager { .. }) {
+            //let motd_mode = self.config.motd.clone().unwrap_or_default();
+            //let init_tty_size = if matches!(motd_mode, MotdDisplayMode::Pager { .. }) {
+            let init_tty_size = if false {
                 match self.daily_messenger.display_in_pager(
                     client_stream,
                     pager_ctl_slot,
@@ -933,7 +924,7 @@ where
 fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
     use nix::sys::socket;
 
-    let peer_creds = socket::getsockopt(sock, socket::sockopt::PeerCredentials)
+    let peer_creds = socket::getsockopt(sock, socket::sockopt::LocalPeerCred)
         .context("could not get peer creds from socket")?;
     let peer_uid = unistd::Uid::from_raw(peer_creds.uid());
     let self_uid = unistd::Uid::current();
@@ -941,7 +932,8 @@ fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
         return Err(anyhow!("shpool prohibits connections across users"));
     }
 
-    let peer_pid = unistd::Pid::from_raw(peer_creds.pid());
+    // TODO: replace
+    let peer_pid = unistd::Pid::from_raw(1000);
     let self_pid = unistd::Pid::this();
     let peer_exe = exe_for_pid(peer_pid).context("could not resolve exe from the pid")?;
     let self_exe = exe_for_pid(self_pid).context("could not resolve our own exe")?;

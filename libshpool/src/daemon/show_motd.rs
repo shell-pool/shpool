@@ -30,7 +30,7 @@ use crate::{
 /// Showers know how to show the message of the day.
 #[derive(Debug, Clone)]
 pub struct DailyMessenger {
-    motd_resolver: motd::Resolver,
+    //motd_resolver: motd::Resolver,
     mode: config::MotdDisplayMode,
     args: Option<Vec<String>>,
 }
@@ -39,8 +39,8 @@ impl DailyMessenger {
     /// Make a new Shower.
     pub fn new(mode: config::MotdDisplayMode, args: Option<Vec<String>>) -> anyhow::Result<Self> {
         Ok(DailyMessenger {
-            motd_resolver: motd::Resolver::new(motd::PamMotdResolutionStrategy::Auto)
-                .context("creating motd resolver")?,
+            //motd_resolver: motd::Resolver::new(motd::PamMotdResolutionStrategy::Auto)
+                //.context("creating motd resolver")?,
             mode,
             args,
         })
@@ -88,21 +88,23 @@ impl DailyMessenger {
         pager.display(client_stream, ctl_slot, init_tty_size, motd_value.as_str())
     }
 
+    // TODO: Fix
     fn motd_value(&self) -> anyhow::Result<String> {
-        self.motd_resolver
-            .value(match &self.args {
-                Some(args) => {
-                    let mut args = args.clone();
-                    // On debian based systems we need to set noupdate in order to get
-                    // the motd from userspace. It should be ignored on non-debian systems.
-                    if !args.iter().any(|a| a == "noupdate") {
-                        args.push(String::from("noupdate"));
-                    }
-                    motd::ArgResolutionStrategy::Exact(args)
-                }
-                None => motd::ArgResolutionStrategy::Auto,
-            })
-            .context("resolving motd")
+        Ok("".to_string())
+        //self.motd_resolver
+            //.value(match &self.args {
+                //Some(args) => {
+                    //let mut args = args.clone();
+                    //// On debian based systems we need to set noupdate in order to get
+                    //// the motd from userspace. It should be ignored on non-debian systems.
+                    //if !args.iter().any(|a| a == "noupdate") {
+                        //args.push(String::from("noupdate"));
+                    //}
+                    //motd::ArgResolutionStrategy::Exact(args)
+                //}
+                //None => motd::ArgResolutionStrategy::Auto,
+            //})
+            //.context("resolving motd")
     }
 
     fn raw_motd_value(&self, term_db: &termini::TermInfo) -> anyhow::Result<Vec<u8>> {
