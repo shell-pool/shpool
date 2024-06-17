@@ -45,6 +45,10 @@ an ssh proxy is holding the connection open in the vain hope that
 it will get some traffic again. You can just run `shpool detach main`
 to force the session to detach and allow you to attach.
 
+This README covers basic usage, but you can also check out
+[the wiki](https://github.com/shell-pool/shpool/wiki) for
+more tips and tricks.
+
 ### [Configuration](./CONFIG.md)
 
 You can customize some of `shpool`s behavior by editing your
