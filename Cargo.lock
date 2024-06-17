@@ -585,9 +585,9 @@ dependencies = [
 
 [[package]]
 name = "motd"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e7d3038c0381e2d91295f07a042809979755365c3ae4decef81936f8ba49408"
+checksum = "2bb26d8886ea6ef1f7d8020dc7a74a48e0acff3ca49381f4aaea745ef7d2782c"
 dependencies = [
  "log",
  "serde",
