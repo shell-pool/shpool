@@ -45,87 +45,13 @@ an ssh proxy is holding the connection open in the vain hope that
 it will get some traffic again. You can just run `shpool detach main`
 to force the session to detach and allow you to attach.
 
-### Configuration
+### [Configuration](./CONFIG.md)
 
-You can specify some additional configuration options to the daemon
-by passing a `-c /path/to/config.toml` flag, or by creating and
-editing `~/.config/shpool/config.toml`. The options available
-are documented in detail in `libshpool/src/config.rs`, but there
-are a few common things you may wish to tweak.
+You can customize some of `shpool`s behavior by editing your
+`~/.config/shpool/config.toml` file. For an in depth discussion
+of configuration options see [CONFIG.md](./CONFIG.md).
 
-#### Detach Keybinding
-
-You may wish to configure your detach keybinding.
-By default, `shpool` will detach from the current user session when you
-press the sequence `Ctrl-Space Ctrl-q` (press `Ctrl-Space` then release
-it and press `Ctrl-q`, don't try to hold down all three keys at once),
-but you can configure a different binding by adding an entry
-like
-
-```
-[[keybinding]]
-binding = "Ctrl-a d"
-action = "Detach"
-```
-
-to your `~/.config/shpool/config.toml`.
-
-For the moment, control is the only modifier key supported, but the keybinding
-engine is designed to be able to handle more, so if you want a different one,
-you can file a bug with your feature request.
-
-#### Session Restore Mode
-
-Shpool can do a few different things when you re-attach to an existing
-session. You can choose what you want it to do with the `session_restore_mode`
-configuration option.
-
-##### `"screen"` (default) - restore a screenful of history
-
-The `"screen"` option causes `shpool` to re-draw sufficient output to fill the
-entire screen of the client terminal as well as using the SIGWINCH trick
-described in the `"simple"` section below. This will help restore
-context for interactive terminal sessions that are not full blown ncurses
-apps. `"screen"` is the default reattach behavior for `shpool`.
-You can choose this option explicitly by adding
-
-```
-session_restore_mode = "screen"
-```
-
-to your `~/.config/shpool/config.toml`.
-
-##### `"simple"` - only ask child processes to redraw
-
-The `"simple"` option avoids restoring any output. In this reconnect mode, `shpool` will
-issue some SIGWINCH signals to try to convince full screen ncurses apps
-such as vim or emacs to re-draw the screen, but will otherwise do nothing.
-Any shell output produced when there was no client connected to the session
-will be lost. You can choose this connection mode by adding
-
-```
-session_restore_mode = "simple"
-```
-
-to your `~/.config/shpool/config.toml`.
-
-##### `{ lines = n }` - restore the last n lines of history
-
-The lines option is much like the `"screen"` option, except that rather
-than just a screenful of text, it restores the last n lines of text
-from the terminal being re-attached to. This could be useful if you
-wish to have more context than a single screenful of text. Note that
-n cannot exceed the value of the `output_spool_lines` configuration
-option, but it defaults to the value of the lines option, so you likely
-won't need to change it.
-
-```
-session_restore_mode = { lines = n }
-```
-
-where n is a number to your `~/.config/shpool/config.toml`.
-
-#### Shell Config
+### Shell Config
 
 ##### bash
 
