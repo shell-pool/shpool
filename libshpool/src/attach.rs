@@ -35,6 +35,12 @@ pub fn run(
 ) -> anyhow::Result<()> {
     info!("\n\n======================== STARTING ATTACH ============================\n\n");
     test_hooks::emit("attach-startup");
+
+    if name.is_empty() {
+        eprintln!("blank session names are not allowed");
+        return Ok(());
+    }
+
     SignalHandler::new(name.clone(), socket.clone()).spawn()?;
 
     let config_manager = config::Manager::new(config_file.as_deref())?;
