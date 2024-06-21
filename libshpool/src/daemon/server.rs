@@ -650,22 +650,29 @@ impl Server {
             .env_clear();
 
         let term = self.inject_env(&mut cmd, &user_info, header).context("setting up shell env")?;
+        let fallback_terminfo = || match termini::TermInfo::from_name("xterm") {
+            Ok(db) => Ok(db),
+            Err(err) => {
+                warn!("could not get xterm terminfo: {:?}", err);
+                let empty_db = io::Cursor::new(vec![]);
+                termini::TermInfo::parse(empty_db).context("getting terminfo db")
+            }
+        };
         let term_db = Arc::new(if let Some(term) = &term {
-            termini::TermInfo::from_name(term).context("resolving terminfo")?
+            match termini::TermInfo::from_name(term).context("resolving terminfo") {
+                Ok(ti) => ti,
+                Err(err) => {
+                    warn!("could not get terminfo for '{}': {:?}", term, err);
+                    fallback_terminfo()?
+                }
+            }
         } else {
             warn!("no $TERM, using default terminfo");
             match termini::TermInfo::from_env() {
                 Ok(db) => db,
                 Err(err) => {
                     warn!("could not get terminfo from env: {:?}", err);
-                    match termini::TermInfo::from_name("xterm") {
-                        Ok(db) => db,
-                        Err(err) => {
-                            warn!("could not get xterm terminfo: {:?}", err);
-                            let empty_db = io::Cursor::new(vec![]);
-                            termini::TermInfo::parse(empty_db).context("getting terminfo db")?
-                        }
-                    }
+                    fallback_terminfo()?
                 }
             }
         });
