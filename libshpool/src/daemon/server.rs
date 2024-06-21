@@ -323,9 +323,13 @@ impl Server {
                     pager_ctl_slot,
                     header.local_tty_size.clone(),
                 ) {
-                    Ok(new_size) => {
+                    Ok(Some(new_size)) => {
                         info!("motd pager finished, reporting new tty size: {:?}", new_size);
                         new_size
+                    }
+                    Ok(None) => {
+                        info!("not time to show the motd in the pager yet");
+                        header.local_tty_size.clone()
                     }
                     Err(e) => match e.downcast::<PagerError>() {
                         Ok(PagerError::ClientHangup) => {
