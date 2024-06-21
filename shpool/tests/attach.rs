@@ -492,6 +492,25 @@ fn blank_session_not_allowed() -> anyhow::Result<()> {
 
 #[test]
 #[timeout(30000)]
+fn whitespace_session_not_allowed() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc = support::daemon::Proc::new(
+            "norc.toml",
+            DaemonArgs { listen_events: false, ..DaemonArgs::default() },
+        )
+        .context("starting daemon proc")?;
+
+        let mut tty1 =
+            daemon_proc.attach("this\tbad", Default::default()).context("attaching from tty1")?;
+        let mut line_matcher1 = tty1.stderr_line_matcher()?;
+        line_matcher1.scan_until_re("whitespace is not allowed in session names")?;
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
 fn daemon_hangup() -> anyhow::Result<()> {
     support::dump_err(|| {
         let mut daemon_proc = support::daemon::Proc::new(
