@@ -35,12 +35,18 @@ enum KnownShell {
 /// Inject the given prefix into the given shell subprocess, using
 /// the shell path in `shell` to decide the right way to go about
 /// injecting the prefix.
+///
+/// If the prefix is blank, this is a noop.
 #[instrument(skip_all)]
-pub fn inject_prefix(
+pub fn maybe_inject_prefix(
     pty_master: &mut shpool_pty::fork::Fork,
     prompt_prefix: &str,
     session_name: &str,
 ) -> anyhow::Result<()> {
+    if prompt_prefix.is_empty() {
+        return Ok(());
+    }
+
     let shell_pid = pty_master.child_pid().ok_or(anyhow!("no child pid"))?;
     // scan for the startup sentinel so we know it is safe to sniff the shell
     let mut pty_master = pty_master.is_parent().context("expected parent")?;
@@ -53,10 +59,6 @@ pub fn inject_prefix(
     let prompt_prefix = prompt_prefix.replace("$SHPOOL_SESSION_NAME", session_name);
 
     let mut script = match (prompt_prefix.as_str(), shell_type) {
-        // if the prompt prefix is empty, we don't need to bother with setup
-        // code, though we will still need to add the prompt setup sentinel
-        // for consistency.
-        ("", _) => String::new(),
         (_, Ok(KnownShell::Bash)) => format!(
             r#"
             if [[ -z "${{PROMPT_COMMAND+x}}" ]]; then
