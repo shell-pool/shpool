@@ -49,6 +49,11 @@ This README covers basic usage, but you can also check out
 [the wiki](https://github.com/shell-pool/shpool/wiki) for
 more tips and tricks.
 
+### [Troubleshooting](https://github.com/shell-pool/shpool/wiki/Troubleshooting)
+
+The [troubleshooting](https://github.com/shell-pool/shpool/wiki/Troubleshooting)
+wiki page contains some information about known pitfalls.
+
 ### [Configuration](./CONFIG.md)
 
 You can customize some of `shpool`s behavior by editing your
