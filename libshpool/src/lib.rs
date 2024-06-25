@@ -30,6 +30,7 @@ use tracing_subscriber::fmt::format::FmtSpan;
 mod attach;
 mod common;
 mod config;
+mod config_watcher;
 mod consts;
 mod daemon;
 mod detach;
