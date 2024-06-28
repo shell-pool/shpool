@@ -1,0 +1,28 @@
+[workspace]
+# disable the changelog for all packages, will only enable for shpool
+changelog_update = false
+
+[changelog]
+header = ""
+body = """
+{{ package }} ({{ version | trim_start_matches(pat="v") }}) unstable; urgency=low
+{% for group, commits in commits | group_by(attribute="group") %}
+  {{ group | upper_first }}
+{% for commit in commits -%}
+{%- if commit.scope %}
+  * *({{commit.scope}})* {% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message }}{%- if commit.links %} ({% for link in commit.links %}[{{link.text}}]({{link.href}}) {% endfor -%}){% endif %}
+{%- else %}
+  * {% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message }}
+{%- endif %}
+{%- endfor %}
+{% endfor %}
+ -- Shpool Authors <shpool-eng@google.com>  {{ now() | date(format="%a, %d %b %Y %T %z") }}
+"""
+trim = false
+
+[[package]]
+name = "shpool"
+changelog_update = true
+changelog_path = "./debian/changelog"
+# Also include changes in files in libshpool
+changelog_include = ["libshpool"]
