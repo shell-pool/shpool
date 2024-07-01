@@ -9,9 +9,9 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
-      - uses: moonrepo/setup-rust@b8edcc56aab474d90c7cf0bb8beeaf8334c15e9f
+      - uses: moonrepo/setup-rust@d8048d4fdff0633123678b093726e6d7c8ad6de5
         with:
-          channel: '1.74.0'
+          inherit-toolchain: true
           bins: cargo-deny
       - run: sudo apt-get install libpam0g-dev
       - run: cargo deny --all-features check

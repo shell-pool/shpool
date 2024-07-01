@@ -1,0 +1,38 @@
+name: Release-plz
+
+permissions:
+  pull-requests: write
+  contents: write
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  release-plz:
+    name: Release-plz
+    runs-on: ubuntu-latest
+    steps:
+      # Generating a GitHub token, so that PRs and tags created by
+      # the release-plz-action can trigger actions workflows.
+      - name: Generate GitHub token
+        uses: actions/create-github-app-token@31c86eb3b33c9b601a1f60f98dcbfd1d70f379b4
+        id: generate-token
+        with:
+          app-id: ${{ secrets.RELEASE_PLZ_APP_ID }} # <-- GitHub App ID secret name
+          private-key: ${{ secrets.RELEASE_PLZ_APP_PRIVATE_KEY }} # <-- GitHub App private key secret name
+      - name: Checkout repository
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+        with:
+          fetch-depth: 0
+      - name: Install Rust toolchain
+        uses: moonrepo/setup-rust@d8048d4fdff0633123678b093726e6d7c8ad6de5
+        with:
+          inherit-toolchain: true
+          bins: cross
+      - name: Run release-plz
+        uses: MarcoIeni/release-plz-action@86afd21a7b114234aab55ba0005eed52f77d89e4
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
