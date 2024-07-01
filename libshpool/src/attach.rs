@@ -40,6 +40,10 @@ pub fn run(
         eprintln!("blank session names are not allowed");
         return Ok(());
     }
+    if name.contains(char::is_whitespace) {
+        eprintln!("whitespace is not allowed in session names");
+        return Ok(());
+    }
 
     SignalHandler::new(name.clone(), socket.clone()).spawn()?;
 
