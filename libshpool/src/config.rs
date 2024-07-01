@@ -309,7 +309,20 @@ pub enum MotdDisplayMode {
     /// (wether to a new session or reattaching to an existing session).
     ///
     /// Typically bin is set to `"less"` if you want to use this option.
-    Pager { bin: String },
+    Pager {
+        /// The path of the binary to use as the pager. It will get invoked
+        /// like `bin /tmp/motd.txt`, so it needs to show its first arg
+        /// as the content.
+        bin: String,
+        /// If provided, this option should contain a duration in the
+        /// same format accepted by the --ttl flag, and indicates that
+        /// shpool should not use the pager to show the motd if it has
+        /// already done so within the given duration.
+        ///
+        /// If this is not provided, shpool will show the motd in a pager
+        /// every time the user attaches with no debounce.
+        show_every: Option<String>,
+    },
 
     /// Just dump the message of the day directly to the screen.
     /// Dumps are only performed when a new session is created.

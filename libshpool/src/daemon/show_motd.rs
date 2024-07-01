@@ -16,15 +16,16 @@ use std::{
     io,
     os::unix::net::UnixStream,
     sync::{Arc, Mutex},
+    time,
 };
 
 use anyhow::{anyhow, Context};
-use tracing::info;
+use tracing::{info, instrument};
 
 use crate::{
     config,
     daemon::pager::{Pager, PagerCtl},
-    protocol, tty,
+    duration, protocol, tty,
 };
 
 /// Showers know how to show the message of the day.
@@ -33,18 +34,28 @@ pub struct DailyMessenger {
     motd_resolver: motd::Resolver,
     mode: config::MotdDisplayMode,
     args: Option<Vec<String>>,
+    debouncer: Option<Debouncer>,
 }
 
 impl DailyMessenger {
-    /// Make a new Shower.
+    /// Make a new DailyMessenger.
     pub fn new(mode: config::MotdDisplayMode, args: Option<Vec<String>>) -> anyhow::Result<Self> {
+        let debouncer = match &mode {
+            config::MotdDisplayMode::Pager { show_every: Some(dur), .. } => {
+                Some(Debouncer::new(duration::parse(dur).context("parsing debounce dur")?))
+            }
+            _ => None,
+        };
+
         Ok(DailyMessenger {
             motd_resolver: motd::Resolver::new().context("creating motd resolver")?,
             mode,
             args,
+            debouncer,
         })
     }
 
+    #[instrument(skip_all)]
     pub fn dump<W: io::Write>(
         &self,
         mut stream: W,
@@ -63,6 +74,13 @@ impl DailyMessenger {
     /// Display the motd in a pager. Callers should do a downcast error
     /// check for PagerError::ClientHangup as if they had called
     /// Pager::display directly.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(Some(...))` indicates that a pager has been shown,
+    /// while `Ok(None)` indicates that it is not time to show the
+    /// pager yet. An error is an error.
+    #[instrument(skip_all)]
     pub fn display_in_pager(
         &self,
         // The client connection on which to display the pager.
@@ -71,8 +89,14 @@ impl DailyMessenger {
         ctl_slot: Arc<Mutex<Option<PagerCtl>>>,
         // The size of the tty to start off with
         init_tty_size: tty::Size,
-    ) -> anyhow::Result<tty::Size> {
-        let pager_bin = if let config::MotdDisplayMode::Pager { bin } = &self.mode {
+    ) -> anyhow::Result<Option<tty::Size>> {
+        if let Some(debouncer) = &self.debouncer {
+            if !debouncer.should_fire()? {
+                return Ok(None);
+            }
+        }
+
+        let pager_bin = if let config::MotdDisplayMode::Pager { bin, .. } = &self.mode {
             bin
         } else {
             return Err(anyhow!("internal error: wrong mode to display in pager"));
@@ -84,7 +108,9 @@ impl DailyMessenger {
 
         let pager = Pager::new(pager_bin.to_string());
 
-        pager.display(client_stream, ctl_slot, init_tty_size, motd_value.as_str())
+        let final_size =
+            pager.display(client_stream, ctl_slot, init_tty_size, motd_value.as_str())?;
+        Ok(Some(final_size))
     }
 
     fn motd_value(&self) -> anyhow::Result<String> {
@@ -127,5 +153,33 @@ impl DailyMessenger {
         }
 
         Ok(buf)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Debouncer {
+    last_fired: Arc<Mutex<time::SystemTime>>,
+    dur: time::Duration,
+}
+
+impl Debouncer {
+    fn new(dur: time::Duration) -> Self {
+        Debouncer { last_fired: Arc::new(Mutex::new(time::SystemTime::now() - (dur * 2))), dur }
+    }
+
+    #[instrument(skip_all)]
+    fn should_fire(&self) -> anyhow::Result<bool> {
+        let mut last_fired = self.last_fired.lock().unwrap();
+        if last_fired.elapsed()? >= self.dur {
+            let old_ts: chrono::DateTime<chrono::Utc> = (*last_fired).into();
+            *last_fired = time::SystemTime::now();
+            let new_ts: chrono::DateTime<chrono::Utc> = (*last_fired).into();
+            info!("last_fired: old = {}, new = {}", old_ts, new_ts);
+            Ok(true)
+        } else {
+            let ts: chrono::DateTime<chrono::Utc> = (*last_fired).into();
+            info!("not firing yet (last_fired = {})", ts);
+            Ok(false)
+        }
     }
 }
