@@ -42,6 +42,7 @@ tempfile = "3" # RAII tmp files
 strip-ansi-escapes = "0.2.0" # cleaning up strings for pager display
 notify = "6" # watch config file for updates
 libproc = "0.14.8" # sniffing shells by examining the subprocess
+directories = "5.0.1" # get paths for configurations
 
 # rusty wrapper for unix apis
 [dependencies.nix]
@@ -55,3 +56,4 @@ features = ["std", "fmt", "tracing-log", "smallvec"]
 
 [dev-dependencies]
 ntest = "0.9" # test timeouts
+assert_matches = "1.5" # assert_matches macro

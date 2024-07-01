@@ -198,8 +198,10 @@ impl SessionInner {
         let mut prompt_sentinel_scanner = prompt::SentinelScanner::new(consts::PROMPT_SENTINEL);
 
         // We only scan for the prompt sentinel if the user has not set up a
-        // custom command.
-        let mut has_seen_prompt_sentinel = self.custom_cmd;
+        // custom command or blanked out the prompt_prefix config option.
+        let prompt_prefix_is_blank =
+            self.config.get().prompt_prefix.as_ref().map(|p| p.is_empty()).unwrap_or(false);
+        let mut has_seen_prompt_sentinel = self.custom_cmd || prompt_prefix_is_blank;
 
         let daily_messenger = Arc::clone(&self.daily_messenger);
         let mut needs_initial_motd_dump = self.needs_initial_motd_dump;
