@@ -13,18 +13,19 @@
 // limitations under the License.
 
 use std::{
+    borrow::Cow,
     collections::HashMap,
     fs,
-    path::{Path, PathBuf},
+    path::Path,
     sync::{Arc, RwLock, RwLockReadGuard},
 };
 
-use anyhow::Context;
-use notify::Watcher;
+use anyhow::{Context as _, Result};
+use directories::ProjectDirs;
 use serde_derive::Deserialize;
 use tracing::{info, warn};
 
-use super::{daemon::keybindings, user};
+use crate::{config_watcher::ConfigWatcher, daemon::keybindings, test_hooks};
 
 /// Exposes the shpool config file, watching for file updates
 /// so that the user does not need to restart the daemon when
@@ -33,90 +34,108 @@ use super::{daemon::keybindings, user};
 /// Users should never cache the config value directly and always
 /// access the config through the manager. The config may change
 /// at any time, so any cached config value could become stale.
+#[derive(Clone)]
 pub struct Manager {
     /// The config value.
     config: Arc<RwLock<Config>>,
-    watcher: Option<Arc<notify::RecommendedWatcher>>,
+    _watcher: Arc<ConfigWatcher>,
 }
 
 impl Manager {
-    // Create a new config manager.
-    pub fn new(config_file: Option<&str>) -> anyhow::Result<Self> {
-        let user_info = user::info()?;
-        let mut default_config_path = PathBuf::from(user_info.home_dir);
+    /// Create a new config manager.
+    ///
+    /// Unless given as the `config_file` argument, config files are read from
+    /// the following paths in the reverse priority order:
+    ///
+    /// - System level config: /etc/shpool/config.toml
+    /// - User level config: $XDG_CONFIG_HOME/shpool/config.toml or
+    ///   $HOME/.config/shpool/config.toml if $XDG_CONFIG_HOME is not set
+    ///
+    /// For each top level field, values read later will overrides those read
+    /// eariler. The exact merging strategy is as defined in
+    /// `Config::merge`.
+    pub fn new(config_file: Option<&str>) -> Result<Self> {
+        let dirs = ProjectDirs::from("", "", "shpool").context("getting ProjectDirs")?;
 
-        let (config, config_path) = if let Some(config_path) = config_file {
-            info!("parsing explicitly passed in config ({})", config_path);
-            let config_str = fs::read_to_string(config_path).context("reading config toml (1)")?;
-            let config = toml::from_str(&config_str).context("parsing config file (1)")?;
-
-            (config, Some(String::from(config_path)))
-        } else {
-            default_config_path.push(".config");
-            default_config_path.push("shpool");
-            default_config_path.push("config.toml");
-            if default_config_path.exists() {
-                let config_str =
-                    fs::read_to_string(&default_config_path).context("reading config toml (2)")?;
-                let config = toml::from_str(&config_str).context("parsing config file (2)")?;
-
-                (config, default_config_path.clone().to_str().map(String::from))
-            } else {
-                (Config::default(), None)
+        let config_files = match config_file {
+            None => {
+                vec![
+                    Cow::from(Path::new("/etc/shpool/config.toml")),
+                    Cow::from(dirs.config_dir().join("config.toml")),
+                ]
+            }
+            Some(config_file) => {
+                info!("parsing explicitly passed in config ({})", config_file);
+                vec![Cow::from(Path::new(config_file))]
             }
         };
+
+        let config = Self::load(&config_files).context("loading initial config")?;
         info!("starting with config: {:?}", config);
+        let config = Arc::new(RwLock::new(config));
 
-        let mut manager = Manager { config: Arc::new(RwLock::new(config)), watcher: None };
-
-        if let Some(watch_path) = config_path {
-            let config_slot = Arc::clone(&manager.config);
-            let reload_path = watch_path.clone();
-            let mut watcher = notify::recommended_watcher(move |res| match res {
-                Ok(event) => {
-                    info!("config file modify event: {:?}", event);
-
-                    let config_str = match fs::read_to_string(&reload_path) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            warn!("error reading config file: {:?}", e);
-                            return;
-                        }
-                    };
-
-                    let config = match toml::from_str(&config_str) {
-                        Ok(c) => c,
-                        Err(e) => {
-                            warn!("error parsing config file: {:?}", e);
-                            return;
-                        }
-                    };
-                    info!("new config: {:?}", config);
-
-                    let mut manager_config = config_slot.write().unwrap();
-                    *manager_config = config;
+        let watcher = {
+            let config = config.clone();
+            // create a owned version of config_files to move to the watcher thread.
+            let config_files: Vec<_> = config_files.iter().map(|f| f.to_path_buf()).collect();
+            ConfigWatcher::new(move || {
+                info!("reloading config");
+                let mut config = config.write().unwrap();
+                match Self::load(&config_files) {
+                    Ok(c) => {
+                        info!("new config: {:?}", c);
+                        *config = c;
+                    }
+                    Err(err) => warn!("error loading config file: {:?}", err),
                 }
-                Err(e) => warn!("config file watch err: {:?}", e),
+                test_hooks::emit("daemon-reload-config");
             })
-            .context("building watcher")?;
-            watcher
-                .watch(Path::new(&watch_path), notify::RecursiveMode::NonRecursive)
-                .context("registering config file for watching")?;
-            manager.watcher = Some(Arc::new(watcher));
+            .context("building watcher")?
+        };
+        for path in config_files {
+            watcher.watch(path).context("registering config file for watching")?;
         }
+        let manager = Manager { config, _watcher: Arc::new(watcher) };
 
         Ok(manager)
     }
 
-    // Get the current config value.
+    /// Get the current config value.
     pub fn get(&self) -> RwLockReadGuard<'_, Config> {
         self.config.read().unwrap()
     }
-}
 
-impl std::clone::Clone for Manager {
-    fn clone(&self) -> Self {
-        Manager { config: Arc::clone(&self.config), watcher: self.watcher.as_ref().map(Arc::clone) }
+    /// Load config by merging configurations from a list of Paths.
+    ///
+    /// Paths come later in the list takes higher priority.
+    /// Merge strategy is as defined in `Config::merge`.
+    fn load<T>(config_files: T) -> Result<Config>
+    where
+        T: IntoIterator,
+        T::Item: AsRef<Path>,
+    {
+        let mut config = Config::default();
+        for path in config_files {
+            let path = path.as_ref();
+            let config_str = match fs::read_to_string(path) {
+                Err(e) => {
+                    warn!("skip reading config file {}: {:?}", path.display(), e);
+                    continue;
+                }
+                Ok(s) => s,
+            };
+            let new_config: Config = match toml::from_str(&config_str) {
+                Err(e) => {
+                    warn!("error parsing config file: {:?}", e);
+                    return Err(e).with_context(|| {
+                        format!("parsing config toml {}", path.to_string_lossy())
+                    });
+                }
+                Ok(c) => c,
+            };
+            config = new_config.merge(config);
+        }
+        Ok(config)
     }
 }
 
@@ -217,6 +236,35 @@ pub struct Config {
     pub motd_args: Option<Vec<String>>,
 }
 
+impl Config {
+    // Merge with `another` Config instance, with `self` taking higher priority,
+    // i.e. it is not communicative.
+    //
+    // Top level options with simple value are directly taken from `self`.
+    // List or map fields may be handled differently. If so, it will be highlighted
+    // in that field's documentation.
+    pub fn merge(self, another: Config) -> Config {
+        Config {
+            norc: self.norc.or(another.norc),
+            noecho: self.noecho.or(another.noecho),
+            nosymlink_ssh_auth_sock: self
+                .nosymlink_ssh_auth_sock
+                .or(another.nosymlink_ssh_auth_sock),
+            noread_etc_environment: self.noread_etc_environment.or(another.noread_etc_environment),
+            shell: self.shell.or(another.shell),
+            env: self.env.or(another.env),
+            forward_env: self.forward_env.or(another.forward_env),
+            initial_path: self.initial_path.or(another.initial_path),
+            session_restore_mode: self.session_restore_mode.or(another.session_restore_mode),
+            output_spool_lines: self.output_spool_lines.or(another.output_spool_lines),
+            keybinding: self.keybinding.or(another.keybinding),
+            prompt_prefix: self.prompt_prefix.or(another.prompt_prefix),
+            motd: self.motd.or(another.motd),
+            motd_args: self.motd_args.or(another.motd_args),
+        }
+    }
+}
+
 #[derive(Deserialize, Debug, Clone)]
 pub struct Keybinding {
     /// The keybinding to map to an action. The syntax for these keybindings
@@ -277,7 +325,7 @@ mod test {
 
     #[test]
     #[timeout(30000)]
-    fn parse() -> anyhow::Result<()> {
+    fn parse() -> Result<()> {
         let cases = vec![
             r#"
             session_restore_mode = "simple"
@@ -300,5 +348,89 @@ mod test {
         }
 
         Ok(())
+    }
+
+    mod merge {
+        use super::*;
+        use assert_matches::assert_matches;
+
+        #[test]
+        #[timeout(30000)]
+        fn simple_value() -> Result<()> {
+            // 4 values are chosen to cover all combinations of None and Some cases.
+            let higher = Config {
+                norc: None,
+                noecho: None,
+                shell: Some("abc".to_string()),
+                session_restore_mode: Some(SessionRestoreMode::Simple),
+                ..Default::default()
+            };
+            let lower = Config {
+                norc: Some(true),
+                noecho: None,
+                shell: None,
+                session_restore_mode: Some(SessionRestoreMode::Lines(42)),
+                ..Default::default()
+            };
+
+            assert_matches!(higher.merge(lower), Config {
+                norc: Some(true),
+                noecho: None,
+                shell: Some(shell),
+                session_restore_mode: Some(SessionRestoreMode::Simple),
+                ..
+            } if shell == "abc");
+            Ok(())
+        }
+
+        #[test]
+        #[timeout(30000)]
+        fn vec_value() -> Result<()> {
+            let higher = Config {
+                forward_env: Some(vec!["abc".to_string(), "efg".to_string()]),
+                motd_args: None,
+                ..Default::default()
+            };
+            let lower = Config {
+                forward_env: None,
+                motd_args: Some(vec!["hij".to_string(), "klm".to_string()]),
+                ..Default::default()
+            };
+
+            let actual = higher.merge(lower);
+            assert_eq!(actual.forward_env, Some(vec!["abc".to_string(), "efg".to_string()]));
+            assert_eq!(actual.motd_args, Some(vec!["hij".to_string(), "klm".to_string()]));
+            Ok(())
+        }
+
+        #[test]
+        #[timeout(30000)]
+        fn map_value() -> Result<()> {
+            let higher = Config {
+                env: Some(HashMap::from([
+                    ("key1".to_string(), "value1".to_string()),
+                    ("key2".to_string(), "value2".to_string()),
+                ])),
+                ..Default::default()
+            };
+            let lower = Config {
+                env: Some(HashMap::from([
+                    ("key3".to_string(), "value3".to_string()),
+                    ("key4".to_string(), "value4".to_string()),
+                ])),
+                ..Default::default()
+            };
+
+            let actual = higher.merge(lower);
+
+            assert_eq!(
+                actual.env,
+                Some(HashMap::from([
+                    ("key1".to_string(), "value1".to_string()),
+                    ("key2".to_string(), "value2".to_string()),
+                ]))
+            );
+            Ok(())
+        }
     }
 }

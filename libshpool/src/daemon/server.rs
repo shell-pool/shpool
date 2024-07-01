@@ -745,7 +745,7 @@ impl Server {
                 .prompt_prefix
                 .clone()
                 .unwrap_or(String::from(DEFAULT_PROMPT_PREFIX));
-            if let Err(err) = prompt::inject_prefix(&mut fork, &prompt_prefix, &header.name) {
+            if let Err(err) = prompt::maybe_inject_prefix(&mut fork, &prompt_prefix, &header.name) {
                 warn!("issue injecting prefix: {:?}", err);
             }
         }

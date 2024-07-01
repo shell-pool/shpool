@@ -1301,9 +1301,16 @@ fn dynamic_config_change() -> anyhow::Result<()> {
         attach_proc.run_cmd("echo $CHANGING_VAR")?;
         line_matcher.scan_until_re("REPLACE_ME$")?;
 
-        // change the config contents on the fly
+        // Create waiter right before changing config file, since reload can also happen
+        // right after daemon startup.
+        let mut waiter = daemon_proc.events.take().unwrap().waiter(["daemon-reload-config"]);
+
+        // Change the config contents on the fly
         let config_contents = config_tmpl.replace("REPLACE_ME", "NEW_VALUE");
         fs::write(&config_file, config_contents)?;
+
+        // Wait for reload to happen since there is debounce time
+        waiter.wait_event("daemon-reload-config")?;
 
         // When we spawn a new session, it should pick up the new value
         let mut attach_proc =
