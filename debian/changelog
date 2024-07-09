@@ -1,3 +1,15 @@
+shpool (0.6.3) unstable; urgency=low
+
+  * Add debounce option to motd pager mode
+  * Ban whitespace in session names
+  * Ban blank session names
+  * Fix terminfo resolution fallback
+  * Fully disable prompt code for blank prompt prefix
+  * Add system level configuration
+  * Fix config change watcher to pick up new files
+  * Sniff shells rather than just keying off of binary name
+
+ -- Ethan Pailes <pailes@google.com>  Tue, 09 Jul 2024 08:32:00 -0400
 shpool (0.6.2) unstable; urgency=low
 
   * Fix bash prompt prefix injection
