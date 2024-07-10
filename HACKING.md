@@ -57,6 +57,19 @@ $ systemctl --user start shpool
 Run `cargo +nightly fmt` to ensure that the code matches the expected
 style.
 
+## Commit message style
+
+https://www.conventionalcommits.org/ is used to facilitate changelog generation.
+
+## Release
+
+[release-plz](https://release-plz.ieni.dev/) is used to manage the release
+process. It will create a release PR and keep it updated with any commits to
+the `master` branch. When the PR is merged, `release-plz` creates the tag and
+the release on GitHub and publishes the creates to creates.io.
+
+See https://release-plz.ieni.dev/ for more details.
+
 ## Measuring Latency
 
 To check e2e latency, you can use the

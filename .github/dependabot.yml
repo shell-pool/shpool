@@ -1,0 +1,19 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    # Check for updates every Monday
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+    groups:
+      github-actions:
+        patterns: ["*"]
+  - package-ecosystem: "cargo"
+    directory: "/"
+    # Check for updates every Monday
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore"
