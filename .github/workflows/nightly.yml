@@ -13,6 +13,7 @@ jobs:
         with:
           inherit-toolchain: true
           bins: cargo-deny
+      - run: rustc --version
       - run: sudo apt-get install libpam0g-dev
       - run: cargo deny --all-features check
 

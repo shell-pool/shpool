@@ -31,6 +31,7 @@ jobs:
         with:
           inherit-toolchain: true
           bins: cross
+      - run: rustc --versoin
       - name: Run release-plz
         uses: MarcoIeni/release-plz-action@86afd21a7b114234aab55ba0005eed52f77d89e4
         env:

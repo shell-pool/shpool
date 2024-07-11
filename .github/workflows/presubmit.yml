@@ -10,6 +10,7 @@ jobs:
       - uses: moonrepo/setup-rust@d8048d4fdff0633123678b093726e6d7c8ad6de5
         with:
           inherit-toolchain: true
+      - run: rustc --version
       - run: sudo apt-get install zsh fish libpam0g-dev
       - run: SHPOOL_LEAVE_TEST_LOGS=true cargo test --all-features
       - name: Archive Logs
@@ -43,6 +44,7 @@ jobs:
         with:
           components: rustfmt
           channel: nightly
+      - run: rustc --version
       - run: sudo apt-get install libpam0g-dev
       - run: cargo +nightly fmt -- --check
 
@@ -56,6 +58,7 @@ jobs:
           components: clippy
           bins: cargo-cranky@0.3.0
           channel: nightly
+      - run: rustc --version
       - run: sudo apt-get install zsh fish libpam0g-dev
       - run: cargo +nightly cranky --all-targets -- -D warnings
 
@@ -69,5 +72,6 @@ jobs:
         with:
           inherit-toolchain: true
           bins: cargo-deny
+      - run: rustc --version
       - run: sudo apt-get install libpam0g-dev
       - run: cargo deny --all-features check licenses

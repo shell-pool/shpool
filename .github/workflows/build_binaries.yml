@@ -51,6 +51,7 @@ jobs:
         with:
           inherit-toolchain: true
           bins: cross
+      - run: rustc --version
       - uses: taiki-e/setup-cross-toolchain-action@241e9bf5f01f63286a020946ddaa3fd6d9c32cca
         with:
           target: ${{ matrix.target }}
