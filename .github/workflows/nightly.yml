@@ -8,7 +8,7 @@ jobs:
     name: cargo deny --all-features check
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
       - uses: moonrepo/setup-rust@d8048d4fdff0633123678b093726e6d7c8ad6de5
         with:
           inherit-toolchain: true
