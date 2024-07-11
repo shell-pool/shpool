@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::{
+    default::Default,
     fmt,
     io::{self, Read, Write},
     os::unix::net::UnixStream,
@@ -23,6 +24,7 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use serde::{Deserialize, Serialize};
 use serde_derive::{Deserialize, Serialize};
 use tracing::{debug, error, instrument, span, trace, warn, Level};
 
@@ -30,6 +32,36 @@ use super::{consts, tty};
 
 const JOIN_POLL_DUR: time::Duration = time::Duration::from_millis(100);
 const JOIN_HANGUP_DUR: time::Duration = time::Duration::from_millis(300);
+
+/// The centralized encoding function that should be used for all protocol
+/// serialization.
+pub fn encode_to<T, W>(d: &T, w: W) -> anyhow::Result<()>
+where
+    T: Serialize,
+    W: Write,
+{
+    // You might be worried that since we are encoding and decoding
+    // directly to/from the stream, unknown fields might be left trailing
+    // and mangle followup data, but msgpack is basically binary
+    // encoded json, so it has a notion of an object, which means
+    // it will be able to skip past the unknown fields and avoid any
+    // sort of mangling.
+    let mut serializer = rmp_serde::Serializer::new(w).with_struct_map();
+    d.serialize(&mut serializer).context("serializing data")?;
+    Ok(())
+}
+
+/// The centralized decoding focuntion that should be used for all protocol
+/// deserialization.
+pub fn decode_from<T, R>(r: R) -> anyhow::Result<T>
+where
+    for<'de> T: Deserialize<'de>,
+    R: Read,
+{
+    let mut deserializer = rmp_serde::Deserializer::new(r);
+    let d: T = Deserialize::deserialize(&mut deserializer).context("deserializing from reader")?;
+    Ok(d)
+}
 
 /// ConnectHeader is the blob of metadata that a client transmits when it
 /// first connections. It uses an enum to allow different connection types
@@ -65,11 +97,13 @@ pub enum ConnectHeader {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct KillRequest {
     /// The sessions to detach
+    #[serde(default)]
     pub sessions: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct KillReply {
+    #[serde(default)]
     pub not_found_sessions: Vec<String>,
 }
 
@@ -78,15 +112,18 @@ pub struct KillReply {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DetachRequest {
     /// The sessions to detach
+    #[serde(default)]
     pub sessions: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DetachReply {
     /// sessions that are not even in the session table
+    #[serde(default)]
     pub not_found_sessions: Vec<String>,
     /// sessions that are in the session table, but have no
     /// tty attached
+    #[serde(default)]
     pub not_attached_sessions: Vec<String>,
 }
 
@@ -96,20 +133,23 @@ pub struct DetachReply {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SessionMessageRequest {
     /// The session to route this request to.
+    #[serde(default)]
     pub session_name: String,
     /// The actual message to send to the session.
+    #[serde(default)]
     pub payload: SessionMessageRequestPayload,
 }
 
 /// SessionMessageRequestPayload contains a request for
 /// a running session.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub enum SessionMessageRequestPayload {
     /// Resize a named session's pty. Generated when
     /// a `shpool attach` process receives a SIGWINCH.
     Resize(ResizeRequest),
     /// Detach the given session. Generated internally
     /// by the server from a batch detach request.
+    #[default]
     Detach,
 }
 
@@ -120,6 +160,7 @@ pub enum SessionMessageRequestPayload {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ResizeRequest {
     /// The size of the client's tty
+    #[serde(default)]
     pub tty_size: tty::Size,
 }
 
@@ -154,22 +195,27 @@ pub enum ResizeReply {
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct AttachHeader {
     /// The name of the session to create or attach to.
+    #[serde(default)]
     pub name: String,
     /// The size of the local tty. Passed along so that the remote
     /// pty can be kept in sync (important so curses applications look
     /// right).
+    #[serde(default)]
     pub local_tty_size: tty::Size,
     /// A subset of the environment of the shell that `shpool attach` is run
     /// in. Contains only some variables needed to set up the shell when
     /// shpool forks off a process. For now the list is just `SSH_AUTH_SOCK`
     /// and `TERM`.
+    #[serde(default)]
     pub local_env: Vec<(String, String)>,
     /// If specified, sets a time limit on how long the shell will be open
     /// when the shell is first created (does nothing in the case of a
     /// reattach). The daemon is responsible for automatically killing the
     /// session once the ttl is over.
+    #[serde(default)]
     pub ttl_secs: Option<u64>,
     /// If specified, a command to run instead of the users default shell.
+    #[serde(default)]
     pub cmd: Option<String>,
 }
 
@@ -184,26 +230,32 @@ impl AttachHeader {
 /// connection error.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AttachReplyHeader {
+    #[serde(default)]
     pub status: AttachStatus,
 }
 
 /// ListReply is contains a list of active sessions to be displayed to the user.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ListReply {
+    #[serde(default)]
     pub sessions: Vec<Session>,
 }
 
 /// Session describes an active session.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Session {
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub started_at_unix_ms: i64,
+    #[serde(default)]
     pub status: SessionStatus,
 }
 
 /// Indicates if a shpool session currently has a client attached.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub enum SessionStatus {
+    #[default]
     Attached,
     Disconnected,
 }
@@ -241,6 +293,12 @@ pub enum AttachStatus {
     Forbidden(String),
     /// Some unexpected error
     UnexpectedError(String),
+}
+
+impl Default for AttachStatus {
+    fn default() -> Self {
+        AttachStatus::UnexpectedError(String::from("default"))
+    }
 }
 
 /// ChunkKind is a tag that indicates what type of frame is being transmitted
@@ -345,16 +403,16 @@ impl Client {
 
     pub fn write_connect_header(&mut self, header: ConnectHeader) -> anyhow::Result<()> {
         let serialize_stream = self.stream.try_clone().context("cloning stream for reply")?;
-        bincode::serialize_into(serialize_stream, &header).context("writing reply")?;
+        encode_to(&header, serialize_stream).context("writing reply")?;
 
         Ok(())
     }
 
     pub fn read_reply<R>(&mut self) -> anyhow::Result<R>
     where
-        R: serde::de::DeserializeOwned,
+        R: for<'de> serde::Deserialize<'de>,
     {
-        let reply: R = bincode::deserialize_from(&mut self.stream).context("parsing header")?;
+        let reply: R = decode_from(&mut self.stream).context("parsing header")?;
         Ok(reply)
     }
 

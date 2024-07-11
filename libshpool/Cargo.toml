@@ -33,7 +33,7 @@ crossbeam-channel = "0.5" # channels
 libc = "0.2" # basic libc types
 log = "0.4" # logging facade (not used directly, but required if we have tracing-log enabled)
 tracing = "0.1" # logging and performance monitoring facade
-bincode = "1" # serialization for the control protocol
+rmp-serde = "1" # serialization for the control protocol
 shpool_vt100 = "0.1.2" # terminal emulation for the scrollback buffer
 shell-words = "1" # parsing the -c/--cmd argument
 motd = { version = "0.2.2", default-features = false, features = [] } # getting the message-of-the-day
