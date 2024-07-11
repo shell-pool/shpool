@@ -916,7 +916,7 @@ impl Server {
 #[instrument(skip_all)]
 fn parse_connect_header(stream: &mut UnixStream) -> anyhow::Result<protocol::ConnectHeader> {
     let header: protocol::ConnectHeader =
-        bincode::deserialize_from(stream).context("parsing header")?;
+        protocol::decode_from(stream).context("parsing header")?;
     Ok(header)
 }
 
@@ -930,7 +930,7 @@ where
         .context("setting write timout on inbound session")?;
 
     let serializeable_stream = stream.try_clone().context("cloning stream handle")?;
-    bincode::serialize_into(serializeable_stream, &header).context("writing reply")?;
+    protocol::encode_to(&header, serializeable_stream).context("writing reply")?;
 
     stream.set_write_timeout(None).context("unsetting write timout on inbound session")?;
     Ok(())
