@@ -206,6 +206,15 @@ pub struct Config {
     /// By default, 10000 lines.
     pub output_spool_lines: Option<usize>,
 
+    /// The width to use when storing session restoration lines via
+    /// the vt100 in-memory terminal engine (for the moment, the only
+    /// supported engine). vt100 allocates memory for the full width
+    /// for each line, leading to a lot of memory overhead, so playing
+    /// with this setting can be useful for tuning shpool's memory
+    /// usage. Eventually, this option will be deprecated once
+    /// the vt100 engine has been replaced.
+    pub vt100_output_spool_width: Option<u16>,
+
     /// The user supplied keybindings.
     pub keybinding: Option<Vec<Keybinding>>,
 
@@ -237,12 +246,12 @@ pub struct Config {
 }
 
 impl Config {
-    // Merge with `another` Config instance, with `self` taking higher priority,
-    // i.e. it is not communicative.
-    //
-    // Top level options with simple value are directly taken from `self`.
-    // List or map fields may be handled differently. If so, it will be highlighted
-    // in that field's documentation.
+    /// Merge with `another` Config instance, with `self` taking higher
+    /// priority, i.e. it is not commutative.
+    ///
+    /// Top level options with simple value are directly taken from `self`.
+    /// List or map fields may be handled differently. If so, it will be
+    /// highlighted in that field's documentation.
     pub fn merge(self, another: Config) -> Config {
         Config {
             norc: self.norc.or(another.norc),
@@ -257,6 +266,9 @@ impl Config {
             initial_path: self.initial_path.or(another.initial_path),
             session_restore_mode: self.session_restore_mode.or(another.session_restore_mode),
             output_spool_lines: self.output_spool_lines.or(another.output_spool_lines),
+            vt100_output_spool_width: self
+                .vt100_output_spool_width
+                .or(another.vt100_output_spool_width),
             keybinding: self.keybinding.or(another.keybinding),
             prompt_prefix: self.prompt_prefix.or(another.prompt_prefix),
             motd: self.motd.or(another.motd),
