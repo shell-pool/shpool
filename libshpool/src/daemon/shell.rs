@@ -40,7 +40,7 @@ use crate::{
 // to use u16::MAX, since the vt100 crate eagerly fills in its rows, and doing
 // so is very memory intensive. The right fix is to get the vt100 crate to
 // lazily initialize its rows, but that is likely a bunch of work.
-const VTERM_WIDTH: u16 = 1024 * 10;
+const VTERM_WIDTH: u16 = 1024;
 
 const SHELL_KILL_TIMEOUT: time::Duration = time::Duration::from_millis(500);
 
@@ -206,6 +206,10 @@ impl SessionInner {
         let daily_messenger = Arc::clone(&self.daily_messenger);
         let mut needs_initial_motd_dump = self.needs_initial_motd_dump;
 
+        let vterm_width = {
+            let config = self.config.get();
+            config.vt100_output_spool_width.unwrap_or(VTERM_WIDTH)
+        };
         let mut pty_master = self.pty_master.is_parent()?;
         let watchable_master = pty_master;
         let name = self.name.clone();
@@ -218,7 +222,7 @@ impl SessionInner {
                 } else {
                     Some(shpool_vt100::Parser::new(
                         args.tty_size.rows,
-                        VTERM_WIDTH,
+                        vterm_width,
                         args.scrollback_lines,
                     ))
                 };
