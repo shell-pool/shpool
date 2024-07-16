@@ -1,3 +1,17 @@
+
+shpool (0.6.4) unstable; urgency=low
+
+  Fixed
+
+  * protocol forward compat
+  * tune vt100 memory usage
+
+  Other
+
+  * update Cargo.lock dependencies
+  * bump toml from 0.7.8 to 0.8.12 ([#78](https://github.com/shell-pool/shpool/pull/78))
+
+ -- Shpool Authors <shpool-eng@google.com>  Tue, 16 Jul 2024 23:27:12 +0000
 shpool (0.6.3) unstable; urgency=low
 
   * Add debounce option to motd pager mode
