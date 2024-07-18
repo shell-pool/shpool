@@ -973,6 +973,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "shpool-protocol"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_derive",
+]
+
+[[package]]
 name = "shpool_pty"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

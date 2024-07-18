@@ -1,0 +1,19 @@
+[package]
+name = "shpool-protocol"
+version = "0.1.0"
+edition = "2021"
+authors = ["Ethan Pailes <pailes@google.com>"]
+repository = "https://github.com/shell-pool/shpool"
+readme = "../README.md"
+description = '''shpool-protocol defines the internal protocol
+shpool uses to talk between its client and daemon processes.
+You almost certainly don't need to use it directly.
+'''
+license = "Apache-2.0"
+keywords = ["tmux", "tty", "terminal", "shell", "persistence"]
+rust-version = "1.74"
+
+[dependencies]
+anyhow = "1"
+serde = "1"
+serde_derive = "1"
