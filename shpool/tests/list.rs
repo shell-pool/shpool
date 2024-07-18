@@ -38,6 +38,7 @@ fn no_daemon() -> anyhow::Result<()> {
         let out = Command::new(support::shpool_bin()?)
             .arg("--socket")
             .arg("/fake/does/not/exist/shpool.socket")
+            .arg("--no-daemonize")
             .arg("list")
             .output()
             .context("spawning list proc")?;

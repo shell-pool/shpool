@@ -117,6 +117,7 @@ impl Manager {
         let mut config = Config::default();
         for path in config_files {
             let path = path.as_ref();
+            info!("loading config from {:?}", path);
             let config_str = match fs::read_to_string(path) {
                 Err(e) => {
                     warn!("skip reading config file {}: {:?}", path.display(), e);
@@ -177,6 +178,17 @@ pub struct Config {
     /// variables found there into new shells. If this flag is set,
     /// it will avoid doing so.
     pub noread_etc_environment: Option<bool>,
+
+    /// By default, shpool will check for a running daemon, and if
+    /// one is not found, automatically spawn a daemon in the background.
+    /// With this option set, it will not do this by default.
+    /// (though this value will be overridden by the -d/--daemonize
+    /// or -D/--no-daemonize flags).
+    pub nodaemonize: Option<bool>,
+
+    /// If set, autodamonization will not timeout when waiting for the
+    /// daemon to come up and will instead spin forever.
+    pub nodaemonize_timeout: Option<bool>,
 
     /// shell overrides the user's default shell
     pub shell: Option<String>,
@@ -260,6 +272,8 @@ impl Config {
                 .nosymlink_ssh_auth_sock
                 .or(another.nosymlink_ssh_auth_sock),
             noread_etc_environment: self.noread_etc_environment.or(another.noread_etc_environment),
+            nodaemonize: self.nodaemonize.or(another.nodaemonize),
+            nodaemonize_timeout: self.nodaemonize_timeout.or(another.nodaemonize_timeout),
             shell: self.shell.or(another.shell),
             env: self.env.or(another.env),
             forward_env: self.forward_env.or(another.forward_env),

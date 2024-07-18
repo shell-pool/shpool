@@ -33,6 +33,7 @@ mod config;
 mod config_watcher;
 mod consts;
 mod daemon;
+mod daemonize;
 mod detach;
 mod duration;
 mod hooks;
@@ -79,7 +80,7 @@ running in daemon mode, the logs will go to stderr by default."
         action,
         long_help = "The path for the unix socket to listen on
 
-This defaults to $XDG_RUNTIME_DIR/shpool/shpool.socket or ~/.shpool/shpool.socket
+This defaults to $XDG_RUNTIME_DIR/shpool/shpool.socket or ~/.local/run/shpool/shpool.socket
 if XDG_RUNTIME_DIR is unset.
 
 This flag gets overridden by systemd socket activation when
@@ -89,6 +90,12 @@ the daemon is launched by systemd."
 
     #[clap(short, long, action, help = "a toml file containing configuration")]
     pub config_file: Option<String>,
+
+    #[clap(short, long, action, help = "automatically launch a daemon if one is not running")]
+    pub daemonize: bool,
+
+    #[clap(short = 'D', long, action, help = "do not automatically launch a daemon")]
+    pub no_daemonize: bool,
 
     #[clap(subcommand)]
     pub command: Commands,
@@ -208,26 +215,16 @@ pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> an
             .init();
     }
 
-    #[cfg(feature = "test_hooks")]
-    if let Ok(test_hook_sock) = std::env::var("SHPOOL_TEST_HOOK_SOCKET_PATH") {
-        log::info!("spawning test hook sock at {}", test_hook_sock);
-        test_hooks::TEST_HOOK_SERVER.set_socket_path(test_hook_sock.clone());
-        std::thread::spawn(|| {
-            test_hooks::TEST_HOOK_SERVER.start();
-        });
-        log::info!("waiting for test hook connection");
-        test_hooks::TEST_HOOK_SERVER.wait_for_connect()?;
-    }
-
     let mut runtime_dir = match env::var("XDG_RUNTIME_DIR") {
         Ok(runtime_dir) => PathBuf::from(runtime_dir),
-        Err(_) => {
-            PathBuf::from(env::var("HOME").context("no XDG_RUNTIME_DIR or HOME")?).join(".shpool")
-        }
+        Err(_) => PathBuf::from(env::var("HOME").context("no XDG_RUNTIME_DIR or HOME")?)
+            .join(".local")
+            .join("run"),
     }
     .join("shpool");
+    fs::create_dir_all(&runtime_dir).context("ensuring runtime dir exists")?;
 
-    let socket = match args.socket {
+    let socket = match &args.socket {
         Some(s) => {
             // The user can reasonably expect that if they provide seperate
             // sockets for differnt shpool instances to run on, they won't
@@ -244,16 +241,36 @@ pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> an
         None => runtime_dir.join("shpool.socket"),
     };
 
+    let config_manager = config::Manager::new(args.config_file.as_deref())?;
+
+    if !config_manager.get().nodaemonize.unwrap_or(false) || args.daemonize {
+        let arg0 = env::args().next().ok_or(anyhow!("arg0 missing"))?;
+        if !args.no_daemonize && !matches!(args.command, Commands::Daemon) {
+            daemonize::maybe_fork_daemon(&config_manager, &args, arg0, &socket)?;
+        }
+    }
+
+    #[cfg(feature = "test_hooks")]
+    if let Ok(test_hook_sock) = std::env::var("SHPOOL_TEST_HOOK_SOCKET_PATH") {
+        log::info!("spawning test hook sock at {}", test_hook_sock);
+        test_hooks::TEST_HOOK_SERVER.set_socket_path(test_hook_sock.clone());
+        std::thread::spawn(|| {
+            test_hooks::TEST_HOOK_SERVER.start();
+        });
+        log::info!("waiting for test hook connection");
+        test_hooks::TEST_HOOK_SERVER.wait_for_connect()?;
+    }
+
     let res: anyhow::Result<()> = match args.command {
         Commands::Version => return Err(anyhow!("wrapper binary must handle version")),
         Commands::Daemon => daemon::run(
-            args.config_file,
+            config_manager,
             runtime_dir,
             hooks.unwrap_or(Box::new(NoopHooks {})),
             socket,
         ),
         Commands::Attach { force, ttl, cmd, name } => {
-            attach::run(args.config_file, name, force, ttl, cmd, socket)
+            attach::run(config_manager, name, force, ttl, cmd, socket)
         }
         Commands::Detach { sessions } => detach::run(sessions, socket),
         Commands::Kill { sessions } => kill::run(sessions, socket),

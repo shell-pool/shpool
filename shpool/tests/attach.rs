@@ -1459,13 +1459,18 @@ fn dynamic_config_change() -> anyhow::Result<()> {
 
         // Create waiter right before changing config file, since reload can also happen
         // right after daemon startup.
-        let mut waiter = daemon_proc.events.take().unwrap().waiter(["daemon-reload-config"]);
+        let mut waiter = daemon_proc
+            .events
+            .take()
+            .unwrap()
+            .waiter(["daemon-config-watcher-file-change", "daemon-reload-config"]);
 
         // Change the config contents on the fly
         let config_contents = config_tmpl.replace("REPLACE_ME", "NEW_VALUE");
         fs::write(&config_file, config_contents)?;
 
-        // Wait for reload to happen since there is debounce time
+        // Wait for reload to happen since there is debounce time.
+        waiter.wait_event("daemon-config-watcher-file-change")?;
         waiter.wait_event("daemon-reload-config")?;
 
         // When we spawn a new session, it should pick up the new value
@@ -1496,6 +1501,62 @@ fn fresh_shell_does_not_have_prompt_setup_code() -> anyhow::Result<()> {
         reader.read_until(b'>', &mut output)?;
         let chunk = String::from_utf8_lossy(&output[..]);
         assert!(!chunk.contains("SHPOOL__OLD_PROMPT_COMMAND"));
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
+fn autodaemonize() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let tmp_dir = tempfile::TempDir::with_prefix("shpool-test-autodaemonize")?;
+        let tmp_dir_path = if env::var("SHPOOL_LEAVE_TEST_LOGS").is_ok() {
+            tmp_dir.into_path()
+        } else {
+            PathBuf::from(tmp_dir.path())
+        };
+        eprintln!("testing autodaemonization in {:?}", &tmp_dir_path);
+
+        let mut socket_path = PathBuf::from(&tmp_dir_path);
+        socket_path.push("control.sock");
+
+        let mut log_file = PathBuf::from(&tmp_dir_path);
+        log_file.push("attach.log");
+
+        // we have to manually spawn the child because the whole point is that there
+        // isn't a daemon yet so we can't use the attach method.
+        let mut child = Command::new(support::shpool_bin()?)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .arg("--daemonize")
+            .arg("--socket")
+            .arg(socket_path)
+            .arg("--log-file")
+            .arg(log_file)
+            .arg("--config-file")
+            .arg(support::testdata_file("norc.toml"))
+            .arg("attach")
+            .arg("sh1")
+            .spawn()
+            .context("spawning attach process")?;
+
+        // After half a second, the daemon should have spanwed
+        std::thread::sleep(time::Duration::from_millis(500));
+        child.kill().context("killing child")?;
+
+        let mut stdout = child.stdout.take().context("missing stdout")?;
+        let mut stdout_str = String::from("");
+        stdout.read_to_string(&mut stdout_str).context("slurping stdout")?;
+        let stdout_re = Regex::new(".*prompt>.*")?;
+        assert!(stdout_re.is_match(&stdout_str));
+
+        // best effort attempt to clean up after ourselves
+        Command::new("pkill")
+            .arg("-f")
+            .arg("shpool-test-autodaemonize")
+            .output()
+            .context("running cleanup process")?;
 
         Ok(())
     })

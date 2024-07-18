@@ -43,6 +43,7 @@ strip-ansi-escapes = "0.2.0" # cleaning up strings for pager display
 notify = "6" # watch config file for updates
 libproc = "0.14.8" # sniffing shells by examining the subprocess
 directories = "5.0.1" # get paths for configurations
+daemonize = "0.5" # autodaemonization
 
 # rusty wrapper for unix apis
 [dependencies.nix]

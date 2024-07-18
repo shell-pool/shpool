@@ -26,7 +26,7 @@ use super::{
 const MAX_FORCE_RETRIES: usize = 20;
 
 pub fn run(
-    config_file: Option<String>,
+    config_manager: config::Manager,
     name: String,
     force: bool,
     ttl: Option<String>,
@@ -46,8 +46,6 @@ pub fn run(
     }
 
     SignalHandler::new(name.clone(), socket.clone()).spawn()?;
-
-    let config_manager = config::Manager::new(config_file.as_deref())?;
 
     let ttl = match &ttl {
         Some(src) => match duration::parse(src.as_str()) {
