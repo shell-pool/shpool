@@ -205,6 +205,8 @@ impl Proc {
                     .into_string()
                     .map_err(|e| anyhow!("conversion error: {:?}", e))?,
             ),
+            daemonize: false,
+            no_daemonize: true,
             command: libshpool::Commands::Daemon,
         };
         let hooks_recorder = Box::new(HooksRecorder {
@@ -277,6 +279,7 @@ impl Proc {
             .arg(&log_file)
             .arg("--socket")
             .arg(&self.socket_path)
+            .arg("--no-daemonize")
             .env_clear()
             .env("SHPOOL_TEST_HOOK_SOCKET_PATH", &test_hook_socket_path)
             .envs(args.extra_env)

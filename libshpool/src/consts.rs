@@ -38,3 +38,6 @@ pub const PROMPT_SENTINEL: &str = "SHPOOL_PROMPT_SETUP_SENTINEL";
 // in the output stream. For the same reason, we don't set the value
 // to an actual sentianl, but instead either "startup" or "prompt".
 pub const SENTINEL_FLAG_VAR: &str = "SHPOOL__INTERNAL__PRINT_SENTINEL";
+
+// If set to "true", the daemon will autodaemonize after launch.
+pub const AUTODAEMONIZE_VAR: &str = "SHPOOL__INTERNAL__AUTODAEMONIZE";

@@ -24,7 +24,9 @@ use std::{
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
-use tracing::{debug, error, warn};
+use tracing::{debug, error, instrument, warn};
+
+use crate::test_hooks;
 
 /// Watches on `path`, returnes the watched path, which is the closest existing
 /// ancestor of `path`, and the immediate child that is of interest.
@@ -96,6 +98,7 @@ impl ConfigWatcher {
     /// # Errors
     /// Returns error if the creation of underlying `notify` watcher or worker
     /// thread failed.
+    #[instrument(skip_all)]
     pub fn new(handler: impl FnMut() + Send + 'static) -> Result<Self> {
         Self::with_debounce(handler, Duration::from_millis(100))
     }
@@ -115,6 +118,7 @@ impl ConfigWatcher {
     /// # Errors
     /// Returns error if the creation of underlying `notify` watcher or worker
     /// thread failed.
+    #[instrument(skip_all)]
     pub fn with_debounce(
         handler: impl FnMut() + Send + 'static,
         reload_debounce: Duration,
@@ -160,6 +164,7 @@ impl ConfigWatcher {
     /// # Errors
     /// Returns error if the underlying thread is gone, e.g. the worker thread
     /// encountered fatal error and stopped its event loop.
+    #[instrument(skip_all)]
     pub fn watch(&self, path: impl AsRef<Path>) -> Result<()> {
         let (tx, rx) = bounded(1);
         self.tx
@@ -340,10 +345,12 @@ where
 {
     /// Loop to reload config, only return when there is error to create any
     /// watches.
+    #[instrument(skip_all)]
     fn run(&mut self) -> Result<()> {
         loop {
             match self.select() {
                 Outcome::Event(res) => {
+                    debug!("event: {:?}", res);
                     let (rewatch, mut reload) = match res {
                         Err(error) => {
                             error!("Error: {error:?}");
@@ -354,14 +361,16 @@ where
                     debug!("rewatch = {rewatch:?}, reload = {reload}");
                     reload |= self.rewatch(rewatch);
                     if reload {
+                        test_hooks::emit("daemon-config-watcher-file-change");
                         self.trigger_reload();
                     }
                 }
                 Outcome::AddWatch(path, sender) => {
+                    debug!("addwatch: {:?}", path);
                     let _ = sender.send(self.add_watch_by_command(path));
                 }
                 Outcome::Timeout => {
-                    debug!("reloading config now!");
+                    debug!("timeout");
                     self.reload_deadline = None;
                     (self.handler)();
                 }

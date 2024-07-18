@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{os::unix::net::UnixListener, path::PathBuf};
+use std::{env, os::unix::net::UnixListener, path::PathBuf};
 
 use anyhow::Context;
 use tracing::{info, instrument};
 
-use super::{config, hooks};
+use crate::{config, consts, hooks};
 
 mod etc_environment;
 mod exit_notify;
@@ -34,14 +34,24 @@ mod ttl_reaper;
 
 #[instrument(skip_all)]
 pub fn run(
-    config_file: Option<String>,
+    config_manager: config::Manager,
     runtime_dir: PathBuf,
     hooks: Box<dyn hooks::Hooks + Send + Sync>,
     socket: PathBuf,
 ) -> anyhow::Result<()> {
+    if let Ok(daemonize) = env::var(consts::AUTODAEMONIZE_VAR) {
+        if daemonize == "true" {
+            env::remove_var(consts::AUTODAEMONIZE_VAR); // avoid looping
+
+            let pid_file = socket.with_file_name("daemonized-shpool.pid");
+
+            info!("daemonizing with pid_file={:?}", pid_file);
+            daemonize::Daemonize::new().pid_file(pid_file).start().context("daemonizing")?;
+        }
+    }
+
     info!("\n\n======================== STARTING DAEMON ============================\n\n");
 
-    let config_manager = config::Manager::new(config_file.as_deref())?;
     let server = server::Server::new(config_manager, hooks, runtime_dir)?;
 
     let (cleanup_socket, listener) = match systemd::activation_socket() {
