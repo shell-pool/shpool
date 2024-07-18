@@ -4,4 +4,5 @@ resolver = "2"
 members = [
     "libshpool",
     "shpool",
+    "shpool-protocol",
 ]
