@@ -57,6 +57,35 @@ $ systemctl --user start shpool
 Run `cargo +nightly fmt` to ensure that the code matches the expected
 style.
 
+## Version Policy
+
+Like most rust projects, shpool follows semver. The libshpool and
+shpool crates are always kept in version lockstep, while other
+supporting crates in the shpool project evolve independently
+depending on how their own APIs change.
+
+It can be a bit murky what counts as a breaking change given the fact
+that shpool is a binary where most of the logic lives inside a library.
+This policy lays out the API surfaces that we consider public for the
+purposes of libshpool/shpool version.
+
+### Public interfaces
+
+- The `libshpool` crate's rust API
+- The command line interface for the `shpool` binary
+- The config file format (any changes in default values for config entries is
+  considered breaking)
+
+### Non-public interfaces
+
+This list is non-exhaustive, but is meant to provide some examples of
+places where changes are not considered breaking for the purposes
+of semver.
+
+- The attach process to daemon process protocol (the shpool-protocol crate)
+- Specifics about how the prompt hook works
+- Specifics about how the session restore engine works
+
 ## Commit message style
 
 https://www.conventionalcommits.org/ is used to facilitate changelog generation.
