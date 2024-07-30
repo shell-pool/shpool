@@ -18,9 +18,9 @@ use std::{
     ops::Add,
     os,
     os::unix::{
-        fs::PermissionsExt,
+        fs::PermissionsExt as _,
         net::{UnixListener, UnixStream},
-        process::CommandExt,
+        process::CommandExt as _,
     },
     path::{Path, PathBuf},
     process,
@@ -31,6 +31,11 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use nix::unistd;
+use shpool_protocol::{
+    AttachHeader, AttachReplyHeader, AttachStatus, ConnectHeader, DetachReply, DetachRequest,
+    KillReply, KillRequest, ListReply, ResizeReply, Session, SessionMessageDetachReply,
+    SessionMessageReply, SessionMessageRequest, SessionMessageRequestPayload, SessionStatus,
+};
 use tracing::{error, info, instrument, span, trace, warn, Level};
 
 use crate::{
@@ -137,12 +142,10 @@ impl Server {
         let header = parse_connect_header(&mut stream).context("parsing connect header")?;
 
         if let Err(err) = check_peer(&stream) {
-            if let protocol::ConnectHeader::Attach(_) = header {
+            if let ConnectHeader::Attach(_) = header {
                 write_reply(
                     &mut stream,
-                    protocol::AttachReplyHeader {
-                        status: protocol::AttachStatus::Forbidden(format!("{:?}", err)),
-                    },
+                    AttachReplyHeader { status: AttachStatus::Forbidden(format!("{:?}", err)) },
                 )?;
             }
             stream.shutdown(net::Shutdown::Both).context("closing stream")?;
@@ -156,13 +159,11 @@ impl Server {
         stream.set_read_timeout(None).context("unsetting read timout on inbound session")?;
 
         match header {
-            protocol::ConnectHeader::Attach(h) => self.handle_attach(stream, conn_id, h),
-            protocol::ConnectHeader::Detach(r) => self.handle_detach(stream, r),
-            protocol::ConnectHeader::Kill(r) => self.handle_kill(stream, r),
-            protocol::ConnectHeader::List => self.handle_list(stream),
-            protocol::ConnectHeader::SessionMessage(header) => {
-                self.handle_session_message(stream, header)
-            }
+            ConnectHeader::Attach(h) => self.handle_attach(stream, conn_id, h),
+            ConnectHeader::Detach(r) => self.handle_detach(stream, r),
+            ConnectHeader::Kill(r) => self.handle_kill(stream, r),
+            ConnectHeader::List => self.handle_list(stream),
+            ConnectHeader::SessionMessage(header) => self.handle_session_message(stream, header),
         }
     }
 
@@ -171,7 +172,7 @@ impl Server {
         &self,
         mut stream: UnixStream,
         conn_id: usize,
-        header: protocol::AttachHeader,
+        header: AttachHeader,
     ) -> anyhow::Result<()> {
         // We don't currently populate any warnings, but we used to and we might
         // want to in the future, so it is not worth breaking the protocol over.
@@ -182,7 +183,7 @@ impl Server {
             let mut shells = self.shells.lock().unwrap();
             info!("locked shells table");
 
-            let mut status = protocol::AttachStatus::Attached { warnings: warnings.clone() };
+            let mut status = AttachStatus::Attached { warnings: warnings.clone() };
             if let Some(session) = shells.get(&header.name) {
                 info!("found entry for '{}'", header.name);
                 if let Ok(mut inner) = session.inner.try_lock() {
@@ -212,7 +213,7 @@ impl Server {
                                 warn!(
                                     "child_exited chan unclosed, but reader thread has exited, clobbering with new subshell"
                                 );
-                                status = protocol::AttachStatus::Created { warnings };
+                                status = AttachStatus::Created { warnings };
                             }
 
                             // status is already attached
@@ -223,7 +224,7 @@ impl Server {
                                 "stale inner={:?}, (child exited with status {}) clobbering with new subshell",
                                 inner, exit_status
                             );
-                            status = protocol::AttachStatus::Created { warnings };
+                            status = AttachStatus::Created { warnings };
                         }
                     }
 
@@ -234,17 +235,14 @@ impl Server {
                                 .map_err(|e| anyhow!("joining reader on reattach: {:?}", e))?
                                 .context("within reader thread on reattach")?;
                         }
-                        assert!(matches!(status, protocol::AttachStatus::Created { .. }));
+                        assert!(matches!(status, AttachStatus::Created { .. }));
                     }
 
                     // fallthrough to bidi streaming
                 } else {
                     info!("busy shell session, doing nothing");
                     // The stream is busy, so we just inform the client and close the stream.
-                    write_reply(
-                        &mut stream,
-                        protocol::AttachReplyHeader { status: protocol::AttachStatus::Busy },
-                    )?;
+                    write_reply(&mut stream, AttachReplyHeader { status: AttachStatus::Busy })?;
                     stream.shutdown(net::Shutdown::Both).context("closing stream")?;
                     if let Err(err) = self.hooks.on_busy(&header.name) {
                         warn!("busy hook: {:?}", err);
@@ -253,10 +251,10 @@ impl Server {
                 }
             } else {
                 info!("no existing '{}' session, creating new one", &header.name);
-                status = protocol::AttachStatus::Created { warnings };
+                status = AttachStatus::Created { warnings };
             }
 
-            if matches!(status, protocol::AttachStatus::Created { .. }) {
+            if matches!(status, AttachStatus::Created { .. }) {
                 use config::MotdDisplayMode;
 
                 info!("creating new subshell");
@@ -308,7 +306,7 @@ impl Server {
             };
 
             let reply_status =
-                write_reply(client_stream, protocol::AttachReplyHeader { status: status.clone() });
+                write_reply(client_stream, AttachReplyHeader { status: status.clone() });
             if let Err(e) = reply_status {
                 error!("error writing reply status: {:?}", e);
             }
@@ -387,7 +385,7 @@ impl Server {
     }
 
     #[instrument(skip_all)]
-    fn link_ssh_auth_sock(&self, header: &protocol::AttachHeader) -> anyhow::Result<()> {
+    fn link_ssh_auth_sock(&self, header: &AttachHeader) -> anyhow::Result<()> {
         if self.config.get().nosymlink_ssh_auth_sock.unwrap_or(false) {
             return Ok(());
         }
@@ -422,11 +420,7 @@ impl Server {
     }
 
     #[instrument(skip_all)]
-    fn handle_detach(
-        &self,
-        mut stream: UnixStream,
-        request: protocol::DetachRequest,
-    ) -> anyhow::Result<()> {
+    fn handle_detach(&self, mut stream: UnixStream, request: DetachRequest) -> anyhow::Result<()> {
         let mut not_found_sessions = vec![];
         let mut not_attached_sessions = vec![];
         {
@@ -454,21 +448,14 @@ impl Server {
             }
         }
 
-        write_reply(
-            &mut stream,
-            protocol::DetachReply { not_found_sessions, not_attached_sessions },
-        )
-        .context("writing detach reply")?;
+        write_reply(&mut stream, DetachReply { not_found_sessions, not_attached_sessions })
+            .context("writing detach reply")?;
 
         Ok(())
     }
 
     #[instrument(skip_all)]
-    fn handle_kill(
-        &self,
-        mut stream: UnixStream,
-        request: protocol::KillRequest,
-    ) -> anyhow::Result<()> {
+    fn handle_kill(&self, mut stream: UnixStream, request: KillRequest) -> anyhow::Result<()> {
         let mut not_found_sessions = vec![];
         {
             let mut shells = self.shells.lock().unwrap();
@@ -494,8 +481,7 @@ impl Server {
             }
         }
 
-        write_reply(&mut stream, protocol::KillReply { not_found_sessions })
-            .context("writing kill reply")?;
+        write_reply(&mut stream, KillReply { not_found_sessions }).context("writing kill reply")?;
 
         Ok(())
     }
@@ -504,15 +490,15 @@ impl Server {
     fn handle_list(&self, mut stream: UnixStream) -> anyhow::Result<()> {
         let shells = self.shells.lock().unwrap();
 
-        let sessions: anyhow::Result<Vec<protocol::Session>> = shells
+        let sessions: anyhow::Result<Vec<Session>> = shells
             .iter()
             .map(|(k, v)| {
                 let status = match v.inner.try_lock() {
-                    Ok(_) => protocol::SessionStatus::Disconnected,
-                    Err(_) => protocol::SessionStatus::Attached,
+                    Ok(_) => SessionStatus::Disconnected,
+                    Err(_) => SessionStatus::Attached,
                 };
 
-                Ok(protocol::Session {
+                Ok(Session {
                     name: k.to_string(),
                     started_at_unix_ms: v.started_at.duration_since(time::UNIX_EPOCH)?.as_millis()
                         as i64,
@@ -522,7 +508,7 @@ impl Server {
             .collect();
         let sessions = sessions.context("collecting running session metadata")?;
 
-        write_reply(&mut stream, protocol::ListReply { sessions })?;
+        write_reply(&mut stream, ListReply { sessions })?;
 
         Ok(())
     }
@@ -531,7 +517,7 @@ impl Server {
     fn handle_session_message(
         &self,
         mut stream: UnixStream,
-        header: protocol::SessionMessageRequest,
+        header: SessionMessageRequest,
     ) -> anyhow::Result<()> {
         // create a slot to store our reply so we can do
         // our IO without the lock held.
@@ -539,7 +525,7 @@ impl Server {
             let shells = self.shells.lock().unwrap();
             if let Some(session) = shells.get(&header.session_name) {
                 match header.payload {
-                    protocol::SessionMessageRequestPayload::Resize(resize_request) => {
+                    SessionMessageRequestPayload::Resize(resize_request) => {
                         info!("handling resize msg");
                         let pager_ctl = session.pager_ctl.lock().unwrap();
                         if let Some(pager_ctl) = pager_ctl.as_ref() {
@@ -565,9 +551,9 @@ impl Server {
                                 .context("recving tty size ack")?;
                         }
 
-                        protocol::SessionMessageReply::Resize(protocol::ResizeReply::Ok)
+                        SessionMessageReply::Resize(ResizeReply::Ok)
                     }
-                    protocol::SessionMessageRequestPayload::Detach => {
+                    SessionMessageRequestPayload::Detach => {
                         info!("handling detach msg");
                         let reader_ctl = session.reader_ctl.lock().unwrap();
                         reader_ctl
@@ -582,13 +568,11 @@ impl Server {
                             .recv_timeout(SESSION_MSG_TIMEOUT)
                             .context("getting client conn ack")?;
                         info!("detached session({}), status = {:?}", header.session_name, status);
-                        protocol::SessionMessageReply::Detach(
-                            protocol::SessionMessageDetachReply::Ok,
-                        )
+                        SessionMessageReply::Detach(SessionMessageDetachReply::Ok)
                     }
                 }
             } else {
-                protocol::SessionMessageReply::NotFound
+                SessionMessageReply::NotFound
             }
         };
 
@@ -605,7 +589,7 @@ impl Server {
         &self,
         conn_id: usize,
         client_stream: UnixStream,
-        header: &protocol::AttachHeader,
+        header: &AttachHeader,
         dump_motd_on_new_session: bool,
     ) -> anyhow::Result<shell::Session> {
         let user_info = user::info()?;
@@ -820,7 +804,7 @@ impl Server {
         &self,
         cmd: &mut process::Command,
         user_info: &user::Info,
-        header: &protocol::AttachHeader,
+        header: &AttachHeader,
     ) -> anyhow::Result<Option<String>> {
         cmd.env("HOME", &user_info.home_dir)
             .env(
@@ -914,9 +898,8 @@ impl Server {
 }
 
 #[instrument(skip_all)]
-fn parse_connect_header(stream: &mut UnixStream) -> anyhow::Result<protocol::ConnectHeader> {
-    let header: protocol::ConnectHeader =
-        protocol::decode_from(stream).context("parsing header")?;
+fn parse_connect_header(stream: &mut UnixStream) -> anyhow::Result<ConnectHeader> {
+    let header: ConnectHeader = protocol::decode_from(stream).context("parsing header")?;
     Ok(header)
 }
 

@@ -4,7 +4,7 @@ use std::{
     os::unix::{
         io::{AsRawFd, FromRawFd},
         net::UnixListener,
-        process::CommandExt,
+        process::CommandExt as _,
     },
     path,
     process::{Command, Stdio},

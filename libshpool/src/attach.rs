@@ -15,13 +15,14 @@
 use std::{env, fmt, io, path::PathBuf, thread, time};
 
 use anyhow::{anyhow, bail, Context};
+use shpool_protocol::{
+    AttachHeader, AttachReplyHeader, ConnectHeader, DetachReply, DetachRequest, ResizeReply,
+    ResizeRequest, SessionMessageReply, SessionMessageRequest, SessionMessageRequestPayload,
+    TtySize,
+};
 use tracing::{error, info, warn};
 
-use super::{
-    config, duration, protocol,
-    protocol::{AttachHeader, ConnectHeader},
-    test_hooks, tty,
-};
+use super::{config, duration, protocol, test_hooks, tty::TtySizeExt as _};
 
 const MAX_FORCE_RETRIES: usize = 20;
 
@@ -69,12 +70,11 @@ pub fn run(
                 if !detached {
                     let mut client = dial_client(&socket)?;
                     client
-                        .write_connect_header(ConnectHeader::Detach(protocol::DetachRequest {
+                        .write_connect_header(ConnectHeader::Detach(DetachRequest {
                             sessions: vec![name.clone()],
                         }))
                         .context("writing detach request header")?;
-                    let detach_reply: protocol::DetachReply =
-                        client.read_reply().context("reading reply")?;
+                    let detach_reply: DetachReply = client.read_reply().context("reading reply")?;
                     if !detach_reply.not_found_sessions.is_empty() {
                         warn!("could not find session '{}' to detach it", name);
                     }
@@ -117,11 +117,11 @@ fn do_attach(
 ) -> anyhow::Result<()> {
     let mut client = dial_client(socket)?;
 
-    let tty_size = match tty::Size::from_fd(0) {
+    let tty_size = match TtySize::from_fd(0) {
         Ok(s) => s,
         Err(e) => {
             warn!("stdin is not a tty, using default size (err: {:?})", e);
-            tty::Size { rows: 24, cols: 80, xpixel: 0, ypixel: 0 }
+            TtySize { rows: 24, cols: 80, xpixel: 0, ypixel: 0 }
         }
     };
 
@@ -149,12 +149,11 @@ fn do_attach(
         }))
         .context("writing attach header")?;
 
-    let attach_resp: protocol::AttachReplyHeader =
-        client.read_reply().context("reading attach reply")?;
+    let attach_resp: AttachReplyHeader = client.read_reply().context("reading attach reply")?;
     info!("attach_resp.status={:?}", attach_resp.status);
 
     {
-        use protocol::AttachStatus::*;
+        use shpool_protocol::AttachStatus::*;
         match attach_resp.status {
             Busy => {
                 return Err(BusyError.into());
@@ -242,31 +241,29 @@ impl SignalHandler {
         info!("handle_sigwinch: enter");
         let mut client = protocol::Client::new(&self.socket)?;
 
-        let tty_size = tty::Size::from_fd(0).context("getting tty size")?;
+        let tty_size = TtySize::from_fd(0).context("getting tty size")?;
         info!("handle_sigwinch: tty_size={:?}", tty_size);
 
         // write the request on a new, seperate connection
         client
-            .write_connect_header(protocol::ConnectHeader::SessionMessage(
-                protocol::SessionMessageRequest {
-                    session_name: self.session_name.clone(),
-                    payload: protocol::SessionMessageRequestPayload::Resize(
-                        protocol::ResizeRequest { tty_size: tty_size.clone() },
-                    ),
-                },
-            ))
+            .write_connect_header(ConnectHeader::SessionMessage(SessionMessageRequest {
+                session_name: self.session_name.clone(),
+                payload: SessionMessageRequestPayload::Resize(ResizeRequest {
+                    tty_size: tty_size.clone(),
+                }),
+            }))
             .context("writing resize request")?;
 
-        let reply: protocol::SessionMessageReply =
+        let reply: SessionMessageReply =
             client.read_reply().context("reading session message reply")?;
         match reply {
-            protocol::SessionMessageReply::NotFound => {
+            SessionMessageReply::NotFound => {
                 warn!(
                     "handle_sigwinch: sent resize for session '{}', but the daemon has no record of that session",
                     self.session_name
                 );
             }
-            protocol::SessionMessageReply::Resize(protocol::ResizeReply::Ok) => {
+            SessionMessageReply::Resize(ResizeReply::Ok) => {
                 info!("handle_sigwinch: resized session '{}' to {:?}", self.session_name, tty_size);
             }
             reply => {

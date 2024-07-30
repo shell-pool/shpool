@@ -28,7 +28,7 @@ use nix::{
     },
     unistd::isatty,
 };
-use serde_derive::{Deserialize, Serialize};
+use shpool_protocol::TtySize;
 use tracing::error;
 
 use crate::consts;
@@ -37,17 +37,16 @@ use crate::consts;
 nix::ioctl_read_bad!(tiocgwinsz, libc::TIOCGWINSZ, libc::winsize);
 nix::ioctl_write_ptr_bad!(tiocswinsz, libc::TIOCSWINSZ, libc::winsize);
 
-#[derive(Serialize, Deserialize, Debug, Default, Clone)]
-pub struct Size {
-    pub rows: u16,
-    pub cols: u16,
-    pub xpixel: u16,
-    pub ypixel: u16,
+/// Methods for the TtySize protocol struct. Protocol structs
+/// are always bare structs, so we use ext traits to mix in methods.
+pub trait TtySizeExt {
+    fn from_fd(fd: RawFd) -> anyhow::Result<TtySize>;
+    fn set_fd(&self, fd: RawFd) -> anyhow::Result<()>;
 }
 
-impl Size {
+impl TtySizeExt for TtySize {
     /// from_fd returns the terminal size for the given terminal.
-    pub fn from_fd(fd: RawFd) -> anyhow::Result<Size> {
+    fn from_fd(fd: RawFd) -> anyhow::Result<TtySize> {
         let mut term_size = libc::winsize { ws_row: 0, ws_col: 0, ws_xpixel: 0, ws_ypixel: 0 };
 
         // Safety: term_size is stack allocated and live for the whole
@@ -56,7 +55,7 @@ impl Size {
             tiocgwinsz(fd, &mut term_size).context("fetching term size")?;
         }
 
-        Ok(Size {
+        Ok(TtySize {
             rows: term_size.ws_row,
             cols: term_size.ws_col,
             xpixel: term_size.ws_xpixel,
@@ -66,7 +65,7 @@ impl Size {
 
     /// set_fd sets the tty indicated by the given file descriptor
     /// to have this size.
-    pub fn set_fd(&self, fd: RawFd) -> anyhow::Result<()> {
+    fn set_fd(&self, fd: RawFd) -> anyhow::Result<()> {
         let term_size = libc::winsize {
             ws_row: self.rows,
             ws_col: self.cols,

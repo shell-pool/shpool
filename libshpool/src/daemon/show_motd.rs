@@ -20,12 +20,14 @@ use std::{
 };
 
 use anyhow::{anyhow, Context};
+use shpool_protocol::{Chunk, ChunkKind, TtySize};
 use tracing::{info, instrument};
 
 use crate::{
     config,
     daemon::pager::{Pager, PagerCtl},
-    duration, protocol, tty,
+    duration,
+    protocol::ChunkExt as _,
 };
 
 /// Showers know how to show the message of the day.
@@ -65,8 +67,7 @@ impl DailyMessenger {
 
         let raw_motd_value = self.raw_motd_value(term_db)?;
 
-        let chunk =
-            protocol::Chunk { kind: protocol::ChunkKind::Data, buf: raw_motd_value.as_slice() };
+        let chunk = Chunk { kind: ChunkKind::Data, buf: raw_motd_value.as_slice() };
 
         chunk.write_to(&mut stream).context("dumping motd")
     }
@@ -88,8 +89,8 @@ impl DailyMessenger {
         // The session to associate this pager with for SIGWINCH purposes.
         ctl_slot: Arc<Mutex<Option<PagerCtl>>>,
         // The size of the tty to start off with
-        init_tty_size: tty::Size,
-    ) -> anyhow::Result<Option<tty::Size>> {
+        init_tty_size: TtySize,
+    ) -> anyhow::Result<Option<TtySize>> {
         if let Some(debouncer) = &self.debouncer {
             if !debouncer.should_fire()? {
                 return Ok(None);

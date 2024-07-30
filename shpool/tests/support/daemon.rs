@@ -1,7 +1,7 @@
 use std::{
     default::Default,
     env,
-    os::unix::{net::UnixStream, prelude::ExitStatusExt},
+    os::unix::{net::UnixStream, prelude::ExitStatusExt as _},
     path::{Path, PathBuf},
     process,
     process::{Command, Stdio},
