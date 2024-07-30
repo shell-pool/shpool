@@ -15,11 +15,9 @@
 use std::{io, path::PathBuf, time};
 
 use anyhow::Context;
+use shpool_protocol::{ConnectHeader, ListReply};
 
-use super::{
-    protocol,
-    protocol::{ConnectHeader, ListReply},
-};
+use crate::protocol;
 
 pub fn run(socket: PathBuf) -> anyhow::Result<()> {
     let mut client = match protocol::Client::new(socket) {

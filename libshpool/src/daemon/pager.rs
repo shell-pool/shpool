@@ -35,7 +35,7 @@ use std::{
     io::{Read, Write},
     os::{
         fd::AsFd,
-        unix::{net::UnixStream, process::CommandExt},
+        unix::{net::UnixStream, process::CommandExt as _},
     },
     process,
     sync::atomic::{AtomicBool, Ordering},
@@ -46,9 +46,10 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use nix::{poll, sys::signal, unistd};
+use shpool_protocol::{Chunk, ChunkKind, TtySize};
 use tracing::{error, info, instrument, span, trace, warn, Level};
 
-use crate::{consts, protocol, tty};
+use crate::{consts, protocol::ChunkExt as _, tty::TtySizeExt as _};
 
 // poll relatively quickly to pick up pager exits reasonably fast,
 // but still slow enough to spend most of the time parked.
@@ -60,7 +61,7 @@ const POLL_MS: u16 = 100;
 pub struct PagerCtl {
     /// Used to signal size changes so we can correctly trigger
     /// a SIGWINCH on the pty.
-    pub tty_size_change: crossbeam_channel::Sender<tty::Size>,
+    pub tty_size_change: crossbeam_channel::Sender<TtySize>,
     /// Acks the completion of a resize/SIGWINCH.
     pub tty_size_change_ack: crossbeam_channel::Receiver<()>,
 }
@@ -100,10 +101,10 @@ impl Pager {
         // The slot to install the control handle in
         ctl_slot: Arc<Mutex<Option<PagerCtl>>>,
         // The size of the tty to start off with
-        init_tty_size: tty::Size,
+        init_tty_size: TtySize,
         // The message to display
         msg: &str,
-    ) -> anyhow::Result<tty::Size> {
+    ) -> anyhow::Result<TtySize> {
         let (tty_size_change_tx, tty_size_change_rx) = crossbeam_channel::bounded(0);
         let (tty_size_change_ack_tx, tty_size_change_ack_rx) = crossbeam_channel::bounded(0);
         {
@@ -234,7 +235,7 @@ impl Pager {
                 {
                     last_heartbeat_at = now;
 
-                    let chunk = protocol::Chunk { kind: protocol::ChunkKind::Heartbeat, buf: &[] };
+                    let chunk = Chunk { kind: ChunkKind::Heartbeat, buf: &[] };
                     match chunk.write_to(client_stream).and_then(|_| client_stream.flush()) {
                         Ok(_) => {
                             trace!("wrote heartbeat");
@@ -257,8 +258,7 @@ impl Pager {
                 if pty_master_poll_fd.any().unwrap_or(false) {
                     // the pager process has some data for us
                     let len = pty_master.read(&mut buf).context("reading chunk from pty master")?;
-                    let chunk =
-                        protocol::Chunk { kind: protocol::ChunkKind::Data, buf: &buf[..len] };
+                    let chunk = Chunk { kind: ChunkKind::Data, buf: &buf[..len] };
                     match chunk.write_to(client_stream).and_then(|_| client_stream.flush()) {
                         Ok(_) => {}
                         Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {

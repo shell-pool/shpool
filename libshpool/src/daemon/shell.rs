@@ -28,12 +28,15 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use nix::{sys::signal, unistd::Pid};
+use shpool_protocol::{Chunk, ChunkKind, TtySize};
 use tracing::{debug, error, info, instrument, span, trace, warn, Level};
 
 use crate::{
     consts,
     daemon::{config, exit_notify::ExitNotifier, keybindings, pager::PagerCtl, prompt, show_motd},
-    protocol, test_hooks, tty,
+    protocol::ChunkExt as _,
+    test_hooks,
+    tty::TtySizeExt as _,
 };
 
 // To prevent data getting dropped, we set this to be large, but we don't want
@@ -121,7 +124,7 @@ pub struct ClientConnection {
     /// accidentally interleave with heartbeat frames.
     sink: Arc<Mutex<io::BufWriter<UnixStream>>>,
     /// The size of the client tty.
-    size: tty::Size,
+    size: TtySize,
     /// The raw unix socket stream. The reader should never write
     /// to this directly, just use it for control operations like
     /// shutdown.
@@ -143,7 +146,7 @@ pub enum ClientConnectionStatus {
 
 struct ResizeCmd {
     /// The actual size to set to
-    size: tty::Size,
+    size: TtySize,
     /// Only perform the resize after this point in time.
     /// Allows for delays to work around emacs being a special
     /// snowflake.
@@ -174,12 +177,12 @@ pub enum ClientConnectionMsg {
 
 pub struct ReaderArgs {
     pub conn_id: usize,
-    pub tty_size: tty::Size,
+    pub tty_size: TtySize,
     pub scrollback_lines: usize,
     pub session_restore_mode: config::SessionRestoreMode,
     pub client_connection: crossbeam_channel::Receiver<ClientConnectionMsg>,
     pub client_connection_ack: crossbeam_channel::Sender<ClientConnectionStatus>,
-    pub tty_size_change: crossbeam_channel::Receiver<tty::Size>,
+    pub tty_size_change: crossbeam_channel::Receiver<TtySize>,
     pub tty_size_change_ack: crossbeam_channel::Sender<()>,
 }
 
@@ -266,7 +269,7 @@ impl SessionInner {
                                 // we do this immediately so that the extra size
                                 // can "bake" for a little bit, which emacs seems
                                 // to require in order to pick up the jiggle.
-                                let oversize = tty::Size {
+                                let oversize = TtySize {
                                     rows: conn.size.rows + 1,
                                     cols: conn.size.cols + 1,
                                     xpixel: conn.size.xpixel,
@@ -310,8 +313,8 @@ impl SessionInner {
                                     // write an exit status frame so the attach process
                                     // can exit with the same exit code as the child shell
                                     let status_buf: [u8; 4] = exit_status.to_le_bytes();
-                                    let chunk = protocol::Chunk {
-                                        kind: protocol::ChunkKind::ExitStatus,
+                                    let chunk = Chunk {
+                                        kind: ChunkKind::ExitStatus,
                                         buf: status_buf.as_slice(),
                                     };
                                     match chunk.write_to(&mut old_conn.stream).and_then(|_| old_conn.stream.flush()) {
@@ -426,8 +429,7 @@ impl SessionInner {
                         // the client allocate too much
                         let mut s = conn.sink.lock().unwrap();
                         for block in restore_buf.as_slice().chunks(consts::BUF_SIZE) {
-                            let chunk =
-                                protocol::Chunk { kind: protocol::ChunkKind::Data, buf: block };
+                            let chunk = Chunk { kind: ChunkKind::Data, buf: block };
 
                             if let Err(err) = chunk.write_to(&mut *s) {
                                 warn!("err writing session-restore buf: {:?}", err);
@@ -495,7 +497,7 @@ impl SessionInner {
                 if let (ClientConnectionMsg::New(conn), true) =
                     (&client_conn, has_seen_prompt_sentinel)
                 {
-                    let chunk = protocol::Chunk { kind: protocol::ChunkKind::Data, buf };
+                    let chunk = Chunk { kind: ChunkKind::Data, buf };
 
                     let mut s = conn.sink.lock().unwrap();
 
@@ -535,7 +537,7 @@ impl SessionInner {
     pub fn bidi_stream(
         &mut self,
         conn_id: usize,
-        init_tty_size: tty::Size,
+        init_tty_size: TtySize,
         child_exit_notifier: Arc<ExitNotifier>,
     ) -> anyhow::Result<bool> {
         test_hooks::emit("daemon-bidi-stream-enter");
@@ -846,7 +848,7 @@ impl SessionInner {
                     }
 
                     thread::sleep(consts::HEARTBEAT_DURATION);
-                    let chunk = protocol::Chunk { kind: protocol::ChunkKind::Heartbeat, buf: &[] };
+                    let chunk = Chunk { kind: ChunkKind::Heartbeat, buf: &[] };
                     {
                         let mut s = client_stream_m.lock().unwrap();
                         match chunk.write_to(&mut *s).and_then(|_| s.flush()) {
@@ -948,7 +950,7 @@ pub struct ReaderCtl {
     /// A control channel for the reader thread. Used to signal size changes so
     /// that the output spool will correctly reflect the size of the user's
     /// tty.
-    pub tty_size_change: crossbeam_channel::Sender<tty::Size>,
+    pub tty_size_change: crossbeam_channel::Sender<TtySize>,
     /// A control channel for the reader thread. Acks the completion of a spool
     /// resize.
     pub tty_size_change_ack: crossbeam_channel::Receiver<()>,

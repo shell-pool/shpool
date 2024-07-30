@@ -15,11 +15,9 @@
 use std::{io, path::Path};
 
 use anyhow::{anyhow, Context};
+use shpool_protocol::{ConnectHeader, DetachReply, DetachRequest};
 
-use super::{
-    common, protocol,
-    protocol::{ConnectHeader, DetachReply, DetachRequest},
-};
+use crate::{common, protocol};
 
 pub fn run<P>(mut sessions: Vec<String>, socket: P) -> anyhow::Result<()>
 where
