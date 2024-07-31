@@ -17,11 +17,15 @@ use std::{io, path::PathBuf, time};
 use anyhow::Context;
 use shpool_protocol::{ConnectHeader, ListReply};
 
-use crate::protocol;
+use crate::{protocol, protocol::ClientResult};
 
 pub fn run(socket: PathBuf) -> anyhow::Result<()> {
     let mut client = match protocol::Client::new(socket) {
-        Ok(c) => c,
+        Ok(ClientResult::JustClient(c)) => c,
+        Ok(ClientResult::VersionMismatch { warning, client }) => {
+            eprintln!("warning: {}, try restarting your daemon", warning);
+            client
+        }
         Err(err) => {
             let io_err = err.downcast::<io::Error>()?;
             if io_err.kind() == io::ErrorKind::NotFound {
