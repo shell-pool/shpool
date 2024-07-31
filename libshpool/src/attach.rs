@@ -22,7 +22,7 @@ use shpool_protocol::{
 };
 use tracing::{error, info, warn};
 
-use super::{config, duration, protocol, test_hooks, tty::TtySizeExt as _};
+use super::{config, duration, protocol, protocol::ClientResult, test_hooks, tty::TtySizeExt as _};
 
 const MAX_FORCE_RETRIES: usize = 20;
 
@@ -188,7 +188,18 @@ fn do_attach(
 
 fn dial_client(socket: &PathBuf) -> anyhow::Result<protocol::Client> {
     match protocol::Client::new(socket) {
-        Ok(c) => Ok(c),
+        Ok(ClientResult::JustClient(c)) => Ok(c),
+        Ok(ClientResult::VersionMismatch { warning, client }) => {
+            eprintln!("warning: {}, try restarting your daemon", warning);
+            eprintln!("hit enter to continue anyway or ^C to exit");
+
+            let _ = io::stdin()
+                .lines()
+                .next()
+                .context("waiting for a continue through a version mismatch")?;
+
+            Ok(client)
+        }
         Err(err) => {
             let io_err = err.downcast::<io::Error>()?;
             if io_err.kind() == io::ErrorKind::NotFound {
@@ -239,7 +250,13 @@ impl SignalHandler {
 
     fn handle_sigwinch(&self) -> anyhow::Result<()> {
         info!("handle_sigwinch: enter");
-        let mut client = protocol::Client::new(&self.socket)?;
+        let mut client = match protocol::Client::new(&self.socket)? {
+            ClientResult::JustClient(c) => c,
+            // At this point, we've already warned the user and they
+            // chose to continue anyway, so we shouldn't bother them
+            // again.
+            ClientResult::VersionMismatch { client, .. } => client,
+        };
 
         let tty_size = TtySize::from_fd(0).context("getting tty size")?;
         info!("handle_sigwinch: tty_size={:?}", tty_size);

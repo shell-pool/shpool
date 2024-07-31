@@ -17,14 +17,18 @@ use std::{io, path::Path};
 use anyhow::{anyhow, Context};
 use shpool_protocol::{ConnectHeader, DetachReply, DetachRequest};
 
-use crate::{common, protocol};
+use crate::{common, protocol, protocol::ClientResult};
 
 pub fn run<P>(mut sessions: Vec<String>, socket: P) -> anyhow::Result<()>
 where
     P: AsRef<Path>,
 {
     let mut client = match protocol::Client::new(socket) {
-        Ok(c) => c,
+        Ok(ClientResult::JustClient(c)) => c,
+        Ok(ClientResult::VersionMismatch { warning, client }) => {
+            eprintln!("warning: {}, try restarting your daemon", warning);
+            client
+        }
         Err(err) => {
             let io_err = err.downcast::<io::Error>()?;
             if io_err.kind() == io::ErrorKind::NotFound {

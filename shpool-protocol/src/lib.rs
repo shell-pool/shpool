@@ -19,7 +19,19 @@ use serde_derive::{Deserialize, Serialize};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// ConnectHeader is the blob of metadata that a client transmits when it
+/// The header used to advertize daemon version.
+///
+/// This header gets written by the daemon to every stream as
+/// soon as it is opened, which allows the client to compare
+/// version strings for protocol negotiation (basically just
+/// deciding if the user ought to be warned about mismatched
+/// versions).
+#[derive(Serialize, Deserialize, Debug)]
+pub struct VersionHeader {
+    pub version: String,
+}
+
+/// The blob of metadata that a client transmits when it
 /// first connects.
 ///
 /// It uses an enum to allow different connection types

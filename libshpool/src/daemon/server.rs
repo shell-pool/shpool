@@ -35,6 +35,7 @@ use shpool_protocol::{
     AttachHeader, AttachReplyHeader, AttachStatus, ConnectHeader, DetachReply, DetachRequest,
     KillReply, KillRequest, ListReply, ResizeReply, Session, SessionMessageDetachReply,
     SessionMessageReply, SessionMessageRequest, SessionMessageRequestPayload, SessionStatus,
+    VersionHeader,
 };
 use tracing::{error, info, instrument, span, trace, warn, Level};
 
@@ -138,6 +139,22 @@ impl Server {
         stream
             .set_read_timeout(Some(consts::SOCK_STREAM_TIMEOUT))
             .context("setting read timout on inbound session")?;
+
+        // advertize our protocol version to the client so that it can
+        // warn about mismatches
+        protocol::encode_to(
+            &VersionHeader {
+                // We allow fake version to be injected for ease of testing.
+                // Otherwise we would have to resort to some heinous build
+                // contortions.
+                version: match env::var("SHPOOL_TEST__OVERRIDE_VERSION") {
+                    Ok(fake_version) => fake_version,
+                    Err(_) => String::from(shpool_protocol::VERSION),
+                },
+            },
+            &mut stream,
+        )
+        .context("writing version header")?;
 
         let header = parse_connect_header(&mut stream).context("parsing connect header")?;
 
