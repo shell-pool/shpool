@@ -53,6 +53,43 @@ fn empty() -> anyhow::Result<()> {
 
 #[test]
 #[timeout(30000)]
+fn version_mismatch_client_newer() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc = support::daemon::Proc::new(
+            "norc.toml",
+            DaemonArgs {
+                extra_env: vec![(
+                    String::from("SHPOOL_TEST__OVERRIDE_VERSION"),
+                    String::from("0.0.0"),
+                )],
+                ..DaemonArgs::default()
+            },
+        )
+        .context("starting daemon proc")?;
+
+        let waiter = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-enter"]);
+        let mut attach_proc =
+            daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+
+        // get past the version mismatch prompt
+        attach_proc.run_cmd("")?;
+
+        daemon_proc.events = Some(waiter.wait_final_event("daemon-bidi-stream-enter")?);
+
+        let out = daemon_proc.kill(vec![String::from("sh1")])?;
+        assert!(out.status.success());
+
+        let stderr = String::from_utf8_lossy(&out.stderr[..]);
+        println!("stderr: {}", stderr);
+        assert!(stderr.contains("is newer"));
+        assert!(stderr.contains("try restarting"));
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
 fn single_attached() -> anyhow::Result<()> {
     support::dump_err(|| {
         let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())

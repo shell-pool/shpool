@@ -33,6 +33,58 @@ fn empty() -> anyhow::Result<()> {
 
 #[test]
 #[timeout(30000)]
+fn version_mismatch_client_newer() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc = support::daemon::Proc::new(
+            "norc.toml",
+            DaemonArgs {
+                listen_events: false,
+                extra_env: vec![(
+                    String::from("SHPOOL_TEST__OVERRIDE_VERSION"),
+                    String::from("0.0.0"),
+                )],
+            },
+        )
+        .context("starting daemon proc")?;
+        let out = daemon_proc.list()?;
+        assert!(out.status.success(), "list proc did not exit successfully");
+
+        let stderr = String::from_utf8_lossy(&out.stderr[..]);
+        assert!(stderr.contains("is newer"));
+        assert!(stderr.contains("try restarting"));
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
+fn version_mismatch_client_older() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc = support::daemon::Proc::new(
+            "norc.toml",
+            DaemonArgs {
+                listen_events: false,
+                extra_env: vec![(
+                    String::from("SHPOOL_TEST__OVERRIDE_VERSION"),
+                    String::from("99999.0.0"),
+                )],
+            },
+        )
+        .context("starting daemon proc")?;
+        let out = daemon_proc.list()?;
+        assert!(out.status.success(), "list proc did not exit successfully");
+
+        let stderr = String::from_utf8_lossy(&out.stderr[..]);
+        assert!(stderr.contains("is older"));
+        assert!(stderr.contains("try restarting"));
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
 fn no_daemon() -> anyhow::Result<()> {
     support::dump_err(|| {
         let out = Command::new(support::shpool_bin()?)
