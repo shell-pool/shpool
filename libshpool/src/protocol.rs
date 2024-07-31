@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::{
+    cmp,
     io::{self, Read, Write},
     os::unix::net::UnixStream,
     path::Path,
@@ -23,8 +24,8 @@ use std::{
 use anyhow::{anyhow, Context};
 use byteorder::{LittleEndian, ReadBytesExt as _, WriteBytesExt as _};
 use serde::{Deserialize, Serialize};
-use shpool_protocol::{Chunk, ChunkKind, ConnectHeader};
-use tracing::{debug, error, instrument, span, trace, warn, Level};
+use shpool_protocol::{Chunk, ChunkKind, ConnectHeader, VersionHeader};
+use tracing::{debug, error, info, instrument, span, trace, warn, Level};
 
 use super::{consts, tty};
 
@@ -120,19 +121,70 @@ impl<'data> ChunkExt<'data> for Chunk<'data> {
 }
 
 pub struct Client {
-    pub stream: UnixStream,
+    stream: UnixStream,
+}
+
+/// The result of creating a client, possibly with
+/// flagging some issues that need to be handled.
+pub enum ClientResult {
+    /// The created client, ready to go.
+    JustClient(Client),
+    /// There was a version mismatch between the client
+    /// process and the daemon process which ought to be
+    /// handled, though it is possible that some operations
+    /// will continue to work.
+    VersionMismatch {
+        /// A warning about a version mismatch that should be
+        /// displayed to the user.
+        warning: String,
+        /// The client, which may or may not work.
+        client: Client,
+    },
 }
 
 impl Client {
-    pub fn new<P: AsRef<Path>>(sock: P) -> anyhow::Result<Self> {
+    /// Create a new client
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new<P: AsRef<Path>>(sock: P) -> anyhow::Result<ClientResult> {
         let stream = UnixStream::connect(sock).context("connecting to shpool")?;
-        Ok(Client { stream })
+
+        let daemon_version: VersionHeader = match decode_from(&stream) {
+            Ok(v) => v,
+            Err(e) => {
+                warn!("error parsing VersionHeader: {:?}", e);
+                return Ok(ClientResult::VersionMismatch {
+                    warning: String::from("could not get daemon version"),
+                    client: Client { stream },
+                });
+            }
+        };
+        info!("read daemon version header: {:?}", daemon_version);
+
+        match Self::version_ord(shpool_protocol::VERSION, &daemon_version.version)
+            .context("comparing versions")?
+        {
+            cmp::Ordering::Equal => Ok(ClientResult::JustClient(Client { stream })),
+            cmp::Ordering::Less => Ok(ClientResult::VersionMismatch {
+                warning: format!(
+                    "client protocol (version {:?}) is older than daemon protocol (version {:?})",
+                    shpool_protocol::VERSION,
+                    daemon_version.version,
+                ),
+                client: Client { stream },
+            }),
+            cmp::Ordering::Greater => Ok(ClientResult::VersionMismatch {
+                warning: format!(
+                    "client protocol ({:?}) is newer than daemon protocol (version {:?})",
+                    shpool_protocol::VERSION,
+                    daemon_version.version,
+                ),
+                client: Client { stream },
+            }),
+        }
     }
 
-    pub fn write_connect_header(&mut self, header: ConnectHeader) -> anyhow::Result<()> {
-        let serialize_stream = self.stream.try_clone().context("cloning stream for reply")?;
-        encode_to(&header, serialize_stream).context("writing reply")?;
-
+    pub fn write_connect_header(&self, header: ConnectHeader) -> anyhow::Result<()> {
+        encode_to(&header, &self.stream).context("writing reply")?;
         Ok(())
     }
 
@@ -142,6 +194,43 @@ impl Client {
     {
         let reply: R = decode_from(&mut self.stream).context("parsing header")?;
         Ok(reply)
+    }
+
+    /// This is essentially just PartialOrd on client version strings
+    /// with more descriptive errors (since PartialOrd gives an option)
+    /// and without having to wrap in a newtype.
+    fn version_ord(client_version: &str, daemon_version: &str) -> anyhow::Result<cmp::Ordering> {
+        let client_parts = client_version
+            .split('.')
+            .map(|p| p.parse::<i64>())
+            .collect::<Result<Vec<_>, _>>()
+            .context("parsing client version")?;
+        if client_parts.len() != 3 {
+            return Err(anyhow!(
+                "parsing client version: got {} parts, want 3",
+                client_parts.len(),
+            ));
+        }
+
+        let daemon_parts = daemon_version
+            .split('.')
+            .map(|p| p.parse::<i64>())
+            .collect::<Result<Vec<_>, _>>()
+            .context("parsing daemon version")?;
+        if daemon_parts.len() != 3 {
+            return Err(anyhow!(
+                "parsing daemon version: got {} parts, want 3",
+                daemon_parts.len(),
+            ));
+        }
+
+        // pre 1.0 releases flag breaking changes with their
+        // minor version rather than major version.
+        if client_parts[0] == 0 && daemon_parts[0] == 0 {
+            return Ok(client_parts[1].cmp(&daemon_parts[1]));
+        }
+
+        Ok(client_parts[0].cmp(&daemon_parts[0]))
     }
 
     /// pipe_bytes suffles bytes from std{in,out} to the unix

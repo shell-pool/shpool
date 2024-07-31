@@ -1562,6 +1562,39 @@ fn autodaemonize() -> anyhow::Result<()> {
     })
 }
 
+#[test]
+#[timeout(30000)]
+fn version_mismatch_client_newer() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc = support::daemon::Proc::new(
+            "norc.toml",
+            DaemonArgs {
+                extra_env: vec![(
+                    String::from("SHPOOL_TEST__OVERRIDE_VERSION"),
+                    String::from("0.0.0"),
+                )],
+                ..DaemonArgs::default()
+            },
+        )
+        .context("starting daemon proc")?;
+        let mut attach_proc =
+            daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+        let mut line_matcher = attach_proc.line_matcher()?;
+        let mut stderr_line_matcher = attach_proc.stderr_line_matcher()?;
+
+        // we should see a warning prompting us
+        stderr_line_matcher.scan_until_re("is newer.*try restarting your daemon$")?;
+        stderr_line_matcher.scan_until_re("hit enter to continue.*$")?;
+        attach_proc.run_cmd("")?; // continue through it
+
+        // not really needed, just here to test the events system
+        attach_proc.run_cmd("echo hi")?;
+        line_matcher.scan_until_re("hi$")?;
+
+        Ok(())
+    })
+}
+
 #[ignore] // TODO: re-enable, this test if flaky
 #[test]
 fn up_arrow_no_crash() -> anyhow::Result<()> {
