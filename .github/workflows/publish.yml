@@ -27,12 +27,12 @@ jobs:
         with:
           fetch-depth: 0
       - name: Install Rust toolchain
-        uses: moonrepo/setup-rust@d8048d4fdff0633123678b093726e6d7c8ad6de5
+        uses: moonrepo/setup-rust@e013866c4215f77c925f42f60257dec7dd18836e
         with:
           inherit-toolchain: true
           bins: cross
       - name: Run release-plz
-        uses: MarcoIeni/release-plz-action@86afd21a7b114234aab55ba0005eed52f77d89e4
+        uses: MarcoIeni/release-plz-action@0f9dc2d45c1b43820f5894fda2345909f5443187
         env:
           GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
