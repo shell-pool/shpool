@@ -1,6 +1,9 @@
 [workspace]
 # disable the changelog for all packages, will only enable for shpool
 changelog_update = false
+# disable creating release by default, will only enable for shpool
+git_release_enable = false
+git_release_type = "auto"
 
 [changelog]
 header = ""
@@ -26,3 +29,19 @@ changelog_update = true
 changelog_path = "./debian/changelog"
 # Also include changes in files in libshpool
 changelog_include = ["libshpool"]
+# Use bare vx.y.z version tag for shpool, other packages will use the default
+# packagename-vx.y.z tag
+git_tag_name = "v{{ version }}"
+# GitHub release will only be created for the overall shpool binary
+git_release_enable = true
+git_release_name = "v{{ version }}"
+
+[[package]]
+name = "libshpool"
+# libshpool doesn't get its own tag since it's always the same version as shpool
+git_tag_enable = false
+
+[[package]]
+name = "shpool-protocol"
+changelog_update = true
+changelog_path = "./shpool-protocol/CHANGELOG"
