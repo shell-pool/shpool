@@ -17,3 +17,9 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "chore"
+    ignore:
+      # Ignore all patch updates to reduce toil for importing into internal
+      # google monorepo.
+      # Security updates are not affected.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-patch"]
