@@ -1,3 +1,23 @@
+
+shpool (0.7.0) unstable; urgency=low
+
+  Added
+
+  * [**breaking**] add autodaemonization support
+
+  Fixed
+
+  * add version negotiation warnings
+  * migrate to new shpool-protocol crate
+  * protocol forward compat
+  * tune vt100 memory usage
+
+  Other
+
+  * rip out directories dep
+  * bump toml from 0.7.8 to 0.8.12 ([#78](https://github.com/shell-pool/shpool/pull/78))
+
+ -- Shpool Authors <shpool-eng@google.com>  Mon, 26 Aug 2024 20:30:00 +0000
 shpool (0.6.3) unstable; urgency=low
 
   * Add debounce option to motd pager mode

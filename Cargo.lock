@@ -505,7 +505,7 @@ dependencies = [
 
 [[package]]
 name = "libshpool"
-version = "0.6.3"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -910,7 +910,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "shpool"
-version = "0.6.3"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "clap",
