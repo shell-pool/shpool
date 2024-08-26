@@ -1,6 +1,6 @@
 [package]
 name = "libshpool"
-version = "0.6.3"
+version = "0.7.0"
 edition = "2021"
 repository = "https://github.com/shell-pool/shpool"
 authors = ["Ethan Pailes <pailes@google.com>"]
@@ -43,7 +43,7 @@ strip-ansi-escapes = "0.2.0" # cleaning up strings for pager display
 notify = "6" # watch config file for updates
 libproc = "0.14.8" # sniffing shells by examining the subprocess
 daemonize = "0.5" # autodaemonization
-shpool-protocol = { version = "0.1.0", path = "../shpool-protocol" } # client-server protocol
+shpool-protocol = { version = "0.2.0", path = "../shpool-protocol" } # client-server protocol
 
 # rusty wrapper for unix apis
 [dependencies.nix]
