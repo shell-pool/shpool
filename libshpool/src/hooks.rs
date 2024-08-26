@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// Callbacks that the wrapping binary can implement in order to do
-/// stuff like inject telemetry into the daemon or trigger background
-/// processes based on a particular session name (for example you
-/// could update and re-build a repository n minutes after your
-/// `devserver` session disconnects on the assumption that the user
-/// is done for the day).
+/// Callbacks that the wrapping binary can implement.
+///
+/// These allow you to do stuff like inject telemetry into the daemon
+/// or trigger background processes based on a particular session
+/// name (for example you could update and re-build a repository n
+/// minutes after your `devserver` session disconnects on the assumption
+/// that the user is done for the day).
 ///
 /// Hooks are invoked inline within the daemon's control flow, so
 /// you MUST NOT block for extended periods of time. If you need to
