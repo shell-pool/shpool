@@ -20,7 +20,9 @@ use serde_derive::{Deserialize, Serialize};
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// ConnectHeader is the blob of metadata that a client transmits when it
-/// first connections. It uses an enum to allow different connection types
+/// first connects.
+///
+/// It uses an enum to allow different connection types
 /// to be initiated on the same socket. The ConnectHeader is always prefixed
 /// with a 4 byte little endian unsigned word to indicate length.
 #[derive(Serialize, Deserialize, Debug)]
@@ -109,7 +111,8 @@ pub enum SessionMessageRequestPayload {
     Detach,
 }
 
-/// ResizeRequest resizes the pty for a given named session.
+/// ResizeRequest resizes the pty for a named session.
+///
 /// We use an out-of-band request rather than doing this
 /// in the input stream because we don't want to have to
 /// introduce a framing protocol for the input stream.

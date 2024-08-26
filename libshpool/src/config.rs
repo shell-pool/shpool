@@ -15,17 +15,16 @@
 use std::{
     borrow::Cow,
     collections::HashMap,
-    fs,
-    path::Path,
+    env, fs,
+    path::{Path, PathBuf},
     sync::{Arc, RwLock, RwLockReadGuard},
 };
 
 use anyhow::{Context as _, Result};
-use directories::ProjectDirs;
 use serde_derive::Deserialize;
 use tracing::{info, warn};
 
-use crate::{config_watcher::ConfigWatcher, daemon::keybindings, test_hooks};
+use crate::{config_watcher::ConfigWatcher, daemon::keybindings, test_hooks, user};
 
 /// Exposes the shpool config file, watching for file updates
 /// so that the user does not need to restart the daemon when
@@ -55,13 +54,13 @@ impl Manager {
     /// eariler. The exact merging strategy is as defined in
     /// `Config::merge`.
     pub fn new(config_file: Option<&str>) -> Result<Self> {
-        let dirs = ProjectDirs::from("", "", "shpool").context("getting ProjectDirs")?;
+        let config_dir = Self::config_dir()?;
 
         let config_files = match config_file {
             None => {
                 vec![
                     Cow::from(Path::new("/etc/shpool/config.toml")),
-                    Cow::from(dirs.config_dir().join("config.toml")),
+                    Cow::from(config_dir.join("config.toml")),
                 ]
             }
             Some(config_file) => {
@@ -137,6 +136,34 @@ impl Manager {
             config = new_config.merge(config);
         }
         Ok(config)
+    }
+
+    fn config_dir() -> anyhow::Result<PathBuf> {
+        let mut dir = Self::config_base_dir()?;
+        dir.push("shpool");
+        Ok(dir)
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    fn config_base_dir() -> anyhow::Result<PathBuf> {
+        let user_info = user::info().context("getting user info")?;
+        let mut path = PathBuf::from(user_info.home_dir);
+        path.push("Library");
+        path.push("Application Support");
+        Ok(path)
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows")))]
+    fn config_base_dir() -> anyhow::Result<PathBuf> {
+        match env::var("XDG_CONFIG_DIR") {
+            Ok(v) => Ok(PathBuf::from(v)),
+            Err(_) => {
+                let user_info = user::info().context("getting user info")?;
+                let mut path = PathBuf::from(user_info.home_dir);
+                path.push(".config");
+                Ok(path)
+            }
+        }
     }
 }
 
