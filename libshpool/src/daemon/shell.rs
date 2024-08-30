@@ -292,8 +292,9 @@ impl SessionInner {
                                     .context("sending client connection ack")?;
                             }
                             Ok(ClientConnectionMsg::Disconnect) => {
-                                let ack = if let ClientConnectionMsg::New(old_conn) = client_conn {
+                                let ack = if let ClientConnectionMsg::New(mut old_conn) = client_conn {
                                     info!("disconnect, shutting down client stream");
+                                    Self::write_exit_chunk(&mut old_conn.stream, 0);
                                     old_conn.stream.shutdown(net::Shutdown::Both)?;
                                     ClientConnectionStatus::Detached
                                 } else {
@@ -312,23 +313,7 @@ impl SessionInner {
 
                                     // write an exit status frame so the attach process
                                     // can exit with the same exit code as the child shell
-                                    let status_buf: [u8; 4] = exit_status.to_le_bytes();
-                                    let chunk = Chunk {
-                                        kind: ChunkKind::ExitStatus,
-                                        buf: status_buf.as_slice(),
-                                    };
-                                    match chunk.write_to(&mut old_conn.stream).and_then(|_| old_conn.stream.flush()) {
-                                        Ok(_) => {
-                                            trace!("wrote exit status chunk");
-                                        }
-                                        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {
-                                            trace!("client hangup: {:?}", e);
-                                        }
-                                        Err(e) => {
-                                            error!("writing exit status chunk: {:?}", e);
-                                        }
-                                    };
-
+                                    Self::write_exit_chunk(&mut old_conn.stream, exit_status);
                                     old_conn.stream.shutdown(net::Shutdown::Both)?;
 
                                     ClientConnectionStatus::Detached
@@ -527,6 +512,22 @@ impl SessionInner {
         Ok(thread::Builder::new()
             .name(format!("shell->client({})", self.name))
             .spawn(move || log_if_error("error in shell->client", closure()))?)
+    }
+
+    fn write_exit_chunk<W: io::Write>(mut stream: W, status: i32) {
+        let status_buf: [u8; 4] = status.to_le_bytes();
+        let chunk = Chunk { kind: ChunkKind::ExitStatus, buf: status_buf.as_slice() };
+        match chunk.write_to(&mut stream).and_then(|_| stream.flush()) {
+            Ok(_) => {
+                trace!("wrote exit status chunk");
+            }
+            Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {
+                trace!("client hangup: {:?}", e);
+            }
+            Err(e) => {
+                error!("writing exit status chunk: {:?}", e);
+            }
+        };
     }
 
     /// bidi_stream shuffles bytes between the subprocess and

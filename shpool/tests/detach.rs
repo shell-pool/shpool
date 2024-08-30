@@ -19,7 +19,7 @@ fn single_running() -> anyhow::Result<()> {
             .take()
             .unwrap()
             .waiter(["daemon-bidi-stream-enter", "daemon-bidi-stream-done"]);
-        let _attach_proc =
+        let mut attach_proc =
             daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
         waiter.wait_event("daemon-bidi-stream-enter")?;
 
@@ -33,6 +33,9 @@ fn single_running() -> anyhow::Result<()> {
         assert_eq!(stdout.len(), 0, "expected no stdout");
 
         daemon_proc.events = Some(waiter.wait_final_event("daemon-bidi-stream-done")?);
+
+        let attach_exit_status = attach_proc.proc.wait()?;
+        assert!(attach_exit_status.success());
 
         Ok(())
     })
