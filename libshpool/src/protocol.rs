@@ -315,12 +315,11 @@ impl Client {
                         }
                         ChunkKind::ExitStatus => {
                             let mut status_reader = io::Cursor::new(chunk.buf);
-                            exit_status.store(
-                                status_reader
-                                    .read_i32::<LittleEndian>()
-                                    .context("reading exit status from exit status chunk")?,
-                                Ordering::Release,
-                            );
+                            let stat = status_reader
+                                .read_i32::<LittleEndian>()
+                                .context("reading exit status from exit status chunk")?;
+                            info!("got exit status frame (status={})", stat);
+                            exit_status.store(stat, Ordering::Release);
                         }
                     }
                 }
@@ -339,9 +338,11 @@ impl Client {
                         thread::sleep(JOIN_HANGUP_DUR);
                         nfinished_threads = 0;
                         if stdin_to_sock_h.is_finished() {
+                            info!("recheck: stdin->sock thread done");
                             nfinished_threads += 1;
                         }
                         if sock_to_stdout_h.is_finished() {
+                            info!("recheck: sock->stdout thread done");
                             nfinished_threads += 1;
                         }
                         if nfinished_threads < 2 {

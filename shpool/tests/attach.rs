@@ -554,7 +554,8 @@ fn default_keybinding_detach() -> anyhow::Result<()> {
         lm1.scan_until_re("someval$")?;
 
         a1.run_raw_cmd(vec![0, 17])?; // Ctrl-Space Ctrl-q
-        a1.proc.wait()?;
+        let exit_status = a1.proc.wait()?;
+        assert!(exit_status.success());
 
         waiter.wait_event("daemon-bidi-stream-done")?;
 
