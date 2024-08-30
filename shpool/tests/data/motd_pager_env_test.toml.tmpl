@@ -1,0 +1,12 @@
+norc = true
+noecho = true
+shell = "/bin/bash"
+session_restore_mode = "simple"
+
+[motd.pager]
+# this gets replaced by motd_env_test_script.sh
+bin = "MOTD_ENV_TEST_SCRIPT"
+
+[env]
+PS1 = "prompt> "
+TERM = "testval"
