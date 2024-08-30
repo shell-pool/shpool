@@ -104,6 +104,8 @@ impl Pager {
         init_tty_size: TtySize,
         // The message to display
         msg: &str,
+        // The env to launch the pager proc with
+        shell_env: &[(String, String)],
     ) -> anyhow::Result<TtySize> {
         let (tty_size_change_tx, tty_size_change_rx) = crossbeam_channel::bounded(0);
         let (tty_size_change_ack_tx, tty_size_change_ack_rx) = crossbeam_channel::bounded(0);
@@ -128,6 +130,7 @@ impl Pager {
         msg_file.write_all(cleaned_msg.as_slice()).context("writing msg to tmp pager file")?;
 
         let mut cmd = process::Command::new(&self.pager_bin);
+        cmd.env_clear().envs(shell_env.to_vec());
         cmd.arg(msg_file.path().as_os_str());
 
         // fork, leaving us with a handle in the master branch

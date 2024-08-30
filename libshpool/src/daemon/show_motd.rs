@@ -90,6 +90,10 @@ impl DailyMessenger {
         ctl_slot: Arc<Mutex<Option<PagerCtl>>>,
         // The size of the tty to start off with
         init_tty_size: TtySize,
+        // The env that the shell will be launched with, we want to use
+        // the same env for the pager program (mostly because we want
+        // to pass TERM along correctly).
+        shell_env: &[(String, String)],
     ) -> anyhow::Result<Option<TtySize>> {
         if let Some(debouncer) = &self.debouncer {
             if !debouncer.should_fire()? {
@@ -109,8 +113,13 @@ impl DailyMessenger {
 
         let pager = Pager::new(pager_bin.to_string());
 
-        let final_size =
-            pager.display(client_stream, ctl_slot, init_tty_size, motd_value.as_str())?;
+        let final_size = pager.display(
+            client_stream,
+            ctl_slot,
+            init_tty_size,
+            motd_value.as_str(),
+            shell_env,
+        )?;
         Ok(Some(final_size))
     }
 
