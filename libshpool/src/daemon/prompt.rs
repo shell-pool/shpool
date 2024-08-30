@@ -113,7 +113,7 @@ pub fn maybe_inject_prefix(
     // hard to make the scanner work right.
     // TODO(julien): this will probably not work on mac
     let sentinel_cmd =
-        format!("\n{}=prompt /proc/{}/exe daemon\n", SENTINEL_FLAG_VAR, std::process::id());
+        format!("\n {}=prompt /proc/{}/exe daemon\n", SENTINEL_FLAG_VAR, std::process::id());
     script.push_str(sentinel_cmd.as_str());
 
     debug!("injecting prefix script '{}'", script);
@@ -126,7 +126,7 @@ pub fn maybe_inject_prefix(
 fn wait_for_startup(pty_master: &mut shpool_pty::fork::Master) -> anyhow::Result<()> {
     let mut startup_sentinel_scanner = SentinelScanner::new(STARTUP_SENTINEL);
     let startup_sentinel_cmd =
-        format!("\n{}=startup /proc/{}/exe daemon\n", SENTINEL_FLAG_VAR, std::process::id());
+        format!("\n {}=startup /proc/{}/exe daemon\n", SENTINEL_FLAG_VAR, std::process::id());
 
     pty_master
         .write_all(startup_sentinel_cmd.as_bytes())
