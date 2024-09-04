@@ -52,7 +52,7 @@ impl Proc {
         )
         .context("setting stdout nonblocking")?;
 
-        Ok(LineMatcher { out: io::BufReader::new(r) })
+        Ok(LineMatcher { out: io::BufReader::new(r), never_match_regex: vec![] })
     }
 
     /// Create a handle for asserting about stderr output lines.
@@ -65,7 +65,7 @@ impl Proc {
         )
         .context("setting stderr nonblocking")?;
 
-        Ok(LineMatcher { out: io::BufReader::new(r) })
+        Ok(LineMatcher { out: io::BufReader::new(r), never_match_regex: vec![] })
     }
 
     pub fn await_event(&mut self, event: &str) -> anyhow::Result<()> {

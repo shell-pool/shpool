@@ -471,12 +471,6 @@ impl SessionInner {
                 let mut buf = &buf[..len];
                 trace!("read pty master len={} '{}'", len, String::from_utf8_lossy(buf));
 
-                if !matches!(args.session_restore_mode, config::SessionRestoreMode::Simple) {
-                    if let Some(s) = output_spool.as_mut() {
-                        s.process(buf);
-                    }
-                }
-
                 // scan for control codes we need to handle
                 let mut reset_client_conn = false;
                 if !has_seen_prompt_sentinel {
@@ -490,6 +484,12 @@ impl SessionInner {
                             // drop everything up to and including the sentinel
                             buf = &buf[i + 1..];
                         }
+                    }
+                }
+
+                if !matches!(args.session_restore_mode, config::SessionRestoreMode::Simple) {
+                    if let (Some(s), true) = (output_spool.as_mut(), has_seen_prompt_sentinel) {
+                        s.process(buf);
                     }
                 }
 
