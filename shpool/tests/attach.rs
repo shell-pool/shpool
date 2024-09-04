@@ -836,10 +836,13 @@ fn screen_restore() -> anyhow::Result<()> {
             let mut attach_proc =
                 daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
             let mut line_matcher = attach_proc.line_matcher()?;
+            line_matcher.never_matches("^.*SHPOOL_PROMPT_SETUP_SENTINEL.*$")?;
 
             // the re-attach should redraw the screen for us, so we should
             // get a line with "foo" as part of the re-drawn screen.
             line_matcher.scan_until_re("foo$")?;
+
+            attach_proc.proc.kill()?;
         }
 
         Ok(())
