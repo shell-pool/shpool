@@ -56,7 +56,7 @@ const DEFAULT_PROMPT_PREFIX: &str = "shpool:$SHPOOL_SESSION_NAME ";
 
 // Half a second should be more than enough time to handle any resize or
 // or detach. If things are taking longer, we can't afford to keep waiting
-// for the reader thread since session message calls are made with the
+// for the shell->client thread since session message calls are made with the
 // global session table lock held.
 const SESSION_MSG_TIMEOUT: time::Duration = time::Duration::from_millis(500);
 
@@ -222,13 +222,13 @@ impl Server {
                             inner.client_stream = Some(stream.try_clone()?);
 
                             if inner
-                                .reader_join_h
+                                .shell_to_client_join_h
                                 .as_ref()
                                 .map(|h| h.is_finished())
                                 .unwrap_or(false)
                             {
                                 warn!(
-                                    "child_exited chan unclosed, but reader thread has exited, clobbering with new subshell"
+                                    "child_exited chan unclosed, but shell->client thread has exited, clobbering with new subshell"
                                 );
                                 status = AttachStatus::Created { warnings };
                             }
@@ -245,12 +245,17 @@ impl Server {
                         }
                     }
 
-                    if inner.reader_join_h.as_ref().map(|h| h.is_finished()).unwrap_or(false) {
-                        info!("reader thread finished, joining");
-                        if let Some(h) = inner.reader_join_h.take() {
+                    if inner
+                        .shell_to_client_join_h
+                        .as_ref()
+                        .map(|h| h.is_finished())
+                        .unwrap_or(false)
+                    {
+                        info!("shell->client thread finished, joining");
+                        if let Some(h) = inner.shell_to_client_join_h.take() {
                             h.join()
-                                .map_err(|e| anyhow!("joining reader on reattach: {:?}", e))?
-                                .context("within reader thread on reattach")?;
+                                .map_err(|e| anyhow!("joining shell->client on reattach: {:?}", e))?
+                                .context("within shell->client thread on reattach")?;
                         }
                         assert!(matches!(status, AttachStatus::Created { .. }));
                     }
@@ -379,15 +384,15 @@ impl Server {
                 let mut shells = self.shells.lock().unwrap();
                 shells.remove(&header.name);
 
-                // The child shell has exited, so the reader thread should
+                // The child shell has exited, so the shell->client thread should
                 // attempt to read from its stdout and get an error, causing
                 // it to exit. That means we should be safe to join. We use
                 // a separate if statement to avoid holding the shells lock
                 // while we join the old thread.
-                if let Some(h) = inner.reader_join_h.take() {
+                if let Some(h) = inner.shell_to_client_join_h.take() {
                     h.join()
-                        .map_err(|e| anyhow!("joining reader after child exit: {:?}", e))?
-                        .context("within reader thread after child exit")?;
+                        .map_err(|e| anyhow!("joining shell->client after child exit: {:?}", e))?
+                        .context("within shell->client thread after child exit")?;
                 }
             } else if let Err(err) = self.hooks.on_client_disconnect(&header.name) {
                 warn!("client_disconnect hook: {:?}", err);
@@ -446,12 +451,12 @@ impl Server {
             trace!("locked shells table 3");
             for session in request.sessions.into_iter() {
                 if let Some(s) = shells.get(&session) {
-                    let reader_ctl = s.reader_ctl.lock().unwrap();
-                    reader_ctl
+                    let shell_to_client_ctl = s.shell_to_client_ctl.lock().unwrap();
+                    shell_to_client_ctl
                         .client_connection
                         .send(shell::ClientConnectionMsg::Disconnect)
-                        .context("sending client detach to reader")?;
-                    let status = reader_ctl
+                        .context("sending client detach to shell->client")?;
+                    let status = shell_to_client_ctl
                         .client_connection_ack
                         .recv()
                         .context("getting client conn ack")?;
@@ -556,13 +561,13 @@ impl Server {
                                 .recv_timeout(SESSION_MSG_TIMEOUT)
                                 .context("recving tty size change ack from pager")?;
                         } else {
-                            info!("resizing reader");
-                            let reader_ctl = session.reader_ctl.lock().unwrap();
-                            reader_ctl
+                            info!("resizing shell->client");
+                            let shell_to_client_ctl = session.shell_to_client_ctl.lock().unwrap();
+                            shell_to_client_ctl
                                 .tty_size_change
                                 .send_timeout(resize_request.tty_size, SESSION_MSG_TIMEOUT)
-                                .context("sending tty size change to reader")?;
-                            reader_ctl
+                                .context("sending tty size change to shell->client")?;
+                            shell_to_client_ctl
                                 .tty_size_change_ack
                                 .recv_timeout(SESSION_MSG_TIMEOUT)
                                 .context("recving tty size ack")?;
@@ -572,15 +577,15 @@ impl Server {
                     }
                     SessionMessageRequestPayload::Detach => {
                         info!("handling detach msg");
-                        let reader_ctl = session.reader_ctl.lock().unwrap();
-                        reader_ctl
+                        let shell_to_client_ctl = session.shell_to_client_ctl.lock().unwrap();
+                        shell_to_client_ctl
                             .client_connection
                             .send_timeout(
                                 shell::ClientConnectionMsg::Disconnect,
                                 SESSION_MSG_TIMEOUT,
                             )
-                            .context("sending client detach to reader")?;
-                        let status = reader_ctl
+                            .context("sending client detach to shell->client")?;
+                        let status = shell_to_client_ctl
                             .client_connection_ack
                             .recv_timeout(SESSION_MSG_TIMEOUT)
                             .context("getting client conn ack")?;
@@ -760,7 +765,7 @@ impl Server {
         let (tty_size_change_tx, tty_size_change_rx) = crossbeam_channel::bounded(0);
         let (tty_size_change_ack_tx, tty_size_change_ack_rx) = crossbeam_channel::bounded(0);
 
-        let reader_ctl = Arc::new(Mutex::new(shell::ReaderCtl {
+        let shell_to_client_ctl = Arc::new(Mutex::new(shell::ReaderCtl {
             client_connection: client_connection_tx,
             client_connection_ack: client_connection_ack_rx,
             tty_size_change: tty_size_change_tx,
@@ -768,35 +773,36 @@ impl Server {
         }));
         let mut session_inner = shell::SessionInner {
             name: header.name.clone(),
-            reader_ctl: Arc::clone(&reader_ctl),
+            shell_to_client_ctl: Arc::clone(&shell_to_client_ctl),
             pty_master: fork,
             client_stream: Some(client_stream),
             config: self.config.clone(),
-            reader_join_h: None,
+            shell_to_client_join_h: None,
             term_db,
             daily_messenger: Arc::clone(&self.daily_messenger),
             needs_initial_motd_dump: dump_motd_on_new_session,
             custom_cmd: header.cmd.is_some(),
         };
         let child_pid = session_inner.pty_master.child_pid().ok_or(anyhow!("no child pid"))?;
-        session_inner.reader_join_h = Some(session_inner.spawn_reader(shell::ReaderArgs {
-            conn_id,
-            tty_size: header.local_tty_size.clone(),
-            scrollback_lines: match (
-                self.config.get().output_spool_lines,
-                &self.config.get().session_restore_mode,
-            ) {
-                (Some(l), _) => l,
-                (None, Some(config::SessionRestoreMode::Lines(l))) => *l as usize,
-                (None, _) => DEFAULT_OUTPUT_SPOOL_LINES,
-            },
-            session_restore_mode:
-                self.config.get().session_restore_mode.clone().unwrap_or_default(),
-            client_connection: client_connection_rx,
-            client_connection_ack: client_connection_ack_tx,
-            tty_size_change: tty_size_change_rx,
-            tty_size_change_ack: tty_size_change_ack_tx,
-        })?);
+        session_inner.shell_to_client_join_h =
+            Some(session_inner.spawn_shell_to_client(shell::ReaderArgs {
+                conn_id,
+                tty_size: header.local_tty_size.clone(),
+                scrollback_lines: match (
+                    self.config.get().output_spool_lines,
+                    &self.config.get().session_restore_mode,
+                ) {
+                    (Some(l), _) => l,
+                    (None, Some(config::SessionRestoreMode::Lines(l))) => *l as usize,
+                    (None, _) => DEFAULT_OUTPUT_SPOOL_LINES,
+                },
+                session_restore_mode:
+                    self.config.get().session_restore_mode.clone().unwrap_or_default(),
+                client_connection: client_connection_rx,
+                client_connection_ack: client_connection_ack_tx,
+                tty_size_change: tty_size_change_rx,
+                tty_size_change_ack: tty_size_change_ack_tx,
+            })?);
 
         if let Some(ttl_secs) = header.ttl_secs {
             info!("registering session with ttl with the reaper");
@@ -806,7 +812,7 @@ impl Server {
         }
 
         Ok(shell::Session {
-            reader_ctl,
+            shell_to_client_ctl,
             pager_ctl: Arc::new(Mutex::new(None)),
             child_pid,
             child_exit_notifier,

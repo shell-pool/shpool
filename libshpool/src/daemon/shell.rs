@@ -55,10 +55,10 @@ const SUPERVISOR_POLL_DUR: time::Duration = time::Duration::from_millis(300);
 // size.
 const REATTACH_RESIZE_DELAY: time::Duration = time::Duration::from_millis(50);
 
-// The reader thread should wake up relatively frequently so it can detect
-// reattach, but we don't need to go crazy since reattach is not part of
+// The shell->client thread should wake up relatively frequently so it can
+// detect reattach, but we don't need to go crazy since reattach is not part of
 // the inner loop.
-const READER_POLL_MS: u16 = 100;
+const SHELL_TO_CLIENT_POLL_MS: u16 = 100;
 
 /// Session represent a shell session
 #[derive(Debug)]
@@ -66,7 +66,7 @@ pub struct Session {
     pub started_at: time::SystemTime,
     pub child_pid: libc::pid_t,
     pub child_exit_notifier: Arc<ExitNotifier>,
-    pub reader_ctl: Arc<Mutex<ReaderCtl>>,
+    pub shell_to_client_ctl: Arc<Mutex<ReaderCtl>>,
     pub pager_ctl: Arc<Mutex<Option<PagerCtl>>>,
     /// Mutable state with the lock held by the servicing handle_attach thread
     /// while a tty is attached to the session. Probing the mutex can be used
@@ -101,7 +101,7 @@ impl Session {
 #[derive(Debug)]
 pub struct SessionInner {
     pub name: String, // to improve logging
-    pub reader_ctl: Arc<Mutex<ReaderCtl>>,
+    pub shell_to_client_ctl: Arc<Mutex<ReaderCtl>>,
     pub pty_master: shpool_pty::fork::Fork,
     pub client_stream: Option<UnixStream>,
     pub config: config::Manager,
@@ -110,14 +110,14 @@ pub struct SessionInner {
     pub needs_initial_motd_dump: bool,
     pub custom_cmd: bool,
 
-    /// The join handle for the always-on background reader thread.
+    /// The join handle for the always-on background shell->client thread.
     /// Only wrapped in an option so we can spawn the thread after
     /// constructing the SessionInner.
-    pub reader_join_h: Option<thread::JoinHandle<anyhow::Result<()>>>,
+    pub shell_to_client_join_h: Option<thread::JoinHandle<anyhow::Result<()>>>,
 }
 
 /// A notification that a new client has connected, sent to the
-/// reader thread.
+/// shell->client thread.
 pub struct ClientConnection {
     /// All output data should be written to this sink rather than
     /// directly to the unix stream. The mutex makes sure that we don't
@@ -125,9 +125,9 @@ pub struct ClientConnection {
     sink: Arc<Mutex<io::BufWriter<UnixStream>>>,
     /// The size of the client tty.
     size: TtySize,
-    /// The raw unix socket stream. The reader should never write
-    /// to this directly, just use it for control operations like
-    /// shutdown.
+    /// The raw unix socket stream. The shell->client thread should
+    /// never write to this directly, just use it for control
+    /// operations like shutdown.
     stream: UnixStream,
 }
 
@@ -163,11 +163,11 @@ where
     })
 }
 
-/// Messages to the reader thread to add or remove a client connection.
+/// Messages to the shell->client thread to add or remove a client connection.
 pub enum ClientConnectionMsg {
     /// Accept a newly connected client
     New(ClientConnection),
-    /// Disconnect the client and exit the reader loop since
+    /// Disconnect the client and exit the shell->client loop since
     /// the client shell has exited with the given exit status.
     DisconnectExit(i32),
     /// Disconnect the client, but stay around and be ready for
@@ -187,11 +187,11 @@ pub struct ReaderArgs {
 }
 
 impl SessionInner {
-    /// Spawn the reader thread which continually reads from the pty
+    /// Spawn the shell-to-client thread which continually reads from the pty
     /// and sends data both to the output spool and to the client,
     /// if one is attached.
     #[instrument(skip_all, fields(s = self.name))]
-    pub fn spawn_reader(
+    pub fn spawn_shell_to_client(
         &self,
         args: ReaderArgs,
     ) -> anyhow::Result<thread::JoinHandle<anyhow::Result<()>>> {
@@ -217,7 +217,7 @@ impl SessionInner {
         let watchable_master = pty_master;
         let name = self.name.clone();
         let mut closure = move || {
-            let _s = span!(Level::INFO, "reader", s = name, cid = args.conn_id).entered();
+            let _s = span!(Level::INFO, "shell->client", s = name, cid = args.conn_id).entered();
 
             let mut output_spool =
                 if matches!(args.session_restore_mode, config::SessionRestoreMode::Simple) {
@@ -444,7 +444,7 @@ impl SessionInner {
                 // Block until the shell has some data for us so we can be sure our reads
                 // always succeed. We don't want to end up blocked forever on a read while
                 // a client is trying to attach.
-                let nready = match poll::poll(&mut poll_fds, READER_POLL_MS) {
+                let nready = match poll::poll(&mut poll_fds, SHELL_TO_CLIENT_POLL_MS) {
                     Ok(n) => n,
                     Err(e) => {
                         error!("polling pty master: {:?}", e);
@@ -456,12 +456,11 @@ impl SessionInner {
                     continue;
                 }
                 if nready != 1 {
-                    return Err(anyhow!("reader thread: expected exactly 1 ready fd"));
+                    return Err(anyhow!("shell->client thread: expected exactly 1 ready fd"));
                 }
                 let len = match pty_master.read(&mut buf) {
                     Ok(l) => l,
                     Err(e) => {
-                        test_hooks::emit("daemon-reader-read-error");
                         error!("reading chunk from pty master: {:?}", e);
                         return Err(e).context("reading pty master chunk")?;
                     }
@@ -526,8 +525,8 @@ impl SessionInner {
         };
 
         Ok(thread::Builder::new()
-            .name(format!("reader({})", self.name))
-            .spawn(move || log_if_error("error in reader", closure()))?)
+            .name(format!("shell->client({})", self.name))
+            .spawn(move || log_if_error("error in shell->client", closure()))?)
     }
 
     /// bidi_stream shuffles bytes between the subprocess and
@@ -552,24 +551,24 @@ impl SessionInner {
         };
 
         let mut client_to_shell_client_stream =
-            client_stream.try_clone().context("creating reader client stream")?;
-        let reader_client_stream =
-            client_stream.try_clone().context("creating reader client stream handle")?;
+            client_stream.try_clone().context("creating client->shell client stream")?;
+        let shell_to_client_client_stream =
+            client_stream.try_clone().context("creating shell->client client stream handle")?;
         let client_stream_m = Arc::new(Mutex::new(io::BufWriter::new(
             client_stream.try_clone().context("wrapping stream in bufwriter")?,
         )));
 
         {
-            let reader_ctl = self.reader_ctl.lock().unwrap();
-            reader_ctl
+            let shell_to_client_ctl = self.shell_to_client_ctl.lock().unwrap();
+            shell_to_client_ctl
                 .client_connection
                 .send(ClientConnectionMsg::New(ClientConnection {
                     sink: Arc::clone(&client_stream_m),
                     size: init_tty_size,
-                    stream: reader_client_stream,
+                    stream: shell_to_client_client_stream,
                 }))
-                .context("attaching new client stream to reader thread")?;
-            let status = reader_ctl
+                .context("attaching new client stream to shell->client thread")?;
+            let status = shell_to_client_ctl
                 .client_connection_ack
                 .recv()
                 .context("waiting for client connection ack")?;
@@ -617,34 +616,34 @@ impl SessionInner {
                 thread::sleep(consts::JOIN_POLL_DURATION);
             }
 
-            // disconnect the reader thread first since that will shutdown the
+            // disconnect the shell->client thread first since that will shutdown the
             // client stream, and the client->shell thread hangs out blocked on
             // that stream, so we need to close it in order to get all our
             // cows to come home.
             let c_done = child_done.load(Ordering::Acquire);
             {
-                let reader_ctl = self.reader_ctl.lock().unwrap();
-                let send_res = reader_ctl.client_connection.send_timeout(if c_done {
+                let shell_to_client_ctl = self.shell_to_client_ctl.lock().unwrap();
+                let send_res = shell_to_client_ctl.client_connection.send_timeout(if c_done {
                     let exit_status = child_exit_notifier
                         .wait(Some(Duration::from_secs(0)))
                         .unwrap_or(1);
-                    info!("telling reader to disconnect with exit status {}", exit_status);
+                    info!("telling shell->client to disconnect with exit status {}", exit_status);
                     ClientConnectionMsg::DisconnectExit(exit_status)
                 } else {
-                    info!("telling reader to disconnect without reaping");
+                    info!("telling shell->client to disconnect without reaping");
                     ClientConnectionMsg::Disconnect
-                }, Duration::from_millis((READER_POLL_MS + (READER_POLL_MS >> 1)) as u64));
+                }, Duration::from_millis((SHELL_TO_CLIENT_POLL_MS + (SHELL_TO_CLIENT_POLL_MS >> 1)) as u64));
 
                 if let Err(send_timeout_err) = send_res {
-                    info!("failed to tell reader to disconnect: {:?}", send_timeout_err);
+                    info!("failed to tell shell->client to disconnect: {:?}", send_timeout_err);
 
-                    // the reader didn't close the client stream for us, so we'll need
+                    // the shell->client didn't close the client stream for us, so we'll need
                     // to handle that ourselves
                     client_stream.shutdown(net::Shutdown::Both)?;
                 } else {
-                    let status = reader_ctl.client_connection_ack.recv()
+                    let status = shell_to_client_ctl.client_connection_ack.recv()
                         .context("waiting for client connection ack")?;
-                    info!("detached from reader, status = {:?}", status);
+                    info!("detached from shell->client, status = {:?}", status);
                 }
             }
 
@@ -690,8 +689,8 @@ impl SessionInner {
         conn_id: usize,
         stop: &'scope AtomicBool,
         pty_master: &'scope shpool_pty::fork::Master,
-        reader_client_stream: &'scope mut UnixStream,
-    ) -> anyhow::Result<thread::ScopedJoinHandle<anyhow::Result<()>>> {
+        shell_to_client_client_stream: &'scope mut UnixStream,
+    ) -> anyhow::Result<thread::ScopedJoinHandle<'scope, anyhow::Result<()>>> {
         let empty_bindings = vec![config::Keybinding {
             binding: String::from("Ctrl-Space Ctrl-q"),
             action: keybindings::Action::Detach,
@@ -733,8 +732,9 @@ impl SessionInner {
                     //
                     // Also, note that we don't access through the mutex because reads
                     // don't need to be excluded from trampling on writes.
-                    let mut len =
-                        reader_client_stream.read(&mut buf).context("reading client chunk")?;
+                    let mut len = shell_to_client_client_stream
+                        .read(&mut buf)
+                        .context("reading client chunk")?;
                     if len == 0 {
                         continue;
                     }
@@ -834,7 +834,7 @@ impl SessionInner {
         conn_id: usize,
         stop: &'scope AtomicBool,
         client_stream_m: &'scope Arc<Mutex<io::BufWriter<UnixStream>>>,
-    ) -> anyhow::Result<thread::ScopedJoinHandle<anyhow::Result<()>>> {
+    ) -> anyhow::Result<thread::ScopedJoinHandle<'scope, anyhow::Result<()>>> {
         thread::Builder::new()
             .name(format!("heartbeat({})", self.name))
             .spawn_scoped(scope, move || -> anyhow::Result<()> {
@@ -878,7 +878,7 @@ impl SessionInner {
         child_done: &'scope AtomicBool,
         pty_master: &'scope shpool_pty::fork::Master,
         child_exit_notifier: Arc<ExitNotifier>,
-    ) -> anyhow::Result<thread::ScopedJoinHandle<anyhow::Result<()>>> {
+    ) -> anyhow::Result<thread::ScopedJoinHandle<'scope, anyhow::Result<()>>> {
         thread::Builder::new()
             .name(format!("supervisor({})", self.name))
             .spawn_scoped(scope, move || -> anyhow::Result<()> {
@@ -899,7 +899,7 @@ impl SessionInner {
                             child_done.store(true, Ordering::Release);
 
                             // we don't need to worry about the ExitStatus frame
-                            // because the reader thread cleanup should handle
+                            // because the shell->client thread cleanup should handle
                             // that.
                             return Ok(());
                         }
@@ -919,40 +919,42 @@ impl SessionInner {
 
     #[instrument(skip_all)]
     fn action_detach(&self) -> anyhow::Result<()> {
-        let reader_ctl = self.reader_ctl.lock().unwrap();
-        reader_ctl
+        let shell_to_client_ctl = self.shell_to_client_ctl.lock().unwrap();
+        shell_to_client_ctl
             .client_connection
             .send(ClientConnectionMsg::Disconnect)
-            .context("signaling client detach to reader thread")?;
-        let status =
-            reader_ctl.client_connection_ack.recv().context("waiting for client connection ack")?;
+            .context("signaling client detach to shell->client thread")?;
+        let status = shell_to_client_ctl
+            .client_connection_ack
+            .recv()
+            .context("waiting for client connection ack")?;
 
         info!("action detach, status={:?}", status);
         Ok(())
     }
 }
 
-/// A handle for poking at the always-running reader thread.
+/// A handle for poking at the always-running shell->client thread.
 /// Shared between the session struct (for calls originating with the cli)
 /// and the session inner struct (for calls resulting from keybindings).
 #[derive(Debug)]
 pub struct ReaderCtl {
-    /// A control channel for the reader thread. Whenever a new client dials in,
-    /// the output stream for that client must be attached to the reader
-    /// thread by sending it down this channel. A disconnect is signaled by
-    /// sending None down this channel. Dropping the channel entirely causes
-    /// the reader thread to exit.
+    /// A control channel for the shell->client thread. Whenever a new client
+    /// dials in, the output stream for that client must be attached to the
+    /// shell->client thread by sending it down this channel. A disconnect
+    /// is signaled by sending None down this channel. Dropping the channel
+    /// entirely causes the shell->client thread to exit.
     pub client_connection: crossbeam_channel::Sender<ClientConnectionMsg>,
-    /// A control channel for the reader thread. Acks the addition of a fresh
-    /// client connection.
+    /// A control channel for the shell->client thread. Acks the addition of a
+    /// fresh client connection.
     pub client_connection_ack: crossbeam_channel::Receiver<ClientConnectionStatus>,
 
-    /// A control channel for the reader thread. Used to signal size changes so
-    /// that the output spool will correctly reflect the size of the user's
-    /// tty.
+    /// A control channel for the shell->client thread. Used to signal size
+    /// changes so that the output spool will correctly reflect the size of
+    /// the user's tty.
     pub tty_size_change: crossbeam_channel::Sender<TtySize>,
-    /// A control channel for the reader thread. Acks the completion of a spool
-    /// resize.
+    /// A control channel for the shell->client thread. Acks the completion of a
+    /// spool resize.
     pub tty_size_change_ack: crossbeam_channel::Receiver<()>,
 }
 
