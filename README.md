@@ -77,6 +77,16 @@ You can customize some of `shpool`s behavior by editing your
 `~/.config/shpool/config.toml` file. For an in depth discussion
 of configuration options see [CONFIG.md](./CONFIG.md).
 
+### Keybindings
+
+`shpool` supports keybindings (well really for the moment it
+supports keybinding, but in principle we could add more).
+For the moment, the only binding is `Ctrl-Space Ctrl-q`
+to detach from the current session. If you wish, you can
+[configure](./CONFIG.md#detach-keybinding) this to use
+a different keybinding. The full list of supported binding
+actions is defined by the `Action` enum in [`keybindings.rs`](./libshpool/src/daemon/keybindings.rs).
+
 ### Shell Config
 
 ##### bash
