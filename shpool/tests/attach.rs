@@ -1277,16 +1277,10 @@ fn motd_pager() -> anyhow::Result<()> {
             let mut f = fs::File::create(&motd_file)?;
             f.write_all("MOTD_MSG\n".as_bytes())?;
         }
-        let config_tmpl = fs::read_to_string(support::testdata_file("motd_pager.toml.tmpl"))?;
-        let config_contents = config_tmpl.replace("TMP_MOTD_MSG_FILE", motd_file.to_str().unwrap());
         let config_file = tmp_dir_path.join("motd_pager.toml");
-        {
-            let mut f = fs::File::create(&config_file)?;
-            f.write_all(config_contents.as_bytes())?;
-        }
 
         // spawn a daemon based on our custom config
-        let daemon_proc = support::daemon::Proc::new(
+        let mut daemon_proc = support::daemon::Proc::new(
             &config_file,
             DaemonArgs {
                 extra_env: vec![(String::from("TERM"), String::from("xterm"))],
@@ -1294,6 +1288,18 @@ fn motd_pager() -> anyhow::Result<()> {
             },
         )
         .context("starting daemon proc")?;
+
+        // Update the config and wait for it to get picked up.
+        // Doing this after the daemon starts tests to make sure
+        // that we can handle dynamic config changes to the
+        // motd settings.
+        let config_tmpl = fs::read_to_string(support::testdata_file("motd_pager.toml.tmpl"))?;
+        let config_contents = config_tmpl.replace("TMP_MOTD_MSG_FILE", motd_file.to_str().unwrap());
+        {
+            let mut f = fs::File::create(&config_file)?;
+            f.write_all(config_contents.as_bytes())?;
+        }
+        daemon_proc.await_event("daemon-reload-config")?;
 
         let stdout_str = snapshot_attach_output(
             &daemon_proc,

@@ -93,10 +93,7 @@ impl Server {
             }
         });
 
-        let daily_messenger = Arc::new(show_motd::DailyMessenger::new(
-            config.get().motd.clone().unwrap_or_default(),
-            config.get().motd_args.clone(),
-        )?);
+        let daily_messenger = Arc::new(show_motd::DailyMessenger::new(config.clone())?);
         Ok(Arc::new(Server {
             config,
             shells,
