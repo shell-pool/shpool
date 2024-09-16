@@ -559,6 +559,7 @@ impl SessionInner {
         )));
 
         {
+            let _s = span!(Level::INFO, "initial_attach_lock(shell_to_client_ctl)").entered();
             let shell_to_client_ctl = self.shell_to_client_ctl.lock().unwrap();
             shell_to_client_ctl
                 .client_connection
@@ -622,6 +623,7 @@ impl SessionInner {
             // cows to come home.
             let c_done = child_done.load(Ordering::Acquire);
             {
+                let _s = span!(Level::INFO, "disconnect_lock(shell_to_client_ctl)").entered();
                 let shell_to_client_ctl = self.shell_to_client_ctl.lock().unwrap();
                 let send_res = shell_to_client_ctl.client_connection.send_timeout(if c_done {
                     let exit_status = child_exit_notifier
@@ -678,7 +680,7 @@ impl SessionInner {
                 .context("shutting down client stream")?;
         }
 
-        info!("bidi_stream: done child_done={}", c_done);
+        info!("done child_done={}", c_done);
         Ok(c_done)
     }
 

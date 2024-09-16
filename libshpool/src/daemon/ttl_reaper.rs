@@ -102,6 +102,7 @@ pub fn run(
                         continue;
                     }
 
+                    let _s = span!(Level::INFO, "lock(shells)").entered();
                     let mut shells = shells.lock().unwrap();
                     if let Some(sess) = shells.get(&reapable.session_name) {
                         if let Err(e) = sess.kill() {

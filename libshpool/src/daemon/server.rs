@@ -37,7 +37,7 @@ use shpool_protocol::{
     SessionMessageReply, SessionMessageRequest, SessionMessageRequestPayload, SessionStatus,
     VersionHeader,
 };
-use tracing::{error, info, instrument, span, trace, warn, Level};
+use tracing::{error, info, instrument, span, warn, Level};
 
 use crate::{
     config,
@@ -197,6 +197,7 @@ impl Server {
 
         let (child_exit_notifier, inner_to_stream, pager_ctl_slot, status) = {
             // we unwrap to propagate the poison as an unwind
+            let _s = span!(Level::INFO, "1_lock(shells)").entered();
             let mut shells = self.shells.lock().unwrap();
             info!("locked shells table");
 
@@ -381,6 +382,7 @@ impl Server {
                 if let Err(err) = self.hooks.on_shell_disconnect(&header.name) {
                     warn!("shell_disconnect hook: {:?}", err);
                 }
+                let _s = span!(Level::INFO, "2_lock(shells)").entered();
                 let mut shells = self.shells.lock().unwrap();
                 shells.remove(&header.name);
 
@@ -446,11 +448,11 @@ impl Server {
         let mut not_found_sessions = vec![];
         let mut not_attached_sessions = vec![];
         {
-            trace!("about to lock shells table 3");
+            let _s = span!(Level::INFO, "lock(shells)").entered();
             let shells = self.shells.lock().unwrap();
-            trace!("locked shells table 3");
             for session in request.sessions.into_iter() {
                 if let Some(s) = shells.get(&session) {
+                    let _s = span!(Level::INFO, "lock(shell_to_client_ctl)").entered();
                     let shell_to_client_ctl = s.shell_to_client_ctl.lock().unwrap();
                     shell_to_client_ctl
                         .client_connection
@@ -480,6 +482,7 @@ impl Server {
     fn handle_kill(&self, mut stream: UnixStream, request: KillRequest) -> anyhow::Result<()> {
         let mut not_found_sessions = vec![];
         {
+            let _s = span!(Level::INFO, "lock(shells)").entered();
             let mut shells = self.shells.lock().unwrap();
 
             let mut to_remove = Vec::with_capacity(request.sessions.len());
@@ -510,6 +513,7 @@ impl Server {
 
     #[instrument(skip_all)]
     fn handle_list(&self, mut stream: UnixStream) -> anyhow::Result<()> {
+        let _s = span!(Level::INFO, "lock(shells)").entered();
         let shells = self.shells.lock().unwrap();
 
         let sessions: anyhow::Result<Vec<Session>> = shells
@@ -544,11 +548,12 @@ impl Server {
         // create a slot to store our reply so we can do
         // our IO without the lock held.
         let reply = {
+            let _s = span!(Level::INFO, "lock(shells)").entered();
             let shells = self.shells.lock().unwrap();
             if let Some(session) = shells.get(&header.session_name) {
                 match header.payload {
                     SessionMessageRequestPayload::Resize(resize_request) => {
-                        info!("handling resize msg");
+                        let _s = span!(Level::INFO, "lock(pager_ctl)").entered();
                         let pager_ctl = session.pager_ctl.lock().unwrap();
                         if let Some(pager_ctl) = pager_ctl.as_ref() {
                             info!("resizing pager");
@@ -561,7 +566,8 @@ impl Server {
                                 .recv_timeout(SESSION_MSG_TIMEOUT)
                                 .context("recving tty size change ack from pager")?;
                         } else {
-                            info!("resizing shell->client");
+                            let _s =
+                                span!(Level::INFO, "resize_lock(shell_to_client_ctl)").entered();
                             let shell_to_client_ctl = session.shell_to_client_ctl.lock().unwrap();
                             shell_to_client_ctl
                                 .tty_size_change
@@ -576,7 +582,7 @@ impl Server {
                         SessionMessageReply::Resize(ResizeReply::Ok)
                     }
                     SessionMessageRequestPayload::Detach => {
-                        info!("handling detach msg");
+                        let _s = span!(Level::INFO, "detach_lock(shell_to_client_ctl)").entered();
                         let shell_to_client_ctl = session.shell_to_client_ctl.lock().unwrap();
                         shell_to_client_ctl
                             .client_connection
