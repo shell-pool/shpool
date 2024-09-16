@@ -1,4 +1,22 @@
 
+shpool (0.7.1) unstable; urgency=low
+
+  Added
+
+  * add span traces at lock() points
+
+  Fixed
+
+  * forward shell env to pager
+  * suppress prompt setup in screen restore
+
+  Other
+
+  * Better ssh config example
+  * reader thread -> shell_to_client thread
+
+ -- Shpool Authors <shpool-eng@google.com>  Mon, 16 Sep 2024 14:51:04 +0000
+
 shpool (0.7.0) unstable; urgency=low
 
   Added

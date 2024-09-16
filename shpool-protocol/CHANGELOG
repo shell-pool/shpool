@@ -1,0 +1,8 @@
+
+shpool-protocol (0.2.1) unstable; urgency=low
+
+  Other
+
+  * Better ssh config example
+
+ -- Shpool Authors <shpool-eng@google.com>  Mon, 16 Sep 2024 14:51:04 +0000
