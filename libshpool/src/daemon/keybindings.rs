@@ -29,7 +29,7 @@
 //!
 //! ```text
 //! sequence ::= chord
-//!            | chord chord
+//!            | chord ' ' chord
 //!
 //! chord ::= key
 //!         | key '-' chord
