@@ -1,9 +1,7 @@
 # Use: `cargo +nightly fmt`
-#
-# The standard devtools/rust/rustfmt.toml google rust format.
 
 edition = "2021"
-version = "Two"
+style_edition = "2021"
 use_small_heuristics = "Max"
 newline_style = "Unix"
 wrap_comments = true

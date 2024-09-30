@@ -66,7 +66,11 @@ where
             return self.nodes[0].value.is_some();
         }
 
-        if let TrieCursor::Match { is_partial, .. } = match_state { !is_partial } else { false }
+        if let TrieCursor::Match { is_partial, .. } = match_state {
+            !is_partial
+        } else {
+            false
+        }
     }
 
     /// Process a single token of input, returning the current state.
