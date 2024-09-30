@@ -54,7 +54,11 @@ impl ExitNotifier {
                     .cond
                     .wait_timeout_while(slot, t, |exit_status| exit_status.is_none())
                     .unwrap();
-                if wait_res.timed_out() { None } else { *exit_status }
+                if wait_res.timed_out() {
+                    None
+                } else {
+                    *exit_status
+                }
             }
             None => *self.cond.wait_while(slot, |exit_status| exit_status.is_none()).unwrap(),
         }

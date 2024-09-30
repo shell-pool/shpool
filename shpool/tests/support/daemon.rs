@@ -251,7 +251,11 @@ impl Proc {
     }
 
     pub fn proc_kill(&mut self) -> std::io::Result<()> {
-        if let Some(proc) = &mut self.proc { proc.kill() } else { Ok(()) }
+        if let Some(proc) = &mut self.proc {
+            proc.kill()
+        } else {
+            Ok(())
+        }
     }
 
     pub fn proc_wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
