@@ -45,13 +45,13 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Checkout repository
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+        uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938
       - name: Install Rust toolchain
         uses: moonrepo/setup-rust@e013866c4215f77c925f42f60257dec7dd18836e
         with:
           inherit-toolchain: true
           bins: cross
-      - uses: taiki-e/setup-cross-toolchain-action@cae290c908b85538356ba35acbdd9f7c9298152a
+      - uses: taiki-e/setup-cross-toolchain-action@92417c3484017b78b44195de2e0026e080f1e001
         with:
           target: ${{ matrix.target }}
         if: startsWith(matrix.os, 'ubuntu') && !contains(matrix.target, '-musl')
