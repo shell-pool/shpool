@@ -329,7 +329,7 @@ struct PagerProcGuard<'pager> {
     pager_exited: Arc<AtomicBool>,
 }
 
-impl<'pager> std::ops::Drop for PagerProcGuard<'pager> {
+impl std::ops::Drop for PagerProcGuard<'_> {
     fn drop(&mut self) {
         if self.pager_exited.load(Ordering::Relaxed) {
             // our work here is done
@@ -342,7 +342,7 @@ impl<'pager> std::ops::Drop for PagerProcGuard<'pager> {
     }
 }
 
-impl<'pager> PagerProcGuard<'pager> {
+impl PagerProcGuard<'_> {
     fn kill(&self) -> anyhow::Result<()> {
         let pid = if let shpool_pty::fork::Fork::Parent(pid, _) = self.pager_proc {
             *pid

@@ -135,7 +135,7 @@ pub struct AttachFlagsGuard<'fd> {
     old: Option<termios::Termios>,
 }
 
-impl<'fd> std::ops::Drop for AttachFlagsGuard<'fd> {
+impl std::ops::Drop for AttachFlagsGuard<'_> {
     fn drop(&mut self) {
         if let Some(old) = &self.old {
             if let Err(e) = termios::tcsetattr(self.fd, SetArg::TCSANOW, old) {

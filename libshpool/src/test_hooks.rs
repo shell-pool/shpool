@@ -62,7 +62,7 @@ impl<'a> ScopedEvent<'a> {
     }
 }
 
-impl<'a> std::ops::Drop for ScopedEvent<'a> {
+impl std::ops::Drop for ScopedEvent<'_> {
     fn drop(&mut self) {
         emit(self.event);
     }
