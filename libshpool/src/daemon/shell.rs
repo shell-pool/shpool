@@ -60,6 +60,10 @@ const REATTACH_RESIZE_DELAY: time::Duration = time::Duration::from_millis(50);
 // the inner loop.
 const SHELL_TO_CLIENT_POLL_MS: u16 = 100;
 
+// How long to wait before giving up while trying to talk to the
+// shell->client thread.
+const SHELL_TO_CLIENT_CTL_TIMEOUT: time::Duration = time::Duration::from_millis(300);
+
 /// Session represent a shell session
 #[derive(Debug)]
 pub struct Session {
@@ -564,15 +568,18 @@ impl SessionInner {
             let shell_to_client_ctl = self.shell_to_client_ctl.lock().unwrap();
             shell_to_client_ctl
                 .client_connection
-                .send(ClientConnectionMsg::New(ClientConnection {
-                    sink: Arc::clone(&client_stream_m),
-                    size: init_tty_size,
-                    stream: shell_to_client_client_stream,
-                }))
+                .send_timeout(
+                    ClientConnectionMsg::New(ClientConnection {
+                        sink: Arc::clone(&client_stream_m),
+                        size: init_tty_size,
+                        stream: shell_to_client_client_stream,
+                    }),
+                    SHELL_TO_CLIENT_CTL_TIMEOUT,
+                )
                 .context("attaching new client stream to shell->client thread")?;
             let status = shell_to_client_ctl
                 .client_connection_ack
-                .recv()
+                .recv_timeout(SHELL_TO_CLIENT_CTL_TIMEOUT)
                 .context("waiting for client connection ack")?;
             info!("client connection status={:?}", status);
         }
@@ -635,7 +642,7 @@ impl SessionInner {
                 } else {
                     info!("telling shell->client to disconnect without reaping");
                     ClientConnectionMsg::Disconnect
-                }, Duration::from_millis((SHELL_TO_CLIENT_POLL_MS + (SHELL_TO_CLIENT_POLL_MS >> 1)) as u64));
+                }, SHELL_TO_CLIENT_CTL_TIMEOUT);
 
                 if let Err(send_timeout_err) = send_res {
                     info!("failed to tell shell->client to disconnect: {:?}", send_timeout_err);
@@ -644,7 +651,7 @@ impl SessionInner {
                     // to handle that ourselves
                     client_stream.shutdown(net::Shutdown::Both)?;
                 } else {
-                    let status = shell_to_client_ctl.client_connection_ack.recv()
+                    let status = shell_to_client_ctl.client_connection_ack.recv_timeout(SHELL_TO_CLIENT_CTL_TIMEOUT)
                         .context("waiting for client connection ack")?;
                     info!("detached from shell->client, status = {:?}", status);
                 }
@@ -925,11 +932,11 @@ impl SessionInner {
         let shell_to_client_ctl = self.shell_to_client_ctl.lock().unwrap();
         shell_to_client_ctl
             .client_connection
-            .send(ClientConnectionMsg::Disconnect)
+            .send_timeout(ClientConnectionMsg::Disconnect, SHELL_TO_CLIENT_CTL_TIMEOUT)
             .context("signaling client detach to shell->client thread")?;
         let status = shell_to_client_ctl
             .client_connection_ack
-            .recv()
+            .recv_timeout(SHELL_TO_CLIENT_CTL_TIMEOUT)
             .context("waiting for client connection ack")?;
 
         info!("action detach, status={:?}", status);
