@@ -6,7 +6,7 @@ jobs:
     name: cargo test --all-features
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938
       - uses: moonrepo/setup-rust@e013866c4215f77c925f42f60257dec7dd18836e
         with:
           inherit-toolchain: true
@@ -26,7 +26,7 @@ jobs:
   #   name: cargo +nightly miri test
   #   runs-on: ubuntu-22.04
   #   steps:
-  #     - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+  #     - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938
   #     - uses: moonrepo/setup-rust@b8edcc56aab474d90c7cf0bb8beeaf8334c15e9f
   #       with:
   #         components: miri
@@ -38,7 +38,7 @@ jobs:
     name: cargo +nightly fmt -- --check
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938
       - uses: moonrepo/setup-rust@e013866c4215f77c925f42f60257dec7dd18836e
         with:
           components: rustfmt
@@ -50,7 +50,7 @@ jobs:
     name: cargo +nightly cranky --all-targets -- -D warnings
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938
       - uses: moonrepo/setup-rust@e013866c4215f77c925f42f60257dec7dd18836e
         with:
           components: clippy
@@ -63,7 +63,7 @@ jobs:
     name: cargo deny --all-features check licenses
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      - uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938
       - name: Install Rust toolchain
         uses: moonrepo/setup-rust@e013866c4215f77c925f42f60257dec7dd18836e
         with:
