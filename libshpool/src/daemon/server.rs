@@ -199,13 +199,13 @@ impl Server {
             // we unwrap to propagate the poison as an unwind
             let _s = span!(Level::INFO, "1_lock(shells)").entered();
             let mut shells = self.shells.lock().unwrap();
-            info!("locked shells table");
 
             let mut status = AttachStatus::Attached { warnings: warnings.clone() };
             if let Some(session) = shells.get(&header.name) {
                 info!("found entry for '{}'", header.name);
                 if let Ok(mut inner) = session.inner.try_lock() {
-                    info!("session '{}': locked inner", header.name);
+                    let _s = span!(Level::INFO, "aquired_lock(session.inner)", s = header.name)
+                        .entered();
                     // We have an existing session in our table, but the subshell
                     // proc might have exited in the meantime, for example if the
                     // user typed `exit` right before the connection dropped there
@@ -455,7 +455,7 @@ impl Server {
             let shells = self.shells.lock().unwrap();
             for session in request.sessions.into_iter() {
                 if let Some(s) = shells.get(&session) {
-                    let _s = span!(Level::INFO, "lock(shell_to_client_ctl)").entered();
+                    let _s = span!(Level::INFO, "lock(shell_to_client_ctl)", s = session).entered();
                     let shell_to_client_ctl = s.shell_to_client_ctl.lock().unwrap();
                     shell_to_client_ctl
                         .client_connection
