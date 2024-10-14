@@ -1,4 +1,18 @@
 
+shpool (0.8.0) unstable; urgency=low
+
+  Fixed
+
+  * style
+  * handle dyn config updates to motd settings
+  * [**breaking**] exit success for graceful detaches
+  * deadlock when shell->client thread stops
+  * new lifetime lints
+  * add space to keybindings grammar
+  * suppress prompt sentinels from history
+
+ -- Shpool Authors <shpool-eng@google.com>  Mon, 14 Oct 2024 20:39:40 +0000
+
 shpool (0.7.1) unstable; urgency=low
 
   Added
