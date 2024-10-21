@@ -57,7 +57,7 @@ jobs:
         if: startsWith(matrix.os, 'ubuntu') && !contains(matrix.target, '-musl')
       - run: echo "RUSTFLAGS=${RUSTFLAGS} -C target-feature=+crt-static" >> "${GITHUB_ENV}"
         if: endsWith(matrix.target, 'windows-msvc')
-      - uses: taiki-e/upload-rust-binary-action@3bbb07bb7f438d0fdf6ce5118bdf9e6e21c0b2a5
+      - uses: taiki-e/upload-rust-binary-action@3a8b5e35eb5fea810221264dfde09e920c1d5310
         with:
           bin: shpool
           target: ${{ matrix.target }}
