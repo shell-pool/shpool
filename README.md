@@ -300,3 +300,7 @@ as `shpool`.
 ## Hacking
 
 For information on how to develop shpool, see [HACKING.md](./HACKING.md).
+
+## Release Notes
+
+...can be found in [debian/changelog](./debian/changelog).
