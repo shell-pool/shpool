@@ -23,7 +23,7 @@ jobs:
           app-id: ${{ secrets.RELEASE_PLZ_APP_ID }} # <-- GitHub App ID secret name
           private-key: ${{ secrets.RELEASE_PLZ_APP_PRIVATE_KEY }} # <-- GitHub App private key secret name
       - name: Checkout repository
-        uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
       - name: Install Rust toolchain
@@ -32,7 +32,7 @@ jobs:
           inherit-toolchain: true
           bins: cross
       - name: Run release-plz
-        uses: MarcoIeni/release-plz-action@ede2f28fa44b20604b878348dda4a27f21a434da
+        uses: MarcoIeni/release-plz-action@fff938ea2923fdfa35797fff63537b00f30fe6f9
         env:
           GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
