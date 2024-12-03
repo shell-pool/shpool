@@ -124,9 +124,8 @@ pub struct SessionInner {
 /// shell->client thread.
 pub struct ClientConnection {
     /// All output data should be written to this sink rather than
-    /// directly to the unix stream. The mutex makes sure that we don't
-    /// accidentally interleave with heartbeat frames.
-    sink: Arc<Mutex<io::BufWriter<UnixStream>>>,
+    /// directly to the unix stream.
+    sink: io::BufWriter<UnixStream>,
     /// The size of the client tty.
     size: TtySize,
     /// The raw unix socket stream. The shell->client thread should
@@ -188,6 +187,9 @@ pub struct ReaderArgs {
     pub client_connection_ack: crossbeam_channel::Sender<ClientConnectionStatus>,
     pub tty_size_change: crossbeam_channel::Receiver<TtySize>,
     pub tty_size_change_ack: crossbeam_channel::Sender<()>,
+    pub heartbeat: crossbeam_channel::Receiver<()>,
+    // true if the client is still live, false if it has hung up on us
+    pub heartbeat_ack: crossbeam_channel::Sender<bool>,
 }
 
 impl SessionInner {
@@ -263,7 +265,8 @@ impl SessionInner {
                             Ok(ClientConnectionMsg::New(conn)) => {
                                 info!("got new connection (rows={}, cols={})", conn.size.rows, conn.size.cols);
                                 do_reattach = true;
-                                let ack = if let ClientConnectionMsg::New(old_conn) = client_conn {
+                                let ack = if let ClientConnectionMsg::New(mut old_conn) = client_conn {
+                                    Self::write_exit_chunk(&mut old_conn.sink, 0);
                                     old_conn.stream.shutdown(net::Shutdown::Both)?;
                                     ClientConnectionStatus::Replaced
                                 } else {
@@ -298,7 +301,7 @@ impl SessionInner {
                             Ok(ClientConnectionMsg::Disconnect) => {
                                 let ack = if let ClientConnectionMsg::New(mut old_conn) = client_conn {
                                     info!("disconnect, shutting down client stream");
-                                    Self::write_exit_chunk(&mut old_conn.stream, 0);
+                                    Self::write_exit_chunk(&mut old_conn.sink, 0);
                                     old_conn.stream.shutdown(net::Shutdown::Both)?;
                                     ClientConnectionStatus::Detached
                                 } else {
@@ -317,7 +320,7 @@ impl SessionInner {
 
                                     // write an exit status frame so the attach process
                                     // can exit with the same exit code as the child shell
-                                    Self::write_exit_chunk(&mut old_conn.stream, exit_status);
+                                    Self::write_exit_chunk(&mut old_conn.sink, exit_status);
                                     old_conn.stream.shutdown(net::Shutdown::Both)?;
 
                                     ClientConnectionStatus::Detached
@@ -362,6 +365,30 @@ impl SessionInner {
                             }
                         }
                     }
+                    recv(args.heartbeat) -> _ => {
+                        let client_present = if let ClientConnectionMsg::New(conn) = &mut client_conn {
+                            let chunk = Chunk { kind: ChunkKind::Heartbeat, buf: &[] };
+                            match chunk.write_to(&mut conn.sink).and_then(|_| conn.sink.flush()) {
+                                Ok(_) => {
+                                    trace!("wrote heartbeat");
+                                    true
+                                }
+                                Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {
+                                    trace!("client hangup: {:?}", e);
+                                    false
+                                }
+                                Err(e) => {
+                                    error!("unexpected IO error while writing heartbeat: {}", e);
+                                    return Err(e).context("writing heartbeat")?;
+                                }
+                            }
+                        } else {
+                            false
+                        };
+
+                        args.heartbeat_ack.send(client_present)
+                            .context("sending heartbeat ack")?;
+                    }
 
                     // make this select non-blocking so we spend most of our time parked
                     // in poll
@@ -373,9 +400,13 @@ impl SessionInner {
                     if resize_cmd.when.saturating_duration_since(time::Instant::now())
                         == time::Duration::ZERO
                     {
-                        resize_cmd
-                            .size
-                            .set_fd(pty_master.raw_fd().ok_or(anyhow!("no master fd"))?)?;
+                        let status = pty_master
+                            .raw_fd()
+                            .ok_or(anyhow!("no master fd"))
+                            .and_then(|fd| resize_cmd.size.set_fd(fd));
+                        if let Err(e) = status {
+                            warn!("error resizing pty: {}", e);
+                        }
                         executed_resize = true;
                         info!(
                             "resized fd (rows={}, cols={})",
@@ -411,24 +442,27 @@ impl SessionInner {
                         (_, _) => vec![],
                     };
                     if let (true, ClientConnectionMsg::New(conn)) =
-                        (!restore_buf.is_empty(), &client_conn)
+                        (!restore_buf.is_empty(), &mut client_conn)
                     {
                         trace!("restore chunk='{}'", String::from_utf8_lossy(&restore_buf[..]));
                         // send the restore buffer, broken up into chunks so that we don't make
                         // the client allocate too much
-                        let mut s = conn.sink.lock().unwrap();
                         for block in restore_buf.as_slice().chunks(consts::BUF_SIZE) {
                             let chunk = Chunk { kind: ChunkKind::Data, buf: block };
 
-                            if let Err(err) = chunk.write_to(&mut *s) {
+                            if let Err(err) = chunk.write_to(&mut conn.sink) {
                                 warn!("err writing session-restore buf: {:?}", err);
                             }
                         }
-                        if let Err(err) = s.flush() {
+                        if let Err(err) = conn.sink.flush() {
                             warn!("err flushing session-restore: {:?}", err);
                         }
                     }
                 }
+
+                // TODO(ethan): what if poll times out on a tick when we have just
+                // set up a restore chunk? It looks like we will just drop the
+                // data as things are now.
 
                 // Block until the shell has some data for us so we can be sure our reads
                 // always succeed. We don't want to end up blocked forever on a read while
@@ -483,23 +517,22 @@ impl SessionInner {
                 }
 
                 if let (ClientConnectionMsg::New(conn), true) =
-                    (&client_conn, has_seen_prompt_sentinel)
+                    (&mut client_conn, has_seen_prompt_sentinel)
                 {
                     let chunk = Chunk { kind: ChunkKind::Data, buf };
-
-                    let mut s = conn.sink.lock().unwrap();
 
                     // If we still need to do an initial motd dump, it means we have just finished
                     // dropping all the prompt setup stuff, we should dump the motd now before we
                     // write the first chunk.
                     if needs_initial_motd_dump {
                         needs_initial_motd_dump = false;
-                        if let Err(e) = daily_messenger.dump(&mut *s, &term_db) {
+                        if let Err(e) = daily_messenger.dump(&mut conn.sink, &term_db) {
                             warn!("Error handling clear: {:?}", e);
                         }
                     }
 
-                    let write_result = chunk.write_to(&mut *s).and_then(|_| s.flush());
+                    let write_result =
+                        chunk.write_to(&mut conn.sink).and_then(|_| conn.sink.flush());
                     if let Err(err) = write_result {
                         info!("client_stream write err, assuming hangup: {:?}", err);
                         reset_client_conn = true;
@@ -518,10 +551,10 @@ impl SessionInner {
             .spawn(move || log_if_error("error in shell->client", closure()))?)
     }
 
-    fn write_exit_chunk<W: io::Write>(mut stream: W, status: i32) {
+    fn write_exit_chunk<W: io::Write>(mut sink: W, status: i32) {
         let status_buf: [u8; 4] = status.to_le_bytes();
         let chunk = Chunk { kind: ChunkKind::ExitStatus, buf: status_buf.as_slice() };
-        match chunk.write_to(&mut stream).and_then(|_| stream.flush()) {
+        match chunk.write_to(&mut sink).and_then(|_| sink.flush()) {
             Ok(_) => {
                 trace!("wrote exit status chunk");
             }
@@ -559,9 +592,8 @@ impl SessionInner {
             client_stream.try_clone().context("creating client->shell client stream")?;
         let shell_to_client_client_stream =
             client_stream.try_clone().context("creating shell->client client stream handle")?;
-        let client_stream_m = Arc::new(Mutex::new(io::BufWriter::new(
-            client_stream.try_clone().context("wrapping stream in bufwriter")?,
-        )));
+        let output_sink =
+            io::BufWriter::new(client_stream.try_clone().context("wrapping stream in bufwriter")?);
 
         {
             let _s = span!(Level::INFO, "initial_attach_lock(shell_to_client_ctl)").entered();
@@ -570,7 +602,7 @@ impl SessionInner {
                 .client_connection
                 .send_timeout(
                     ClientConnectionMsg::New(ClientConnection {
-                        sink: Arc::clone(&client_stream_m),
+                        sink: output_sink,
                         size: init_tty_size,
                         stream: shell_to_client_client_stream,
                     }),
@@ -600,8 +632,7 @@ impl SessionInner {
             // Send a steady stream of heartbeats to the client
             // so that if the connection unexpectedly goes
             // down, we detect it immediately.
-            let heartbeat_h = self.spawn_heartbeat(
-                s, conn_id, &stop, &client_stream_m)?;
+            let heartbeat_h = self.spawn_heartbeat(s, conn_id, &stop)?;
 
             // poll the pty master fd to see if the child
             // shell has exited.
@@ -676,7 +707,6 @@ impl SessionInner {
                 Err(panic_err) => std::panic::resume_unwind(panic_err),
             }
             debug!("joined all threads");
-
 
             Ok(())
         }).context("outer thread scope")?;
@@ -843,7 +873,6 @@ impl SessionInner {
         scope: &'scope thread::Scope<'scope, '_>,
         conn_id: usize,
         stop: &'scope AtomicBool,
-        client_stream_m: &'scope Arc<Mutex<io::BufWriter<UnixStream>>>,
     ) -> anyhow::Result<thread::ScopedJoinHandle<'scope, anyhow::Result<()>>> {
         thread::Builder::new()
             .name(format!("heartbeat({})", self.name))
@@ -858,20 +887,39 @@ impl SessionInner {
                     }
 
                     thread::sleep(consts::HEARTBEAT_DURATION);
-                    let chunk = Chunk { kind: ChunkKind::Heartbeat, buf: &[] };
                     {
-                        let mut s = client_stream_m.lock().unwrap();
-                        match chunk.write_to(&mut *s).and_then(|_| s.flush()) {
-                            Ok(_) => {
-                                trace!("wrote heartbeat");
-                            }
-                            Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {
-                                trace!("client hangup: {:?}", e);
-                                return Ok(());
+                        let shell_to_client_ctl = self.shell_to_client_ctl.lock().unwrap();
+                        match shell_to_client_ctl
+                            .heartbeat
+                            .send_timeout((), SHELL_TO_CLIENT_CTL_TIMEOUT)
+                        {
+                            // If the channel is disconnected, it means that the shell exited and
+                            // the shell->client process exited cleanly. We should not raise a
+                            // ruckus.
+                            Err(crossbeam_channel::SendTimeoutError::Disconnected(_)) => {
+                                return Ok(())
                             }
                             Err(e) => {
-                                return Err(e).context("writing heartbeat")?;
+                                return Err(e)
+                                    .context("requesting heartbeat from shell->client thread")
                             }
+                            _ => {}
+                        }
+                        let client_present = match shell_to_client_ctl
+                            .heartbeat_ack
+                            .recv_timeout(SHELL_TO_CLIENT_CTL_TIMEOUT)
+                        {
+                            // If the channel is disconnected, it means that the shell exited and
+                            // the shell->client process exited cleanly. We should not raise a
+                            // ruckus.
+                            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return Ok(()),
+                            Err(e) => return Err(e).context("waiting for heartbeat ack"),
+                            Ok(client_present) => client_present,
+                        };
+                        if !client_present {
+                            // Bail from the thread to get the rest of the
+                            // client threads to clean themselves up.
+                            return Ok(());
                         }
                     }
                 }
@@ -966,6 +1014,13 @@ pub struct ReaderCtl {
     /// A control channel for the shell->client thread. Acks the completion of a
     /// spool resize.
     pub tty_size_change_ack: crossbeam_channel::Receiver<()>,
+
+    // A control channel telling the shell->client thread to issue
+    // a heartbeat to check if the client is still listening.
+    pub heartbeat: crossbeam_channel::Sender<()>,
+    // True if the client is still listening, false if it has hung up
+    // on us.
+    pub heartbeat_ack: crossbeam_channel::Receiver<bool>,
 }
 
 /// Given a buffer, a length after which the data is not valid, a list of
