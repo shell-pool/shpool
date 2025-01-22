@@ -40,7 +40,7 @@ motd = { version = "0.2.2", default-features = false, features = [] } # getting 
 termini = "1.0.0" # terminfo database
 tempfile = "3" # RAII tmp files
 strip-ansi-escapes = "0.2.0" # cleaning up strings for pager display
-notify = "6" # watch config file for updates
+notify = "8" # watch config file for updates
 libproc = "0.14.8" # sniffing shells by examining the subprocess
 daemonize = "0.5" # autodaemonization
 shpool-protocol = { version = "0.2.1", path = "../shpool-protocol" } # client-server protocol
