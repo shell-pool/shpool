@@ -139,7 +139,7 @@ impl Server {
 
         // advertize our protocol version to the client so that it can
         // warn about mismatches
-        protocol::encode_to(
+        match protocol::encode_to(
             &VersionHeader {
                 // We allow fake version to be injected for ease of testing.
                 // Otherwise we would have to resort to some heinous build
@@ -150,8 +150,19 @@ impl Server {
                 },
             },
             &mut stream,
-        )
-        .context("writing version header")?;
+        ) {
+            Ok(_) => {}
+            Err(e)
+                if e.root_cause()
+                    .downcast_ref::<io::Error>()
+                    .map(|ioe| ioe.kind() == io::ErrorKind::BrokenPipe)
+                    .unwrap_or(false) =>
+            {
+                info!("broken pipe while writing version, likely just a daemon presence probe");
+                return Ok(());
+            }
+            Err(e) => return Err(e).context("while writing version"),
+        }
 
         let header = parse_connect_header(&mut stream).context("parsing connect header")?;
 
@@ -239,8 +250,8 @@ impl Server {
                         Some(exit_status) => {
                             // the channel is closed so we know the subshell exited
                             info!(
-                                "stale inner={:?}, (child exited with status {}) clobbering with new subshell",
-                                inner, exit_status
+                                "stale inner, (child exited with status {}) clobbering with new subshell",
+                                exit_status
                             );
                             status = AttachStatus::Created { warnings };
                         }
@@ -378,7 +389,7 @@ impl Server {
                     error!("error shuffling bytes: {:?}", e);
                 }
             }
-            info!("bidi stream loop finished");
+            info!("bidi stream loop finished child_done={}", child_done);
 
             if child_done {
                 info!("'{}' exited, removing from session table", header.name);
@@ -732,27 +743,55 @@ impl Server {
         // spawn a background thread to reap the shell when it exits
         // and notify about the exit by closing a channel.
         let child_exit_notifier = Arc::new(ExitNotifier::new());
-        let waitable_child = fork.clone();
+
+        // The `fork` object logically has two parts, the child pid that serves
+        // as a handle to the child process, and the pty fd which allows us to
+        // do IO on it. The child watcher thread only needs the child pid.
+        //
+        // Just cloning the fork and directly calling wait_for_exit() on it would
+        // be simpler, but it would be wrong because then the destructor for the
+        // cloned fork object would close the pty fd earlier than we want as the
+        // child watcher thread exits. This can cause the shell->client thread
+        // to read the wrong file (for example, the config file contents if the
+        // config watcher reloads).
+        let waitable_child_pid = fork.child_pid().ok_or(anyhow!("missing child pid"))?;
         let session_name = header.name.clone();
         let notifiable_child_exit_notifier = Arc::clone(&child_exit_notifier);
         thread::spawn(move || {
             let _s = span!(Level::INFO, "child_watcher", s = session_name, cid = conn_id).entered();
 
-            match waitable_child.wait_for_exit() {
-                Ok((_, Some(exit_status))) => {
-                    info!("child exited with status {}", exit_status);
-                    notifiable_child_exit_notifier.notify_exit(exit_status);
-                }
-                Ok((_, None)) => {
-                    info!("child exited without status, using 1");
-                    notifiable_child_exit_notifier.notify_exit(1);
-                }
-                Err(e) => {
-                    info!("error waiting on child, using exit status 1: {:?}", e);
-                    notifiable_child_exit_notifier.notify_exit(1);
+            let mut err = None;
+            let mut status = 0;
+            let mut unpacked_status = None;
+            loop {
+                // Saftey: all basic ffi, the pid is valid before this returns.
+                unsafe {
+                    match libc::waitpid(waitable_child_pid, &mut status, 0) {
+                        0 => continue,
+                        -1 => {
+                            err = Some("waitpid failed");
+                            break;
+                        }
+                        _ => {
+                            if libc::WIFEXITED(status) {
+                                unpacked_status = Some(libc::WEXITSTATUS(status));
+                            }
+                            break;
+                        }
+                    }
                 }
             }
-            info!("reaped child shell: {:?}", waitable_child);
+            if let Some(status) = unpacked_status {
+                info!("child exited with status {}", status);
+                notifiable_child_exit_notifier.notify_exit(status);
+            } else {
+                if let Some(e) = err {
+                    info!("child exited without status, using 1: {:?}", e);
+                } else {
+                    info!("child exited without status, using 1");
+                }
+                notifiable_child_exit_notifier.notify_exit(1);
+            }
         });
 
         // Inject the prompt prefix, if any. For custom commands, avoid doing this
@@ -776,11 +815,16 @@ impl Server {
         let (tty_size_change_tx, tty_size_change_rx) = crossbeam_channel::bounded(0);
         let (tty_size_change_ack_tx, tty_size_change_ack_rx) = crossbeam_channel::bounded(0);
 
+        let (heartbeat_tx, heartbeat_rx) = crossbeam_channel::bounded(0);
+        let (heartbeat_ack_tx, heartbeat_ack_rx) = crossbeam_channel::bounded(0);
+
         let shell_to_client_ctl = Arc::new(Mutex::new(shell::ReaderCtl {
             client_connection: client_connection_tx,
             client_connection_ack: client_connection_ack_rx,
             tty_size_change: tty_size_change_tx,
             tty_size_change_ack: tty_size_change_ack_rx,
+            heartbeat: heartbeat_tx,
+            heartbeat_ack: heartbeat_ack_rx,
         }));
         let mut session_inner = shell::SessionInner {
             name: header.name.clone(),
@@ -813,6 +857,8 @@ impl Server {
                 client_connection_ack: client_connection_ack_tx,
                 tty_size_change: tty_size_change_rx,
                 tty_size_change_ack: tty_size_change_ack_tx,
+                heartbeat: heartbeat_rx,
+                heartbeat_ack: heartbeat_ack_tx,
             })?);
 
         if let Some(ttl_secs) = header.ttl_secs {
