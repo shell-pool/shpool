@@ -1,11 +1,7 @@
 use std::{
     fmt::Write,
     io::Read,
-    os::unix::{
-        io::{AsRawFd, FromRawFd},
-        net::UnixListener,
-        process::CommandExt as _,
-    },
+    os::unix::{io::AsRawFd, net::UnixListener, process::CommandExt as _},
     path,
     process::{Command, Stdio},
     time,
@@ -80,8 +76,7 @@ fn systemd_activation() -> anyhow::Result<()> {
 
         let (parent_stderr, child_stderr) =
             nix::unistd::pipe().context("creating pipe to collect stderr")?;
-        // Safety: this is a test
-        let child_stderr_pipe = unsafe { Stdio::from_raw_fd(child_stderr) };
+        let child_stderr_pipe = Stdio::from(child_stderr);
         let mut cmd = Command::new(support::shpool_bin()?);
         cmd.stdout(Stdio::piped())
             .stderr(child_stderr_pipe)
@@ -147,8 +142,8 @@ fn systemd_activation() -> anyhow::Result<()> {
         nix::sys::wait::waitpid(child_pid, None).context("reaping daemon")?;
 
         let mut stderr_buf: Vec<u8> = vec![0; 1024 * 8];
-        let len =
-            nix::unistd::read(parent_stderr, &mut stderr_buf[..]).context("reading stderr")?;
+        let len = nix::unistd::read(parent_stderr.as_raw_fd(), &mut stderr_buf[..])
+            .context("reading stderr")?;
         let stderr = String::from_utf8_lossy(&stderr_buf[..len]);
         assert!(stderr.contains("using systemd activation socket"));
 
