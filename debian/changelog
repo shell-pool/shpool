@@ -1,4 +1,13 @@
 
+shpool (0.8.2) unstable; urgency=low
+
+  Other
+
+  * update Cargo.lock dependencies
+  * upgrade notify crate (#190)
+
+ -- Shpool Authors <shpool-eng@google.com>  Fri, 24 Jan 2025 19:29:30 +0000
+
 shpool (0.8.1) unstable; urgency=low
 
   Fixed
