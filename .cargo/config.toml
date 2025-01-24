@@ -1,0 +1,3 @@
+# use MSRV aware resolver
+[resolver]
+incompatible-rust-versions = "fallback"

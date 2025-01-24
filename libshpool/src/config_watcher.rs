@@ -321,21 +321,18 @@ impl<Handler> ConfigWatcherInner<Handler> {
                 self.paths.drain().map(|(path, (watched_path, _))| (path, watched_path)).collect()
             }
         };
-        rewatch_paths
-            .into_iter()
-            .map(|(path, watched_path)| {
-                if let Err(err) = self.watcher.unwatch(&watched_path) {
-                    // error sometimes is expected if the watched_path was simply removed, in that
-                    // case notify will automatically remove the watch.
-                    error!("error unwatch {:?}", err);
-                } else {
-                    debug!("unwatched {}", watched_path.display());
-                }
-                watch_and_add(&mut self.watcher, self.paths.entry(path))
-                    .map_err(|err| error!("Failed to add watch: {:?}", err))
-                    .unwrap_or(true)
-            })
-            .any(|reload| reload)
+        rewatch_paths.into_iter().any(|(path, watched_path)| {
+            if let Err(err) = self.watcher.unwatch(&watched_path) {
+                // error sometimes is expected if the watched_path was simply removed, in that
+                // case notify will automatically remove the watch.
+                error!("error unwatch {:?}", err);
+            } else {
+                debug!("unwatched {}", watched_path.display());
+            }
+            watch_and_add(&mut self.watcher, self.paths.entry(path))
+                .map_err(|err| error!("Failed to add watch: {:?}", err))
+                .unwrap_or(true)
+        })
     }
 }
 
