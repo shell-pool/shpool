@@ -92,7 +92,7 @@ impl TestHookServer {
         for _ in 0..12 {
             {
                 let clients = self.clients.lock().unwrap();
-                if clients.len() > 0 {
+                if !clients.is_empty() {
                     return Ok(());
                 }
             }

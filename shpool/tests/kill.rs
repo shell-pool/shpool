@@ -1,3 +1,5 @@
+#![allow(clippy::literal_string_with_formatting_args)]
+
 use std::{env, process::Command};
 
 use anyhow::Context;
@@ -104,10 +106,10 @@ fn single_attached() -> anyhow::Result<()> {
         assert!(out.status.success());
 
         let stdout = String::from_utf8_lossy(&out.stdout[..]);
-        assert!(stdout.len() == 0);
+        assert!(stdout.is_empty());
 
         let stderr = String::from_utf8_lossy(&out.stderr[..]);
-        assert!(stderr.len() == 0);
+        assert!(stderr.is_empty());
 
         Ok(())
     })
@@ -136,10 +138,10 @@ fn multiple_attached() -> anyhow::Result<()> {
         assert!(out.status.success());
 
         let stdout = String::from_utf8_lossy(&out.stdout[..]);
-        assert!(stdout.len() == 0);
+        assert!(stdout.is_empty());
 
         let stderr = String::from_utf8_lossy(&out.stderr[..]);
-        assert!(stderr.len() == 0);
+        assert!(stderr.is_empty());
 
         Ok(())
     })
@@ -169,10 +171,10 @@ fn reattach_after_kill() -> anyhow::Result<()> {
         assert!(out.status.success());
 
         let stdout = String::from_utf8_lossy(&out.stdout[..]);
-        assert!(stdout.len() == 0);
+        assert!(stdout.is_empty());
 
         let stderr = String::from_utf8_lossy(&out.stderr[..]);
-        assert!(stderr.len() == 0);
+        assert!(stderr.is_empty());
 
         waiter.wait_event("daemon-handle-kill-removed-shells")?;
         waiter.wait_event("daemon-bidi-stream-done")?;
@@ -210,10 +212,10 @@ fn single_detached() -> anyhow::Result<()> {
         assert!(out.status.success());
 
         let stdout = String::from_utf8_lossy(&out.stdout[..]);
-        assert!(stdout.len() == 0);
+        assert!(stdout.is_empty());
 
         let stderr = String::from_utf8_lossy(&out.stderr[..]);
-        assert!(stderr.len() == 0);
+        assert!(stderr.is_empty());
 
         Ok(())
     })
@@ -248,10 +250,10 @@ fn multiple_detached() -> anyhow::Result<()> {
         assert!(out.status.success());
 
         let stdout = String::from_utf8_lossy(&out.stdout[..]);
-        assert!(stdout.len() == 0);
+        assert!(stdout.is_empty());
 
         let stderr = String::from_utf8_lossy(&out.stderr[..]);
-        assert!(stderr.len() == 0);
+        assert!(stderr.is_empty());
 
         Ok(())
     })
@@ -286,10 +288,10 @@ fn multiple_mixed() -> anyhow::Result<()> {
         assert!(out.status.success());
 
         let stdout = String::from_utf8_lossy(&out.stdout[..]);
-        assert!(stdout.len() == 0);
+        assert!(stdout.is_empty());
 
         let stderr = String::from_utf8_lossy(&out.stderr[..]);
-        assert!(stderr.len() == 0);
+        assert!(stderr.is_empty());
 
         Ok(())
     })

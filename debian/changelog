@@ -1,4 +1,12 @@
 
+shpool (0.8.1) unstable; urgency=low
+
+  Fixed
+
+  * reduce deadlock potential in shell->client
+
+ -- Shpool Authors <shpool-eng@google.com>  Wed, 22 Jan 2025 16:54:09 +0000
+
 shpool (0.8.0) unstable; urgency=low
 
   Fixed
