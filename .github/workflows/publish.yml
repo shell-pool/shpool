@@ -32,7 +32,7 @@ jobs:
           inherit-toolchain: true
           bins: cross
       - name: Run release-plz
-        uses: MarcoIeni/release-plz-action@ca8762285a5dc0c220cb4a7896c9986ff6c97ecf
+        uses: MarcoIeni/release-plz-action@608dd7882102f11581db9edb9ce790d2bab5c995
         env:
           GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
