@@ -205,7 +205,7 @@ pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> an
             .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
             .with_writer(Mutex::new(file))
             .init();
-    } else if let Commands::Daemon { .. } = args.command {
+    } else if let Commands::Daemon = args.command {
         tracing_subscriber::fmt()
             .with_max_level(trace_level)
             .with_thread_ids(true)
