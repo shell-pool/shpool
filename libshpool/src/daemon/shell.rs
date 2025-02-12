@@ -311,7 +311,7 @@ impl SessionInner {
                                 client_conn = ClientConnectionMsg::Disconnect;
 
                                 args.client_connection_ack.send(ack)
-                                    .context("sending client connection ack")?;
+                                    .context("sending client disconnect ack")?;
                             }
                             Ok(ClientConnectionMsg::DisconnectExit(exit_status)) => {
                                 let ack = if let ClientConnectionMsg::New(mut old_conn) = client_conn {
@@ -331,7 +331,7 @@ impl SessionInner {
                                     ClientConnectionStatus::DetachNone
                                 };
                                 args.client_connection_ack.send(ack)
-                                    .context("sending client connection ack")?;
+                                    .context("sending client disconnect exit ack")?;
 
                                 return Ok(());
                             }
@@ -612,7 +612,7 @@ impl SessionInner {
             let status = shell_to_client_ctl
                 .client_connection_ack
                 .recv_timeout(SHELL_TO_CLIENT_CTL_TIMEOUT)
-                .context("waiting for client connection ack")?;
+                .context("waiting for client connection ack (1)")?;
             info!("client connection status={:?}", status);
         }
 
@@ -683,7 +683,7 @@ impl SessionInner {
                     client_stream.shutdown(net::Shutdown::Both)?;
                 } else {
                     let status = shell_to_client_ctl.client_connection_ack.recv_timeout(SHELL_TO_CLIENT_CTL_TIMEOUT)
-                        .context("waiting for client connection ack")?;
+                        .context("waiting for client connection ack (2)")?;
                     info!("detached from shell->client, status = {:?}", status);
                 }
             }
@@ -985,7 +985,7 @@ impl SessionInner {
         let status = shell_to_client_ctl
             .client_connection_ack
             .recv_timeout(SHELL_TO_CLIENT_CTL_TIMEOUT)
-            .context("waiting for client connection ack")?;
+            .context("waiting for client connection ack (3)")?;
 
         info!("action detach, status={:?}", status);
         Ok(())
