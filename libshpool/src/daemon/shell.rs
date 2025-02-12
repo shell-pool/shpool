@@ -263,15 +263,23 @@ impl SessionInner {
                     recv(args.client_connection) -> new_connection => {
                         match new_connection {
                             Ok(ClientConnectionMsg::New(conn)) => {
+                                let _s = span!(Level::INFO, "HANDLE_NEW_CONN");
                                 info!("got new connection (rows={}, cols={})", conn.size.rows, conn.size.cols);
+                                info!("1");
                                 do_reattach = true;
+                                info!("2");
                                 let ack = if let ClientConnectionMsg::New(mut old_conn) = client_conn {
+                                    info!("3");
                                     Self::write_exit_chunk(&mut old_conn.sink, 0);
+                                    info!("4");
                                     old_conn.stream.shutdown(net::Shutdown::Both)?;
+                                    info!("5");
                                     ClientConnectionStatus::Replaced
                                 } else {
+                                    info!("6");
                                     ClientConnectionStatus::New
                                 };
+                                info!("7");
                                 // Resize the pty to be bigger than it needs to be,
                                 // we do this immediately so that the extra size
                                 // can "bake" for a little bit, which emacs seems
@@ -282,18 +290,24 @@ impl SessionInner {
                                     xpixel: conn.size.xpixel,
                                     ypixel: conn.size.ypixel,
                                 };
+                                info!("8");
                                 oversize.set_fd(pty_master.raw_fd().ok_or(anyhow!("no master fd"))?)?;
+                                info!("9");
 
                                 // Always instantly resize the spool, since we don't
                                 // need to inject a delay into that.
                                 if let Some(s) = output_spool.as_mut() {
+                                    info!("10");
                                     s.screen_mut().set_size(conn.size.rows, VTERM_WIDTH);
                                 }
+                                info!("11");
                                 resize_cmd = Some(ResizeCmd {
                                     size: conn.size.clone(),
                                     when: time::Instant::now().add(REATTACH_RESIZE_DELAY),
                                 });
+                                info!("12");
                                 client_conn = ClientConnectionMsg::New(conn);
+                                info!("13");
 
                                 args.client_connection_ack.send(ack)
                                     .context("sending client connection ack")?;
