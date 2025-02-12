@@ -40,6 +40,7 @@ mod hooks;
 mod kill;
 mod list;
 mod protocol;
+mod session_restore;
 mod test_hooks;
 mod tty;
 mod user;
