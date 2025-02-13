@@ -51,7 +51,7 @@ version = "0.28"
 features = ["poll", "ioctl", "socket", "user", "process", "signal", "term", "fs"]
 
 [dependencies.tracing-subscriber]
-version = "0.3"
+version = "0.3.19"
 default-features = false
 features = ["std", "fmt", "tracing-log", "smallvec"]
 
