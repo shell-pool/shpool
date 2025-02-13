@@ -31,6 +31,9 @@ jobs:
         with:
           inherit-toolchain: true
           bins: cross
+          # Packaging seems to require a more recent rustc/cargo than
+          # our MSRV, though we can still build on the MSRV.
+          channel: '1.84.1'
       - name: Run release-plz
         uses: MarcoIeni/release-plz-action@ca8762285a5dc0c220cb4a7896c9986ff6c97ecf
         env:
