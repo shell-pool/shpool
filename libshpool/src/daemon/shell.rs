@@ -432,11 +432,8 @@ impl SessionInner {
                             spool.screen().contents_formatted()
                         }
                         (Some(spool), Lines(nlines)) => {
-                            let (rows, cols) = spool.screen().size();
-                            info!(
-                                "computing lines({}) restore buf with (rows={}, cols={})",
-                                nlines, rows, cols
-                            );
+                            let (_, cols) = spool.screen().size();
+                            info!("computing lines({}) restore buf with (cols={})", nlines, cols);
                             spool.screen().last_n_rows_contents_formatted(*nlines)
                         }
                         (_, _) => vec![],
@@ -495,7 +492,6 @@ impl SessionInner {
                 trace!("read pty master len={} '{}'", len, String::from_utf8_lossy(buf));
 
                 // scan for control codes we need to handle
-                let mut reset_client_conn = false;
                 if !has_seen_prompt_sentinel {
                     for (i, byte) in buf.iter().enumerate() {
                         if prompt_sentinel_scanner.transition(*byte) {
@@ -516,6 +512,7 @@ impl SessionInner {
                     }
                 }
 
+                let mut reset_client_conn = false;
                 if let (ClientConnectionMsg::New(conn), true) =
                     (&mut client_conn, has_seen_prompt_sentinel)
                 {
@@ -899,9 +896,13 @@ impl SessionInner {
                             Err(crossbeam_channel::SendTimeoutError::Disconnected(_)) => {
                                 return Ok(())
                             }
-                            Err(e) => {
-                                return Err(e)
-                                    .context("requesting heartbeat from shell->client thread")
+                            // If we get a timeout it doesn't necessarily mean that the
+                            // shell->client thread is unhealthy. It might just be busy
+                            // doing other stuff. In particular, this comes up when the
+                            // shell->client thread is generating a particularly large
+                            // session restore buffer, which can take a minute.
+                            Err(crossbeam_channel::SendTimeoutError::Timeout(_)) => {
+                                continue;
                             }
                             _ => {}
                         }
