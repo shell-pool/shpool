@@ -29,7 +29,6 @@ jobs:
       - name: Install Rust toolchain
         uses: moonrepo/setup-rust@e013866c4215f77c925f42f60257dec7dd18836e
         with:
-          inherit-toolchain: true
           bins: cross
       - name: Run release-plz
         uses: MarcoIeni/release-plz-action@ca8762285a5dc0c220cb4a7896c9986ff6c97ecf
