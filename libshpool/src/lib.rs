@@ -199,6 +199,7 @@ pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> an
     if let Some(log_file) = args.log_file.clone() {
         let file = fs::File::create(log_file)?;
         tracing_subscriber::fmt()
+            .with_ansi(false)
             .with_max_level(trace_level)
             .with_thread_ids(true)
             .with_target(false)
@@ -207,6 +208,7 @@ pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> an
             .init();
     } else if let Commands::Daemon = args.command {
         tracing_subscriber::fmt()
+            .with_ansi(false)
             .with_max_level(trace_level)
             .with_thread_ids(true)
             .with_target(false)
