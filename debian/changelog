@@ -1,4 +1,21 @@
 
+shpool (0.8.2) unstable; urgency=low
+
+  Fixed
+
+  * remove ansi color codes from logs (#202)
+  * reconnect hangup due to long session restore (#199)
+  * vterm width (#201)
+  * lints (#198)
+
+  Other
+
+  * update Cargo.lock dependencies
+  * differentiate error contexts (#200)
+  * upgrade notify crate (#190)
+
+ -- Shpool Authors <shpool-eng@google.com>  Thu, 13 Feb 2025 20:04:17 +0000
+
 shpool (0.8.1) unstable; urgency=low
 
   Fixed
