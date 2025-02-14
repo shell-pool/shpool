@@ -6,8 +6,12 @@ version = 2
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
-ignore = [
-]
+
+# The instant crate is unmaintained, but we need to depend on
+# it to avoid bumping our MSRV. This should be fixed once our
+# MSRV is at least 1.77.
+[[advisories.ignore]]
+id = "RUSTSEC-2024-0384"
 
 [licenses]
 allow = [
