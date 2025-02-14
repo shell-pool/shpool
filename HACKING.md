@@ -8,7 +8,7 @@ Some tips for working on shpool.
 ### Install a rust toolchain
 
 If you have not already done so, install a rust toolchain.
-The minimum rust version for shpool is `1.63.0`, so make sure that
+The minimum rust version for shpool is `1.74.0`, so make sure that
 `cargo --version` reports that version or higher before attempting
 to build shpool. The easiest way to install an up to date
 rust toolchain is with [`rustup`](https://rustup.rs/),
@@ -85,6 +85,17 @@ of semver.
 - The attach process to daemon process protocol (the shpool-protocol crate)
 - Specifics about how the prompt hook works
 - Specifics about how the session restore engine works
+- MSRV
+
+## MSRV Policy
+
+We aim to maintain a significant lag behind the latest rust stable for our
+MSRV (minimum supported rust version). This is to enable users with older
+toolchains who don't want to use rustup to build and package shpool. We
+target the [debian stable rust version](https://tracker.debian.org/pkg/rustc)
+(though as of this writing we are 11 versions ahead and will take some time
+to get there). This target is not set in stone and may need to change
+due to unforeseen circumstances.
 
 ## Commit message style
 
