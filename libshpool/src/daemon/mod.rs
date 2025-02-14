@@ -37,6 +37,10 @@ pub fn run(
     config_manager: config::Manager,
     runtime_dir: PathBuf,
     hooks: Box<dyn hooks::Hooks + Send + Sync>,
+    log_level_handle: tracing_subscriber::reload::Handle<
+        tracing_subscriber::filter::LevelFilter,
+        tracing_subscriber::registry::Registry,
+    >,
     socket: PathBuf,
 ) -> anyhow::Result<()> {
     if let Ok(daemonize) = env::var(consts::AUTODAEMONIZE_VAR) {
@@ -52,7 +56,7 @@ pub fn run(
 
     info!("\n\n======================== STARTING DAEMON ============================\n\n");
 
-    let server = server::Server::new(config_manager, hooks, runtime_dir)?;
+    let server = server::Server::new(config_manager, hooks, runtime_dir, log_level_handle)?;
 
     let (cleanup_socket, listener) = match systemd::activation_socket() {
         Ok(l) => {
