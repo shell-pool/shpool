@@ -43,6 +43,7 @@ fn version_mismatch_client_newer() -> anyhow::Result<()> {
                     String::from("SHPOOL_TEST__OVERRIDE_VERSION"),
                     String::from("0.0.0"),
                 )],
+                ..Default::default()
             },
         )
         .context("starting daemon proc")?;
@@ -69,6 +70,7 @@ fn version_mismatch_client_older() -> anyhow::Result<()> {
                     String::from("SHPOOL_TEST__OVERRIDE_VERSION"),
                     String::from("99999.0.0"),
                 )],
+                ..Default::default()
             },
         )
         .context("starting daemon proc")?;

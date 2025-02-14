@@ -33,9 +33,9 @@ use anyhow::{anyhow, Context};
 use nix::unistd;
 use shpool_protocol::{
     AttachHeader, AttachReplyHeader, AttachStatus, ConnectHeader, DetachReply, DetachRequest,
-    KillReply, KillRequest, ListReply, ResizeReply, Session, SessionMessageDetachReply,
+    KillReply, KillRequest, ListReply, LogLevel, ResizeReply, Session, SessionMessageDetachReply,
     SessionMessageReply, SessionMessageRequest, SessionMessageRequestPayload, SessionStatus,
-    VersionHeader,
+    SetLogLevelReply, SetLogLevelRequest, VersionHeader,
 };
 use tracing::{error, info, instrument, span, warn, Level};
 
@@ -73,6 +73,10 @@ pub struct Server {
     register_new_reapable_session: crossbeam_channel::Sender<(String, Instant)>,
     hooks: Box<dyn hooks::Hooks + Send + Sync>,
     daily_messenger: Arc<show_motd::DailyMessenger>,
+    log_level_handle: tracing_subscriber::reload::Handle<
+        tracing_subscriber::filter::LevelFilter,
+        tracing_subscriber::registry::Registry,
+    >,
 }
 
 impl Server {
@@ -81,6 +85,10 @@ impl Server {
         config: config::Manager,
         hooks: Box<dyn hooks::Hooks + Send + Sync>,
         runtime_dir: PathBuf,
+        log_level_handle: tracing_subscriber::reload::Handle<
+            tracing_subscriber::filter::LevelFilter,
+            tracing_subscriber::registry::Registry,
+        >,
     ) -> anyhow::Result<Arc<Self>> {
         let shells = Arc::new(Mutex::new(HashMap::new()));
         // buffered so that we are unlikely to block when setting up a
@@ -101,6 +109,7 @@ impl Server {
             register_new_reapable_session: new_sess_tx,
             hooks,
             daily_messenger,
+            log_level_handle,
         }))
     }
 
@@ -189,7 +198,7 @@ impl Server {
             ConnectHeader::Kill(r) => self.handle_kill(stream, r),
             ConnectHeader::List => self.handle_list(stream),
             ConnectHeader::SessionMessage(header) => self.handle_session_message(stream, header),
-            ConnectHeader::SetLogLevel(_) => unimplemented!(),
+            ConnectHeader::SetLogLevel(r) => self.handle_set_log_level(stream, r),
         }
     }
 
@@ -490,6 +499,28 @@ impl Server {
         write_reply(&mut stream, DetachReply { not_found_sessions, not_attached_sessions })
             .context("writing detach reply")?;
 
+        Ok(())
+    }
+
+    #[instrument(skip_all)]
+    fn handle_set_log_level(
+        &self,
+        mut stream: UnixStream,
+        request: SetLogLevelRequest,
+    ) -> anyhow::Result<()> {
+        let level_filter = match request.level {
+            LogLevel::Off => tracing_subscriber::filter::LevelFilter::OFF,
+            LogLevel::Error => tracing_subscriber::filter::LevelFilter::ERROR,
+            LogLevel::Warn => tracing_subscriber::filter::LevelFilter::WARN,
+            LogLevel::Info => tracing_subscriber::filter::LevelFilter::INFO,
+            LogLevel::Debug => tracing_subscriber::filter::LevelFilter::DEBUG,
+            LogLevel::Trace => tracing_subscriber::filter::LevelFilter::TRACE,
+        };
+        if let Err(e) = self.log_level_handle.modify(|filter| *filter = level_filter) {
+            error!("modifying log level: {}", e);
+        }
+
+        write_reply(&mut stream, SetLogLevelReply {}).context("writing set log level reply")?;
         Ok(())
     }
 

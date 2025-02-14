@@ -19,7 +19,7 @@ use super::{attach, events::Events, shpool_bin, testdata_file, wait_until};
 pub struct Proc {
     pub proc: Option<process::Child>,
     subproc_counter: usize,
-    log_file: PathBuf,
+    pub log_file: PathBuf,
     local_tmp_dir: Option<TempDir>,
     pub tmp_dir: PathBuf,
     pub events: Option<Events>,
@@ -31,11 +31,12 @@ pub struct Proc {
 pub struct DaemonArgs {
     pub listen_events: bool,
     pub extra_env: Vec<(String, String)>,
+    pub verbosity: i64,
 }
 
 impl std::default::Default for DaemonArgs {
     fn default() -> Self {
-        DaemonArgs { listen_events: true, extra_env: vec![] }
+        DaemonArgs { listen_events: true, extra_env: vec![], verbosity: 2 }
     }
 }
 
@@ -122,14 +123,21 @@ impl Proc {
         let mut cmd = Command::new(shpool_bin()?);
         cmd.stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .arg("-vv")
             .arg("--log-file")
             .arg(&log_file)
             .arg("--socket")
             .arg(&socket_path)
             .arg("--config-file")
-            .arg(resolved_config)
-            .arg("daemon");
+            .arg(resolved_config);
+
+        if args.verbosity == 1 {
+            cmd.arg("-v");
+        } else if args.verbosity >= 2 {
+            cmd.arg("-vv");
+        }
+
+        cmd.arg("daemon");
+
         if args.listen_events {
             cmd.env("SHPOOL_TEST_HOOK_SOCKET_PATH", &test_hook_socket_path);
         }
@@ -208,6 +216,7 @@ impl Proc {
             daemonize: false,
             no_daemonize: true,
             command: libshpool::Commands::Daemon,
+            ..libshpool::Args::default()
         };
         let hooks_recorder = Box::new(HooksRecorder {
             records: Arc::new(Mutex::new(HookRecords {
@@ -379,6 +388,24 @@ impl Proc {
             .arg("list")
             .output()
             .context("spawning list proc")
+    }
+
+    // launches a `shpool set-log-level` process
+    pub fn set_log_level(&mut self, level: &str) -> anyhow::Result<process::Output> {
+        let log_file = self.tmp_dir.join(format!("set_log_level_{}.log", self.subproc_counter));
+        eprintln!("spawning set-log-level proc with log {:?}", &log_file);
+        self.subproc_counter += 1;
+
+        Command::new(shpool_bin()?)
+            .arg("-vv")
+            .arg("--log-file")
+            .arg(&log_file)
+            .arg("--socket")
+            .arg(&self.socket_path)
+            .arg("set-log-level")
+            .arg(level)
+            .output()
+            .context("spawning set-log-level proc")
     }
 
     pub fn await_event(&mut self, event: &str) -> anyhow::Result<()> {
