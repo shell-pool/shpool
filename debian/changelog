@@ -1,4 +1,12 @@
 
+shpool (0.8.3) unstable; urgency=low
+
+  Other
+
+  * upgrade nix to 0.29 (#192)
+
+ -- Shpool Authors <shpool-eng@google.com>  Fri, 14 Feb 2025 23:03:03 +0000
+
 shpool (0.8.2) unstable; urgency=low
 
   Fixed
