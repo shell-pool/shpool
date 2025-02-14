@@ -297,3 +297,36 @@ fn echo_sentinel() -> anyhow::Result<()> {
         Ok(())
     })
 }
+
+#[test]
+#[timeout(30000)]
+fn allows_dynamic_log_adjustments() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc = support::daemon::Proc::new(
+            "norc.toml",
+            DaemonArgs { verbosity: 0, ..Default::default() },
+        )
+        .context("starting daemon proc")?;
+
+        daemon_proc.set_log_level("trace")?;
+
+        // Loop because the data might not get flushed the first time through.
+        loop {
+            let mut sh1 = daemon_proc.attach("sh1", AttachArgs::default())?;
+            // let mut line_matcher1 = sh1.line_matcher()?;
+            sh1.run_cmd("echo hi")?;
+            // line_matcher1.scan_until_re("hi$")?;
+
+            // Make sure trace level data landed in the log despite the fact
+            // that we started the daemon with a verbosity level of 0.
+            let log_data = std::fs::read_to_string(&daemon_proc.log_file)?;
+            if log_data.contains("echo hi") {
+                break;
+            }
+
+            std::thread::sleep(time::Duration::from_millis(300));
+        }
+
+        Ok(())
+    })
+}

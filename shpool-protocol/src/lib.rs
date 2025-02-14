@@ -15,6 +15,7 @@
 use std::{default::Default, fmt};
 
 use anyhow::anyhow;
+use clap::ValueEnum;
 use serde_derive::{Deserialize, Serialize};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -60,6 +61,8 @@ pub enum ConnectHeader {
     /// A message to request that a list of running
     /// sessions get killed.
     Kill(KillRequest),
+    // A request to set the log level to a new value.
+    SetLogLevel(SetLogLevelRequest),
 }
 
 /// KillRequest represents a request to kill
@@ -96,6 +99,28 @@ pub struct DetachReply {
     #[serde(default)]
     pub not_attached_sessions: Vec<String>,
 }
+
+#[derive(Serialize, Deserialize, Debug, Default, ValueEnum, Clone)]
+pub enum LogLevel {
+    #[default]
+    Off,
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
+// SetLogLevelRequest contains a request to set a new
+// log level
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SetLogLevelRequest {
+    #[serde(default)]
+    pub level: LogLevel,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SetLogLevelReply {}
 
 /// SessionMessageRequest represents a request that
 /// ought to be routed to the session indicated by
