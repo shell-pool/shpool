@@ -189,6 +189,7 @@ impl Server {
             ConnectHeader::Kill(r) => self.handle_kill(stream, r),
             ConnectHeader::List => self.handle_list(stream),
             ConnectHeader::SessionMessage(header) => self.handle_session_message(stream, header),
+            ConnectHeader::SetLogLevel(_) => unimplemented!(),
         }
     }
 

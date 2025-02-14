@@ -1,6 +1,6 @@
 [package]
 name = "shpool-protocol"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 authors = ["Ethan Pailes <pailes@google.com>"]
 repository = "https://github.com/shell-pool/shpool"
@@ -17,3 +17,4 @@ rust-version = "1.74"
 anyhow = "1"
 serde = "1"
 serde_derive = "1"
+clap = { version = "4", features = ["derive"] } # cli parsing
