@@ -51,7 +51,7 @@ jobs:
         with:
           inherit-toolchain: true
           bins: cross
-      - uses: taiki-e/setup-cross-toolchain-action@1b7a78f3a5d6480ee3fff55b679f60bc2fb2286e
+      - uses: taiki-e/setup-cross-toolchain-action@dd27a7558a45f6b00c1098e61fa074a038c287f6
         with:
           target: ${{ matrix.target }}
         if: startsWith(matrix.os, 'ubuntu') && !contains(matrix.target, '-musl')
