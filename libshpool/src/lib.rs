@@ -18,14 +18,14 @@ use std::{
     hash::{Hash, Hasher},
     io,
     path::PathBuf,
-    sync::Mutex,
+    sync::{Mutex, MutexGuard},
 };
 
 use anyhow::{anyhow, Context};
 use clap::{Parser, Subcommand};
 pub use hooks::Hooks;
 use tracing::error;
-use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
 mod attach;
 mod common;
@@ -40,6 +40,7 @@ mod hooks;
 mod kill;
 mod list;
 mod protocol;
+mod set_log_level;
 mod test_hooks;
 mod tty;
 mod user;
@@ -52,7 +53,7 @@ mod user;
 /// NOTE: You must check `version()` and handle it yourself
 /// if it is set. Clap won't do a good job with its
 /// automatic version support for a library.
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Default)]
 #[clap(author, about)]
 pub struct Args {
     #[clap(
@@ -99,18 +100,30 @@ the daemon is launched by systemd."
 
     #[clap(subcommand)]
     pub command: Commands,
+
+    // A hidden field rather than using the #[non_exhaustive] attribute
+    // allows users to build this struct using the default value plus
+    // modifications, while the #[non_exhaustive] attribute would not.
+    // See https://rust-lang.github.io/rfcs/2008-non-exhaustive.html#functional-record-updates
+    // (the attribute behaves as if there is implicitly a field like this
+    // that is private).
+    #[doc(hidden)]
+    pub __non_exhaustive: (),
 }
 
 /// The subcommds that shpool supports.
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Default)]
+#[non_exhaustive]
 pub enum Commands {
     #[clap(about = "Print version")]
+    #[default]
     Version,
 
     #[clap(about = "Starts running a daemon that holds a pool of shells")]
     Daemon,
 
     #[clap(about = "Creates or attaches to an existing shell session")]
+    #[non_exhaustive]
     Attach {
         #[clap(short, long, help = "If a tty is already attached to the session, detach it first")]
         force: bool,
@@ -146,6 +159,7 @@ pass to the binary using the shell-words crate."
 This does not close the shell. If no session name is provided
 $SHPOOL_SESSION_NAME will be used if it is present in the
 environment.")]
+    #[non_exhaustive]
     Detach {
         #[clap(help = "sessions to detach")]
         sessions: Vec<String>,
@@ -157,13 +171,26 @@ This detaches the session if it is attached and kills the underlying
 shell with a SIGHUP followed by a SIGKILL if the shell fails to exit
 quickly enough. If no session name is provided $SHPOOL_SESSION_NAME
 will be used if it is present in the environment.")]
+    #[non_exhaustive]
     Kill {
         #[clap(help = "sessions to kill")]
         sessions: Vec<String>,
     },
 
     #[clap(about = "lists all the running shell sessions")]
+    #[non_exhaustive]
     List,
+
+    #[clap(about = "Dynamically change daemon log level
+
+This command changes the log level of the shpool daemon without
+restarting. It may to useful if the daemon gets into a state that
+needs debugging, but would be clobbered by a restart.")]
+    #[non_exhaustive]
+    SetLogLevel {
+        #[clap(help = "new log level")]
+        level: shpool_protocol::LogLevel,
+    },
 }
 
 impl Args {
@@ -171,6 +198,61 @@ impl Args {
     /// version then exit.
     pub fn version(&self) -> bool {
         matches!(self.command, Commands::Version)
+    }
+}
+
+// Copied from the tracing-subscriber crate. This is public in
+// a future version of the crate, but for now we don't have
+// access to it. If tracing-subscriber is 0.3.19 or better,
+// it is worth checking to see if we can rip this out.
+#[derive(Debug)]
+pub struct MutexGuardWriter<'a, W>(MutexGuard<'a, W>);
+impl<W> io::Write for MutexGuardWriter<'_, W>
+where
+    W: io::Write,
+{
+    #[inline]
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.write(buf)
+    }
+
+    #[inline]
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.flush()
+    }
+
+    #[inline]
+    fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        self.0.write_vectored(bufs)
+    }
+
+    #[inline]
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        self.0.write_all(buf)
+    }
+
+    #[inline]
+    fn write_fmt(&mut self, fmt: std::fmt::Arguments<'_>) -> io::Result<()> {
+        self.0.write_fmt(fmt)
+    }
+}
+
+struct LogWriterBuilder {
+    log_file: Option<Mutex<fs::File>>,
+    is_daemon: bool,
+}
+
+impl<'writer> tracing_subscriber::fmt::MakeWriter<'writer> for LogWriterBuilder {
+    type Writer = Box<dyn io::Write + 'writer>;
+
+    fn make_writer(&'writer self) -> Self::Writer {
+        if let Some(log_file) = &self.log_file {
+            Box::new(MutexGuardWriter(log_file.lock().expect("poisoned")))
+        } else if self.is_daemon {
+            Box::new(io::stderr())
+        } else {
+            Box::new(io::empty())
+        }
     }
 }
 
@@ -189,33 +271,35 @@ pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> an
         _ => {}
     }
 
-    let trace_level = if args.verbose == 0 {
-        tracing::Level::INFO
+    let log_level_filter = if args.verbose == 0 {
+        tracing_subscriber::filter::LevelFilter::INFO
     } else if args.verbose == 1 {
-        tracing::Level::DEBUG
+        tracing_subscriber::filter::LevelFilter::DEBUG
     } else {
-        tracing::Level::TRACE
+        tracing_subscriber::filter::LevelFilter::TRACE
     };
-    if let Some(log_file) = args.log_file.clone() {
-        let file = fs::File::create(log_file)?;
-        tracing_subscriber::fmt()
-            .with_ansi(false)
-            .with_max_level(trace_level)
-            .with_thread_ids(true)
-            .with_target(false)
-            .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
-            .with_writer(Mutex::new(file))
-            .init();
-    } else if let Commands::Daemon = args.command {
-        tracing_subscriber::fmt()
-            .with_ansi(false)
-            .with_max_level(trace_level)
-            .with_thread_ids(true)
-            .with_target(false)
-            .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
-            .with_writer(io::stderr)
-            .init();
-    }
+    let (log_level_layer, log_level_handle) =
+        tracing_subscriber::reload::Layer::new(log_level_filter);
+
+    let log_writer_builder = LogWriterBuilder {
+        log_file: if let Some(lf) = &args.log_file {
+            Some(Mutex::new(fs::File::create(lf).context("unable to create log file")?))
+        } else {
+            None
+        },
+        is_daemon: matches!(args.command, Commands::Daemon),
+    };
+    tracing_subscriber::registry::Registry::default()
+        .with(log_level_layer)
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_thread_ids(true)
+                .with_target(false)
+                .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+                .with_writer(log_writer_builder),
+        )
+        .init();
 
     let mut runtime_dir = match env::var("XDG_RUNTIME_DIR") {
         Ok(runtime_dir) => PathBuf::from(runtime_dir),
@@ -269,6 +353,7 @@ pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> an
             config_manager,
             runtime_dir,
             hooks.unwrap_or(Box::new(NoopHooks {})),
+            log_level_handle,
             socket,
         ),
         Commands::Attach { force, ttl, cmd, name } => {
@@ -277,6 +362,7 @@ pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> an
         Commands::Detach { sessions } => detach::run(sessions, socket),
         Commands::Kill { sessions } => kill::run(sessions, socket),
         Commands::List => list::run(socket),
+        Commands::SetLogLevel { level } => set_log_level::run(level, socket),
     };
 
     if let Err(err) = res {
