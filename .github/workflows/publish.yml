@@ -17,7 +17,7 @@ jobs:
       # Generating a GitHub token, so that PRs and tags created by
       # the release-plz-action can trigger actions workflows.
       - name: Generate GitHub token
-        uses: actions/create-github-app-token@c1a285145b9d317df6ced56c09f525b5c2b6f755
+        uses: actions/create-github-app-token@0d564482f06ca65fa9e77e2510873638c82206f2
         id: generate-token
         with:
           app-id: ${{ secrets.RELEASE_PLZ_APP_ID }} # <-- GitHub App ID secret name
@@ -27,11 +27,11 @@ jobs:
         with:
           fetch-depth: 0
       - name: Install Rust toolchain
-        uses: moonrepo/setup-rust@e013866c4215f77c925f42f60257dec7dd18836e
+        uses: moonrepo/setup-rust@ede6de059f8046a5e236c94046823e2af11ca670
         with:
           bins: cross
       - name: Run release-plz
-        uses: MarcoIeni/release-plz-action@ca8762285a5dc0c220cb4a7896c9986ff6c97ecf
+        uses: MarcoIeni/release-plz-action@36d2dcf6a250ff9c4dfd2984e988d79ea67a4c6a
         env:
           GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
