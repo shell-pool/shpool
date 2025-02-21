@@ -1,4 +1,17 @@
 
+shpool (0.9.0) unstable; urgency=low
+
+  Added
+
+  * [**breaking**] allow daemon log level to dynamically change (#207)
+  * add dynamic log level msg to shpool-protocol (#206)
+
+  Other
+
+  * upgrade nix to 0.29 (#192)
+
+ -- Shpool Authors <shpool-eng@google.com>  Fri, 21 Feb 2025 20:52:30 +0000
+
 shpool (0.8.2) unstable; urgency=low
 
   Fixed
