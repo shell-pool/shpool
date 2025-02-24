@@ -31,7 +31,7 @@ jobs:
         with:
           bins: cross
       - name: Run release-plz
-        uses: MarcoIeni/release-plz-action@36d2dcf6a250ff9c4dfd2984e988d79ea67a4c6a
+        uses: MarcoIeni/release-plz-action@49d211662734649022d06ac385e317aa025c64e7
         env:
           GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
