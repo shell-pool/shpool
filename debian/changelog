@@ -1,4 +1,13 @@
 
+shpool (0.9.1) unstable; urgency=low
+
+  Other
+
+  * update Cargo.lock dependencies
+  * 0.1.2 -> 0.1.3 (#215)
+
+ -- Shpool Authors <shpool-eng@google.com>  Thu, 27 Feb 2025 18:17:42 +0000
+
 shpool (0.9.0) unstable; urgency=low
 
   Added
