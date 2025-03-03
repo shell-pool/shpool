@@ -17,7 +17,7 @@ jobs:
       # Generating a GitHub token, so that PRs and tags created by
       # the release-plz-action can trigger actions workflows.
       - name: Generate GitHub token
-        uses: actions/create-github-app-token@0d564482f06ca65fa9e77e2510873638c82206f2
+        uses: actions/create-github-app-token@21cfef2b496dd8ef5b904c159339626a10ad380e
         id: generate-token
         with:
           app-id: ${{ secrets.RELEASE_PLZ_APP_ID }} # <-- GitHub App ID secret name
@@ -31,7 +31,7 @@ jobs:
         with:
           bins: cross
       - name: Run release-plz
-        uses: MarcoIeni/release-plz-action@36d2dcf6a250ff9c4dfd2984e988d79ea67a4c6a
+        uses: MarcoIeni/release-plz-action@704937995982d7590add777dbdb2bf7aa94a6cf6
         env:
           GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
