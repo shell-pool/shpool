@@ -68,15 +68,11 @@ pub fn maybe_inject_prefix(
                SHPOOL__OLD_PS1="${{PS1}}"
                function __shpool__prompt_command() {{
                   PS1="${{SHPOOL__OLD_PS1}}"
-                  if [[ "$(declare -a SHPOOL__OLD_PROMPT_COMMAND)" =~ "declare -a" ]]; then
-                    for prompt_hook in "${{SHPOOL__OLD_PROMPT_COMMAND[@]}}"
-                    do
-                      ${{prompt_hook}}
-                    done
-                  else
-                    eval "${{SHPOOL__OLD_PROMPT_COMMAND}}"
-                  fi
-                  PS1="${prompt_prefix}${{PS1}}"
+                  for prompt_hook in "${{SHPOOL__OLD_PROMPT_COMMAND[@]}}"
+                  do
+                    eval "${{prompt_hook}}"
+                  done
+                  PS1="{prompt_prefix}${{PS1}}"
                }}
                PROMPT_COMMAND=__shpool__prompt_command
             fi
