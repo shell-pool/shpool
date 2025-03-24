@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::{
+    ffi::OsString,
     io,
     os::unix::net::UnixStream,
     sync::{Arc, Mutex},
@@ -97,7 +98,7 @@ impl DailyMessenger {
         // The env that the shell will be launched with, we want to use
         // the same env for the pager program (mostly because we want
         // to pass TERM along correctly).
-        shell_env: &[(String, String)],
+        shell_env: &[(OsString, OsString)],
     ) -> anyhow::Result<Option<TtySize>> {
         if let Some(debouncer) = &self.debouncer {
             if !debouncer.should_fire()? {
