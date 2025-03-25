@@ -1,4 +1,20 @@
 
+shpool (0.9.1) unstable; urgency=low
+
+  Added
+
+  * dump forward_env in file (#223)
+
+  Fixed
+
+  * eval SHPOOL__OLD_PROMPT_COMMAND rather than iterate sub-components (#213)
+
+  Other
+
+  * 0.1.2 -> 0.1.3 (#215)
+
+ -- Shpool Authors <shpool-eng@google.com>  Tue, 25 Mar 2025 14:40:49 +0000
+
 shpool (0.9.0) unstable; urgency=low
 
   Added
