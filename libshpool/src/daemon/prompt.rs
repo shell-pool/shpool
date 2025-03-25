@@ -64,7 +64,7 @@ pub fn maybe_inject_prefix(
             if [[ -z "${{PROMPT_COMMAND+x}}" ]]; then
                PS1="{prompt_prefix}${{PS1}}"
             else
-               SHPOOL__OLD_PROMPT_COMMAND="${{PROMPT_COMMAND}}"
+               SHPOOL__OLD_PROMPT_COMMAND=("${{PROMPT_COMMAND[@]}}")
                SHPOOL__OLD_PS1="${{PS1}}"
                function __shpool__prompt_command() {{
                   PS1="${{SHPOOL__OLD_PS1}}"
