@@ -14,7 +14,9 @@
 
 use std::{
     collections::HashMap,
-    env, fs, io, net,
+    env,
+    ffi::OsString,
+    fs, io, net,
     ops::Add,
     os,
     os::unix::{
@@ -338,6 +340,7 @@ impl Server {
         info!("released lock on shells table");
 
         self.link_ssh_auth_sock(&header).context("linking SSH_AUTH_SOCK")?;
+        self.populate_session_env_file(&header).context("populating session env file")?;
 
         if let (Some(child_exit_notifier), Some(inner), Some(pager_ctl_slot)) =
             (child_exit_notifier, inner_to_stream, pager_ctl_slot)
@@ -463,6 +466,28 @@ impl Server {
         } else {
             info!("no SSH_AUTH_SOCK in client env, leaving it unlinked");
         }
+
+        Ok(())
+    }
+
+    #[instrument(skip_all)]
+    fn populate_session_env_file(&self, header: &AttachHeader) -> anyhow::Result<()> {
+        let session_name = PathBuf::from(&header.name);
+        fs::create_dir_all(self.session_dir(session_name.clone()))
+            .context("creating session dir")?;
+
+        let session_env_file = self.session_env_file(session_name);
+        info!("populating {:?}", session_env_file);
+        fs::write(
+            session_env_file,
+            header
+                .local_env
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .context("writing session env")?;
 
         Ok(())
     }
@@ -665,7 +690,7 @@ impl Server {
         client_stream: UnixStream,
         header: &AttachHeader,
         user_info: &user::Info,
-        shell_env: &[(String, String)],
+        shell_env: &[(OsString, OsString)],
         dump_motd_on_new_session: bool,
     ) -> anyhow::Result<shell::Session> {
         let shell = if let Some(s) = &self.config.get().shell {
@@ -723,10 +748,12 @@ impl Server {
             }
         };
         let term_db = Arc::new(if let Some(term) = &term {
-            match termini::TermInfo::from_name(term).context("resolving terminfo") {
+            match termini::TermInfo::from_name(term.to_string_lossy().as_ref())
+                .context("resolving terminfo")
+            {
                 Ok(ti) => ti,
                 Err(err) => {
-                    warn!("could not get terminfo for '{}': {:?}", term, err);
+                    warn!("could not get terminfo for '{:?}': {:?}", term, err);
                     fallback_terminfo()?
                 }
             }
@@ -916,8 +943,8 @@ impl Server {
         &self,
         user_info: &user::Info,
         header: &AttachHeader,
-    ) -> anyhow::Result<Vec<(String, String)>> {
-        let s = String::from;
+    ) -> anyhow::Result<Vec<(OsString, OsString)>> {
+        let s = OsString::from;
         let config = self.config.get();
         let auth_sock = self.ssh_auth_sock_symlink(PathBuf::from(&header.name));
         let mut env = vec![
@@ -931,6 +958,10 @@ impl Server {
                     .unwrap_or(DEFAULT_INITIAL_SHELL_PATH)),
             ),
             (s("SHPOOL_SESSION_NAME"), s(&header.name)),
+            (
+                s("SHPOOL_SESSION_DIR"),
+                self.session_dir(PathBuf::from(&header.name)).into_os_string(),
+            ),
             (s("SHELL"), s(&user_info.default_shell)),
             (s("USER"), s(&user_info.user)),
             (
@@ -939,7 +970,7 @@ impl Server {
             ),
         ];
 
-        if let Ok(xdg_runtime_dir) = env::var("XDG_RUNTIME_DIR") {
+        if let Some(xdg_runtime_dir) = env::var_os("XDG_RUNTIME_DIR") {
             env.push((s("XDG_RUNTIME_DIR"), xdg_runtime_dir));
         }
 
@@ -998,7 +1029,7 @@ impl Server {
                 Ok(f) => {
                     let pairs = etc_environment::parse_compat(io::BufReader::new(f))?;
                     for (var, val) in pairs.into_iter() {
-                        env.push((var, val));
+                        env.push((var.into(), val.into()));
                     }
                 }
                 Err(e) => {
@@ -1010,8 +1041,18 @@ impl Server {
         Ok(env)
     }
 
-    fn ssh_auth_sock_symlink(&self, session_name: PathBuf) -> PathBuf {
-        self.runtime_dir.join("sessions").join(session_name).join("ssh-auth-sock.socket")
+    // Generate the path to the env file that is populated on every
+    // attach.
+    fn session_env_file<P: AsRef<Path>>(&self, session_name: P) -> PathBuf {
+        self.session_dir(session_name).join("forward.env")
+    }
+
+    fn ssh_auth_sock_symlink<P: AsRef<Path>>(&self, session_name: P) -> PathBuf {
+        self.session_dir(session_name).join("ssh-auth-sock.socket")
+    }
+
+    fn session_dir<P: AsRef<Path>>(&self, session_name: P) -> PathBuf {
+        self.runtime_dir.join("sessions").join(session_name)
     }
 }
 

@@ -31,6 +31,7 @@
 */
 
 use std::{
+    ffi::OsString,
     io,
     io::{Read, Write},
     os::{
@@ -105,7 +106,7 @@ impl Pager {
         // The message to display
         msg: &str,
         // The env to launch the pager proc with
-        shell_env: &[(String, String)],
+        shell_env: &[(OsString, OsString)],
     ) -> anyhow::Result<TtySize> {
         let (tty_size_change_tx, tty_size_change_rx) = crossbeam_channel::bounded(0);
         let (tty_size_change_ack_tx, tty_size_change_ack_rx) = crossbeam_channel::bounded(0);

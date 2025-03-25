@@ -92,25 +92,56 @@ fn forward_env() -> anyhow::Result<()> {
     support::dump_err(|| {
         let mut daemon_proc = support::daemon::Proc::new("forward_env.toml", DaemonArgs::default())
             .context("starting daemon proc")?;
-        let mut attach_proc = daemon_proc
-            .attach(
-                "sh1",
-                AttachArgs {
-                    config: Some(String::from("forward_env.toml")),
-                    extra_env: vec![
-                        (String::from("FOO"), String::from("foo")),
-                        (String::from("BAR"), String::from("bar")),
-                        (String::from("BAZ"), String::from("baz")),
-                    ],
-                    ..Default::default()
-                },
-            )
-            .context("starting attach proc")?;
 
-        let mut line_matcher = attach_proc.line_matcher()?;
+        let bidi_done_w = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
+        {
+            let mut attach_proc = daemon_proc
+                .attach(
+                    "sh1",
+                    AttachArgs {
+                        config: Some(String::from("forward_env.toml")),
+                        extra_env: vec![
+                            (String::from("FOO"), String::from("foo")), // forwarded
+                            (String::from("BAR"), String::from("bar")), // forwarded
+                            (String::from("BAZ"), String::from("baz")), // not forwarded
+                        ],
+                        ..Default::default()
+                    },
+                )
+                .context("starting attach proc")?;
 
-        attach_proc.run_cmd(r#"echo "$FOO:$BAR:$BAZ" "#)?;
-        line_matcher.scan_until_re("foo:bar:$")?;
+            let mut line_matcher = attach_proc.line_matcher()?;
+
+            attach_proc.run_cmd(r#"echo "$FOO:$BAR:$BAZ" "#)?;
+            line_matcher.scan_until_re("foo:bar:$")?;
+        }
+
+        // wait until the daemon has noticed that the connection
+        // has dropped before we attempt to open the connection again
+        daemon_proc.events = Some(bidi_done_w.wait_final_event("daemon-bidi-stream-done")?);
+
+        {
+            let mut attach_proc = daemon_proc
+                .attach(
+                    "sh1",
+                    AttachArgs {
+                        config: Some(String::from("forward_env.toml")),
+                        extra_env: vec![
+                            (String::from("FOO"), String::from("foonew")), // forwarded
+                            (String::from("BAR"), String::from("bar")),    // forwarded
+                            (String::from("BAZ"), String::from("baz")),    // not forwarded
+                        ],
+                        ..Default::default()
+                    },
+                )
+                .context("starting attach proc")?;
+
+            let mut line_matcher = attach_proc.line_matcher()?;
+
+            attach_proc.run_cmd(r#"source $SHPOOL_SESSION_DIR/forward.env "#)?;
+            attach_proc.run_cmd(r#"echo "$FOO:$BAR:$BAZ" "#)?;
+            line_matcher.scan_until_re("foonew:bar:$")?;
+        }
 
         Ok(())
     })
