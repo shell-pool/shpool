@@ -1,4 +1,4 @@
-use std::{io, io::Write, os::unix::io::AsRawFd, path::PathBuf, process};
+use std::{io, io::Write, path::PathBuf, process};
 
 use anyhow::{anyhow, Context};
 
@@ -46,11 +46,8 @@ impl Proc {
     pub fn line_matcher(&mut self) -> anyhow::Result<LineMatcher<process::ChildStdout>> {
         let r = self.proc.stdout.take().ok_or(anyhow!("missing stdout"))?;
 
-        nix::fcntl::fcntl(
-            r.as_raw_fd(),
-            nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
-        )
-        .context("setting stdout nonblocking")?;
+        nix::fcntl::fcntl(&r, nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK))
+            .context("setting stdout nonblocking")?;
 
         Ok(LineMatcher { out: io::BufReader::new(r), never_match_regex: vec![] })
     }
@@ -59,11 +56,8 @@ impl Proc {
     pub fn stderr_line_matcher(&mut self) -> anyhow::Result<LineMatcher<process::ChildStderr>> {
         let r = self.proc.stderr.take().ok_or(anyhow!("missing stderr"))?;
 
-        nix::fcntl::fcntl(
-            r.as_raw_fd(),
-            nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
-        )
-        .context("setting stderr nonblocking")?;
+        nix::fcntl::fcntl(&r, nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK))
+            .context("setting stderr nonblocking")?;
 
         Ok(LineMatcher { out: io::BufReader::new(r), never_match_regex: vec![] })
     }

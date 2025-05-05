@@ -1,7 +1,7 @@
 use std::{
     fmt::Write,
     io::Read,
-    os::unix::{io::AsRawFd, net::UnixListener, process::CommandExt as _},
+    os::unix::{net::UnixListener, process::CommandExt as _},
     path,
     process::{Command, Stdio},
     time,
@@ -98,9 +98,10 @@ fn systemd_activation() -> anyhow::Result<()> {
         let child_pid = match unsafe { nix::unistd::fork() } {
             Ok(ForkResult::Parent { child, .. }) => child,
             Ok(ForkResult::Child) => {
-                // place the unix socket file descriptor in the right
-                // place
-                let fdarg = match nix::unistd::dup2(activation_sock.as_raw_fd(), 3) {
+                // place the unix socket file descriptor in the right place
+                // Safety: We are sure that FD 3 is not open, and the returned OwnedFd will be
+                // its only owner.
+                let fdarg = match unsafe { nix::unistd::dup2_raw(activation_sock, 3) } {
                     Ok(newfd) => newfd,
                     Err(e) => {
                         eprintln!("dup err: {e}");
@@ -110,11 +111,11 @@ fn systemd_activation() -> anyhow::Result<()> {
 
                 // unset the fd_cloexec flag on the file descriptor so
                 // we can actuall pass it down to the child
-                let fdflags = nix::fcntl::fcntl(fdarg, nix::fcntl::FcntlArg::F_GETFD)
+                let fdflags = nix::fcntl::fcntl(&fdarg, nix::fcntl::FcntlArg::F_GETFD)
                     .expect("getfd flags to work");
                 let mut newflags = nix::fcntl::FdFlag::from_bits(fdflags).unwrap();
                 newflags.remove(nix::fcntl::FdFlag::FD_CLOEXEC);
-                nix::fcntl::fcntl(fdarg, nix::fcntl::FcntlArg::F_SETFD(newflags))
+                nix::fcntl::fcntl(&fdarg, nix::fcntl::FcntlArg::F_SETFD(newflags))
                     .expect("FD_CLOEXEC to be unset");
 
                 // set the LISTEN_PID environment variable without
@@ -142,8 +143,8 @@ fn systemd_activation() -> anyhow::Result<()> {
         nix::sys::wait::waitpid(child_pid, None).context("reaping daemon")?;
 
         let mut stderr_buf: Vec<u8> = vec![0; 1024 * 8];
-        let len = nix::unistd::read(parent_stderr.as_raw_fd(), &mut stderr_buf[..])
-            .context("reading stderr")?;
+        let len =
+            nix::unistd::read(&parent_stderr, &mut stderr_buf[..]).context("reading stderr")?;
         let stderr = String::from_utf8_lossy(&stderr_buf[..len]);
         assert!(stderr.contains("using systemd activation socket"));
 
