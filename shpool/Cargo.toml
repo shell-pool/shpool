@@ -30,5 +30,5 @@ ntest = "0.9" # test timeouts
 
 # rusty wrapper for unix apis
 [dependencies.nix]
-version = "0.29"
+version = "0.30"
 features = ["poll", "ioctl", "process", "signal", "fs"]
