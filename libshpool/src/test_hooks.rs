@@ -148,7 +148,7 @@ impl TestHookServer {
 
     fn emit_event(&self, event: &str) {
         info!("emitting event '{}'", event);
-        let event_line = format!("{}\n", event);
+        let event_line = format!("{event}\n");
         let clients = self.clients.lock().unwrap();
         for mut client in clients.iter() {
             if let Err(e) = client.write_all(event_line.as_bytes()) {

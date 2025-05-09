@@ -55,35 +55,35 @@ pub struct HooksRecorder {
 
 impl libshpool::Hooks for HooksRecorder {
     fn on_new_session(&self, session_name: &str) -> anyhow::Result<()> {
-        eprintln!("on_new_session: {}", session_name);
+        eprintln!("on_new_session: {session_name}");
         let mut recs = self.records.lock().unwrap();
         recs.new_sessions.push(String::from(session_name));
         Ok(())
     }
 
     fn on_reattach(&self, session_name: &str) -> anyhow::Result<()> {
-        eprintln!("on_reattach: {}", session_name);
+        eprintln!("on_reattach: {session_name}");
         let mut recs = self.records.lock().unwrap();
         recs.reattaches.push(String::from(session_name));
         Ok(())
     }
 
     fn on_busy(&self, session_name: &str) -> anyhow::Result<()> {
-        eprintln!("on_busy: {}", session_name);
+        eprintln!("on_busy: {session_name}");
         let mut recs = self.records.lock().unwrap();
         recs.busys.push(String::from(session_name));
         Ok(())
     }
 
     fn on_client_disconnect(&self, session_name: &str) -> anyhow::Result<()> {
-        eprintln!("on_client_disconnect: {}", session_name);
+        eprintln!("on_client_disconnect: {session_name}");
         let mut recs = self.records.lock().unwrap();
         recs.client_disconnects.push(String::from(session_name));
         Ok(())
     }
 
     fn on_shell_disconnect(&self, session_name: &str) -> anyhow::Result<()> {
-        eprintln!("on_shell_disconnect: {}", session_name);
+        eprintln!("on_shell_disconnect: {session_name}");
         let mut recs = self.records.lock().unwrap();
         recs.shell_disconnects.push(String::from(session_name));
         Ok(())
@@ -232,7 +232,7 @@ impl Proc {
         // spawn the daemon in a thread
         thread::spawn(move || {
             if let Err(err) = libshpool::run(args, Some(hooks_recorder)) {
-                eprintln!("shpool proc exited with err: {:?}", err);
+                eprintln!("shpool proc exited with err: {err:?}");
             }
         });
 
@@ -311,7 +311,7 @@ impl Proc {
             cmd.arg("-c");
             cmd.arg(cmd_str);
         }
-        let proc = cmd.arg(name).spawn().context(format!("spawning attach proc for {}", name))?;
+        let proc = cmd.arg(name).spawn().context(format!("spawning attach proc for {name}"))?;
 
         let events = Events::new(&test_hook_socket_path)?;
 
@@ -364,7 +364,7 @@ impl Proc {
             let list_out = self.list()?;
             if !list_out.status.success() {
                 let list_stderr = String::from_utf8_lossy(&list_out.stdout[..]);
-                eprintln!("list bad exit, stderr: {:?}", list_stderr);
+                eprintln!("list bad exit, stderr: {list_stderr:?}");
                 return Ok(false);
             }
             let list_stdout = String::from_utf8_lossy(&list_out.stdout[..]);
@@ -420,7 +420,7 @@ impl Proc {
 impl std::ops::Drop for Proc {
     fn drop(&mut self) {
         if let Err(e) = self.proc_kill() {
-            eprintln!("err killing daemon proc: {:?}", e);
+            eprintln!("err killing daemon proc: {e:?}");
         }
         if std::env::var("SHPOOL_LEAVE_TEST_LOGS").unwrap_or(String::from("")) == "true" {
             self.local_tmp_dir.take().map(|d| d.into_path());

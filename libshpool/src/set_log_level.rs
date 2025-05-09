@@ -23,7 +23,7 @@ pub fn run(level: LogLevel, socket: PathBuf) -> anyhow::Result<()> {
     let mut client = match protocol::Client::new(socket) {
         Ok(ClientResult::JustClient(c)) => c,
         Ok(ClientResult::VersionMismatch { warning, client }) => {
-            eprintln!("warning: {}, try restarting your daemon", warning);
+            eprintln!("warning: {warning}, try restarting your daemon");
             client
         }
         Err(err) => {

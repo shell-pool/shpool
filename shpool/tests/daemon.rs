@@ -49,7 +49,7 @@ fn start() -> anyhow::Result<()> {
         stdout.read_to_string(&mut stdout_str).context("slurping stdout")?;
 
         if !stdout_str.is_empty() {
-            println!("{}", stdout_str);
+            println!("{stdout_str}");
             return Err(anyhow!("unexpected stdout output"));
         }
 
@@ -103,7 +103,7 @@ fn systemd_activation() -> anyhow::Result<()> {
                 let fdarg = match nix::unistd::dup2(activation_sock.as_raw_fd(), 3) {
                     Ok(newfd) => newfd,
                     Err(e) => {
-                        eprintln!("dup err: {}", e);
+                        eprintln!("dup err: {e}");
                         std::process::exit(1)
                     }
                 };
@@ -124,7 +124,7 @@ fn systemd_activation() -> anyhow::Result<()> {
                 cmd.env("LISTEN_PID", pid_buf);
 
                 let err = cmd.exec();
-                eprintln!("exec err: {:?}", err);
+                eprintln!("exec err: {err:?}");
                 std::process::exit(1);
             }
             Err(e) => {
@@ -183,7 +183,7 @@ fn config() -> anyhow::Result<()> {
         stdout.read_to_string(&mut stdout_str).context("slurping stdout")?;
 
         if !stdout_str.is_empty() {
-            println!("{}", stdout_str);
+            println!("{stdout_str}");
             return Err(anyhow!("unexpected stdout output"));
         }
 
@@ -246,7 +246,7 @@ fn hooks() -> anyhow::Result<()> {
         })?;
 
         let hook_records = daemon_proc.hook_records.as_ref().unwrap().lock().unwrap();
-        eprintln!("hook_records: {:?}", hook_records);
+        eprintln!("hook_records: {hook_records:?}");
         assert_eq!(hook_records.new_sessions[0], "sh1");
         assert_eq!(hook_records.reattaches[0], "sh1");
         assert_eq!(hook_records.busys[0], "sh1");

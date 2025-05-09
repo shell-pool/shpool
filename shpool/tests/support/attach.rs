@@ -28,10 +28,10 @@ impl Proc {
     }
 
     pub fn run_cmd(&mut self, cmd: &str) -> anyhow::Result<()> {
-        eprintln!("running cmd '{}'", cmd);
+        eprintln!("running cmd '{cmd}'");
         let stdin = self.proc.stdin.as_mut().ok_or(anyhow!("missing stdin"))?;
 
-        let full_cmd = format!("{}\n", cmd);
+        let full_cmd = format!("{cmd}\n");
         stdin.write_all(full_cmd.as_bytes()).context("writing cmd into attach proc")?;
         stdin.flush().context("flushing cmd")?;
 
@@ -80,7 +80,7 @@ impl Proc {
 impl std::ops::Drop for Proc {
     fn drop(&mut self) {
         if let Err(e) = self.proc.kill() {
-            eprintln!("err killing attach proc: {:?}", e);
+            eprintln!("err killing attach proc: {e:?}");
         }
     }
 }

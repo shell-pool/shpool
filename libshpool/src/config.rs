@@ -170,7 +170,7 @@ impl Manager {
 impl std::fmt::Debug for Manager {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
         let config = self.config.read().unwrap();
-        write!(f, "{:?}", config)?;
+        write!(f, "{config:?}")?;
 
         Ok(())
     }

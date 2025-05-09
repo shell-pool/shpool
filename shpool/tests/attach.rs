@@ -1226,7 +1226,7 @@ fn motd_dump() -> anyhow::Result<()> {
         } else {
             PathBuf::from(tmp_dir.path())
         };
-        eprintln!("building config in {:?}", tmp_dir_path);
+        eprintln!("building config in {tmp_dir_path:?}");
         let motd_file = tmp_dir_path.join("motd.txt");
         {
             let mut f = fs::File::create(&motd_file)?;
@@ -1304,7 +1304,7 @@ fn motd_pager() -> anyhow::Result<()> {
         } else {
             PathBuf::from(tmp_dir.path())
         };
-        eprintln!("building config in {:?}", tmp_dir_path);
+        eprintln!("building config in {tmp_dir_path:?}");
         let motd_file = tmp_dir_path.join("motd.txt");
         {
             let mut f = fs::File::create(&motd_file)?;
@@ -1361,7 +1361,7 @@ fn motd_debounced_pager_debounces() -> anyhow::Result<()> {
         } else {
             PathBuf::from(tmp_dir.path())
         };
-        eprintln!("building config in {:?}", tmp_dir_path);
+        eprintln!("building config in {tmp_dir_path:?}");
         let motd_file = tmp_dir_path.join("motd.txt");
         {
             let mut f = fs::File::create(&motd_file)?;
@@ -1422,7 +1422,7 @@ fn motd_debounced_pager_unbounces() -> anyhow::Result<()> {
         } else {
             PathBuf::from(tmp_dir.path())
         };
-        eprintln!("building config in {:?}", tmp_dir_path);
+        eprintln!("building config in {tmp_dir_path:?}");
         let motd_file = tmp_dir_path.join("motd.txt");
         {
             let mut f = fs::File::create(&motd_file)?;
@@ -1486,7 +1486,7 @@ fn motd_env_test_pager_preserves_term_env_var() -> anyhow::Result<()> {
         } else {
             PathBuf::from(tmp_dir.path())
         };
-        eprintln!("building config in {:?}", tmp_dir_path);
+        eprintln!("building config in {tmp_dir_path:?}");
         let config_tmpl =
             fs::read_to_string(support::testdata_file("motd_pager_env_test.toml.tmpl"))?;
         let config_contents = config_tmpl.replace(
@@ -1510,7 +1510,7 @@ fn motd_env_test_pager_preserves_term_env_var() -> anyhow::Result<()> {
             "sh1",
         )?;
         // Scan for a fragment of less output.
-        eprintln!("STDOUT: {}", stdout_str);
+        eprintln!("STDOUT: {stdout_str}");
         let stdout_file_re = Regex::new(".*TERM=testval.*")?;
         assert!(stdout_file_re.is_match(&stdout_str));
 
@@ -1530,7 +1530,7 @@ fn dynamic_config_change() -> anyhow::Result<()> {
         } else {
             PathBuf::from(tmp_dir.path())
         };
-        eprintln!("building config in {:?}", tmp_dir_path);
+        eprintln!("building config in {tmp_dir_path:?}");
         let config_tmpl = fs::read_to_string(support::testdata_file("dynamic_config.toml.tmpl"))?;
         let config_file = tmp_dir_path.join("motd_pager.toml");
         fs::write(&config_file, &config_tmpl)?;
@@ -1604,7 +1604,7 @@ fn autodaemonize() -> anyhow::Result<()> {
         } else {
             PathBuf::from(tmp_dir.path())
         };
-        eprintln!("testing autodaemonization in {:?}", &tmp_dir_path);
+        eprintln!("testing autodaemonization in {tmp_dir_path:?}");
 
         let mut socket_path = PathBuf::from(&tmp_dir_path);
         socket_path.push("control.sock");

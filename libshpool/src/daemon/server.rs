@@ -181,7 +181,7 @@ impl Server {
             if let ConnectHeader::Attach(_) = header {
                 write_reply(
                     &mut stream,
-                    AttachReplyHeader { status: AttachStatus::Forbidden(format!("{:?}", err)) },
+                    AttachReplyHeader { status: AttachStatus::Forbidden(format!("{err:?}")) },
                 )?;
             }
             stream.shutdown(net::Shutdown::Both).context("closing stream")?;
@@ -460,8 +460,7 @@ impl Server {
 
             let _ = fs::remove_file(&symlink); // clean up the link if it exists already
             os::unix::fs::symlink(ssh_auth_sock, &symlink).context(format!(
-                "could not symlink '{:?}' to point to '{:?}'",
-                symlink, ssh_auth_sock
+                "could not symlink '{symlink:?}' to point to '{ssh_auth_sock:?}'"
             ))?;
         } else {
             info!("no SSH_AUTH_SOCK in client env, leaving it unlinked");
@@ -480,12 +479,7 @@ impl Server {
         info!("populating {:?}", session_env_file);
         fs::write(
             session_env_file,
-            header
-                .local_env
-                .iter()
-                .map(|(k, v)| format!("{}={}", k, v))
-                .collect::<Vec<_>>()
-                .join("\n"),
+            header.local_env.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("\n"),
         )
         .context("writing session env")?;
 
@@ -779,7 +773,7 @@ impl Server {
                 .ok_or(anyhow!("error building login shell indicator"))?
                 .to_str()
                 .ok_or(anyhow!("error parsing shell name as utf8"))?;
-            cmd.arg0(format!("-{}", shell_basename));
+            cmd.arg0(format!("-{shell_basename}"));
         };
 
         let noecho = self.config.get().noecho.unwrap_or(false);
@@ -795,7 +789,7 @@ impl Server {
                 let _ = nix::unistd::close(fd);
             }
             let err = cmd.exec();
-            eprintln!("shell exec err: {:?}", err);
+            eprintln!("shell exec err: {err:?}");
             std::process::exit(1);
         }
 
@@ -1104,6 +1098,6 @@ fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
 }
 
 fn exe_for_pid(pid: unistd::Pid) -> anyhow::Result<PathBuf> {
-    let path = std::fs::read_link(format!("/proc/{}/exe", pid))?;
+    let path = std::fs::read_link(format!("/proc/{pid}/exe"))?;
     Ok(path)
 }

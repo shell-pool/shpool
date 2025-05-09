@@ -143,7 +143,7 @@ impl Pager {
                 let _ = nix::unistd::close(fd);
             }
             let err = cmd.exec();
-            eprintln!("pager exec err: {:?}", err);
+            eprintln!("pager exec err: {err:?}");
             std::process::exit(1);
         }
         let pager_exited = Arc::new(AtomicBool::new(false));
@@ -387,7 +387,7 @@ pub enum PagerError {
 
 impl std::fmt::Display for PagerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "{:?}", self)?;
+        write!(f, "{self:?}")?;
         Ok(())
     }
 }

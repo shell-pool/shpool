@@ -320,7 +320,7 @@ pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> an
             let mut hasher = DefaultHasher::new();
             s.hash(&mut hasher);
             let hash = hasher.finish();
-            runtime_dir = runtime_dir.join(format!("{:x}", hash));
+            runtime_dir = runtime_dir.join(format!("{hash:x}"));
 
             PathBuf::from(s)
         }
