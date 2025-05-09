@@ -265,7 +265,7 @@ impl Chord {
         }
 
         if self.0.len() == 2 {
-            let ctrl_chord = format!("{}", self);
+            let ctrl_chord = format!("{self}");
             for (chord, code) in CONTROL_CODES.iter() {
                 if ctrl_chord == *chord {
                     return Ok(*code);
@@ -548,10 +548,10 @@ mod test {
             if errstr.is_empty() {
                 chord.check_valid()?;
             } else if let Err(e) = chord.check_valid() {
-                let got = format!("{:?}", e);
+                let got = format!("{e:?}");
                 assert!(got.contains(errstr));
             } else {
-                panic!("bad success, want err with: {}", errstr);
+                panic!("bad success, want err with: {errstr}");
             }
         }
 
@@ -631,7 +631,7 @@ mod test {
         let tokenizer = Lexer::new();
         for (src, errsubstr) in cases.into_iter() {
             if let Err(err) = tokenizer.tokenize(src.chars()) {
-                let errstr = format!("{:?}", err);
+                let errstr = format!("{err:?}");
                 assert!(errstr.contains(errsubstr));
             } else {
                 panic!("expected an error")

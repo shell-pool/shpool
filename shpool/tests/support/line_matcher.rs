@@ -64,7 +64,7 @@ where
 
             self.check_persistant_assertions(&line)?;
 
-            eprint!("scanning for /{}/... ", re);
+            eprint!("scanning for /{re}/... ");
             if compiled_re.is_match(&line) {
                 eprintln!(" match");
                 return Ok(());
@@ -118,7 +118,7 @@ where
 
             // Don't print the whole line so we don't include any control codes.
             // eprintln!("testing /{}/ against '{}'", re, &line);
-            eprintln!("testing /{}/ against line", re);
+            eprintln!("testing /{re}/ against line");
             return match Regex::new(re)?.captures(&line) {
                 Some(caps) => Ok(caps
                     .iter()
@@ -186,7 +186,7 @@ where
     fn drop(&mut self) {
         if !self.never_match_regex.is_empty() {
             if let Err(e) = self.drain() {
-                panic!("assertion failure during drain: {:?}", e);
+                panic!("assertion failure during drain: {e:?}");
             }
         }
     }

@@ -448,9 +448,9 @@ mod test {
 
         for (lhs, rhs, err_substr) in cases {
             if let Err(e) = Client::version_ord(lhs, rhs) {
-                eprintln!("ERR: {:?}", e);
-                eprintln!("EXPECTED SUBSTR: {}", err_substr);
-                let errstr = format!("{:?}", e);
+                eprintln!("ERR: {e:?}");
+                eprintln!("EXPECTED SUBSTR: {err_substr}");
+                let errstr = format!("{e:?}");
                 assert!(errstr.contains(err_substr));
             } else {
                 panic!("no error though we expected one");

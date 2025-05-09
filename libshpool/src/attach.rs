@@ -63,7 +63,7 @@ pub fn run(
     while let Err(err) = do_attach(&config_manager, name.as_str(), &ttl, &cmd, &socket) {
         match err.downcast() {
             Ok(BusyError) if !force => {
-                eprintln!("session '{}' already has a terminal attached", name);
+                eprintln!("session '{name}' already has a terminal attached");
                 return Ok(());
             }
             Ok(BusyError) => {
@@ -84,10 +84,7 @@ pub fn run(
                 thread::sleep(time::Duration::from_millis(100));
 
                 if tries > MAX_FORCE_RETRIES {
-                    eprintln!(
-                        "session '{}' already has a terminal which remains attached even after attempting to detach it",
-                        name
-                    );
+                    eprintln!("session '{name}' already has a terminal which remains attached even after attempting to detach it");
                     return Err(anyhow!("could not detach session, forced attach failed"));
                 }
                 tries += 1;
@@ -120,7 +117,7 @@ fn do_attach(
     let tty_size = match TtySize::from_fd(0) {
         Ok(s) => s,
         Err(e) => {
-            warn!("stdin is not a tty, using default size (err: {:?})", e);
+            warn!("stdin is not a tty, using default size (err: {e:?})");
             TtySize { rows: 24, cols: 80, xpixel: 0, ypixel: 0 }
         }
     };
@@ -159,18 +156,18 @@ fn do_attach(
                 return Err(BusyError.into());
             }
             Forbidden(reason) => {
-                eprintln!("forbidden: {}", reason);
-                return Err(anyhow!("forbidden: {}", reason));
+                eprintln!("forbidden: {reason}");
+                return Err(anyhow!("forbidden: {reason}"));
             }
             Attached { warnings } => {
                 for warning in warnings.into_iter() {
-                    eprintln!("shpool: warn: {}", warning);
+                    eprintln!("shpool: warn: {warning}");
                 }
                 info!("attached to an existing session: '{}'", name);
             }
             Created { warnings } => {
                 for warning in warnings.into_iter() {
-                    eprintln!("shpool: warn: {}", warning);
+                    eprintln!("shpool: warn: {warning}");
                 }
                 info!("created a new session: '{}'", name);
             }
@@ -190,7 +187,7 @@ fn dial_client(socket: &PathBuf) -> anyhow::Result<protocol::Client> {
     match protocol::Client::new(socket) {
         Ok(ClientResult::JustClient(c)) => Ok(c),
         Ok(ClientResult::VersionMismatch { warning, client }) => {
-            eprintln!("warning: {}, try restarting your daemon", warning);
+            eprintln!("warning: {warning}, try restarting your daemon");
             eprintln!("hit enter to continue anyway or ^C to exit");
 
             let _ = io::stdin()
@@ -236,7 +233,7 @@ impl SignalHandler {
                     SIGWINCH => self.handle_sigwinch(),
                     sig => {
                         error!("unknown signal: {}", sig);
-                        panic!("unknown signal: {}", sig);
+                        panic!("unknown signal: {sig}");
                     }
                 };
                 if let Err(e) = res {

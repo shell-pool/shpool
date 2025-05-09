@@ -23,7 +23,7 @@ fn main() -> anyhow::Result<()> {
     let args = libshpool::Args::parse();
 
     if args.version() {
-        println!("shpool {}", VERSION);
+        println!("shpool {VERSION}");
         return Ok(());
     }
 

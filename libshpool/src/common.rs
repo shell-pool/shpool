@@ -26,8 +26,8 @@ pub fn resolve_sessions(sessions: &mut Vec<String>, action: &str) -> anyhow::Res
     }
 
     if sessions.is_empty() {
-        eprintln!("no session to {}", action);
-        return Err(anyhow!("no session to {}", action));
+        eprintln!("no session to {action}");
+        return Err(anyhow!("no session to {action}"));
     }
 
     Ok(())

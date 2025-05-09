@@ -46,7 +46,7 @@ fn empty() -> anyhow::Result<()> {
         assert!(!out.status.success());
 
         let stderr = String::from_utf8_lossy(&out.stderr[..]);
-        eprintln!("stderr: {}", stderr);
+        eprintln!("stderr: {stderr}");
         assert!(stderr.contains("no session to kill"));
 
         Ok(())
@@ -82,7 +82,7 @@ fn version_mismatch_client_newer() -> anyhow::Result<()> {
         assert!(out.status.success());
 
         let stderr = String::from_utf8_lossy(&out.stderr[..]);
-        println!("stderr: {}", stderr);
+        println!("stderr: {stderr}");
         assert!(stderr.contains("is newer"));
         assert!(stderr.contains("try restarting"));
 
