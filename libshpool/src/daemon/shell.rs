@@ -35,15 +35,9 @@ use crate::{
     consts,
     daemon::{config, exit_notify::ExitNotifier, keybindings, pager::PagerCtl, prompt, show_motd},
     protocol::ChunkExt as _,
-    test_hooks,
+    session_restore, test_hooks,
     tty::TtySizeExt as _,
 };
-
-// To prevent data getting dropped, we set this to be large, but we don't want
-// to use u16::MAX, since the vt100 crate eagerly fills in its rows, and doing
-// so is very memory intensive. The right fix is to get the vt100 crate to
-// lazily initialize its rows, but that is likely a bunch of work.
-const VTERM_WIDTH: u16 = 1024;
 
 const SHELL_KILL_TIMEOUT: time::Duration = time::Duration::from_millis(500);
 
@@ -215,26 +209,20 @@ impl SessionInner {
         let daily_messenger = Arc::clone(&self.daily_messenger);
         let mut needs_initial_motd_dump = self.needs_initial_motd_dump;
 
-        let vterm_width = {
-            let config = self.config.get();
-            config.vt100_output_spool_width.unwrap_or(VTERM_WIDTH)
-        };
         let mut pty_master = self.pty_master.is_parent()?;
         let watchable_master = pty_master;
         let name = self.name.clone();
-        let mut closure = move || {
+        let config = self.config.clone();
+        let closure = move || {
             let _s = span!(Level::INFO, "shell->client", s = name, cid = args.conn_id).entered();
 
-            let mut output_spool =
-                if matches!(args.session_restore_mode, config::SessionRestoreMode::Simple) {
-                    None
-                } else {
-                    Some(shpool_vt100::Parser::new(
-                        args.tty_size.rows,
-                        vterm_width,
-                        args.scrollback_lines,
-                    ))
-                };
+            let mut output_spool = session_restore::new(
+                config,
+                // TODO: #173 - fetch session restore mode from config dynamically
+                &args.session_restore_mode,
+                &args.tty_size,
+                args.scrollback_lines,
+            );
             let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
             let mut poll_fds = [poll::PollFd::new(
                 watchable_master.borrow_fd().ok_or(anyhow!("no master fd"))?,
@@ -272,7 +260,12 @@ impl SessionInner {
                                 } else {
                                     ClientConnectionStatus::New
                                 };
-                                // Resize the pty to be bigger than it needs to be,
+
+                                // Always instantly resize the spool, since we don't
+                                // need to inject a delay into that.
+                                output_spool.resize(conn.size.clone());
+
+                                // First resize the pty to be bigger than it needs to be,
                                 // we do this immediately so that the extra size
                                 // can "bake" for a little bit, which emacs seems
                                 // to require in order to pick up the jiggle.
@@ -284,11 +277,7 @@ impl SessionInner {
                                 };
                                 oversize.set_fd(pty_master.raw_fd().ok_or(anyhow!("no master fd"))?)?;
 
-                                // Always instantly resize the spool, since we don't
-                                // need to inject a delay into that.
-                                if let Some(s) = output_spool.as_mut() {
-                                    s.screen_mut().set_size(conn.size.rows, VTERM_WIDTH);
-                                }
+                                // Prepare a resize command for pty to execute later.
                                 resize_cmd = Some(ResizeCmd {
                                     size: conn.size.clone(),
                                     when: time::Instant::now().add(REATTACH_RESIZE_DELAY),
@@ -347,9 +336,7 @@ impl SessionInner {
                         match new_size {
                             Ok(size) => {
                                 info!("resize size={:?}", size);
-                                if let Some(s) = output_spool.as_mut() {
-                                    s.screen_mut().set_size(size.rows, VTERM_WIDTH);
-                                }
+                                output_spool.resize(size.clone());
                                 resize_cmd = Some(ResizeCmd {
                                     size,
                                     // No delay needed for ordinary resizes, just
@@ -419,25 +406,8 @@ impl SessionInner {
                 }
 
                 if do_reattach {
-                    use config::SessionRestoreMode::*;
-
-                    info!("executing reattach protocol (mode={:?})", args.session_restore_mode);
-                    let restore_buf = match (output_spool.as_mut(), &args.session_restore_mode) {
-                        (Some(spool), Screen) => {
-                            let (rows, cols) = spool.screen().size();
-                            info!(
-                                "computing screen restore buf with (rows={}, cols={})",
-                                rows, cols
-                            );
-                            spool.screen().contents_formatted()
-                        }
-                        (Some(spool), Lines(nlines)) => {
-                            let (_, cols) = spool.screen().size();
-                            info!("computing lines({}) restore buf with (cols={})", nlines, cols);
-                            spool.screen().last_n_rows_contents_formatted(*nlines)
-                        }
-                        (_, _) => vec![],
-                    };
+                    info!("executing reattach protocol (mode={:?})", &args.session_restore_mode);
+                    let restore_buf = output_spool.restore_buffer();
                     if let (true, ClientConnectionMsg::New(conn)) =
                         (!restore_buf.is_empty(), &mut client_conn)
                     {
@@ -506,10 +476,8 @@ impl SessionInner {
                     }
                 }
 
-                if !matches!(args.session_restore_mode, config::SessionRestoreMode::Simple) {
-                    if let (Some(s), true) = (output_spool.as_mut(), has_seen_prompt_sentinel) {
-                        s.process(buf);
-                    }
+                if has_seen_prompt_sentinel {
+                    output_spool.process(buf);
                 }
 
                 let mut reset_client_conn = false;
