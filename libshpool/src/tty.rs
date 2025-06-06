@@ -14,10 +14,7 @@
 
 use std::{
     io,
-    os::{
-        fd::BorrowedFd,
-        unix::io::{AsRawFd, RawFd},
-    },
+    os::{fd::BorrowedFd, unix::io::RawFd},
 };
 
 use anyhow::Context;
@@ -95,10 +92,7 @@ pub fn set_attach_flags() -> anyhow::Result<AttachFlagsGuard<'static>> {
     // Safety: stdin is live for the whole program duration
     let fd = unsafe { BorrowedFd::borrow_raw(consts::STDIN_FD) };
 
-    if !isatty(io::stdin().as_raw_fd())?
-        || !isatty(io::stdout().as_raw_fd())?
-        || !isatty(io::stderr().as_raw_fd())?
-    {
+    if !isatty(io::stdin())? || !isatty(io::stdout())? || !isatty(io::stderr())? {
         // We are not attached to a terminal, so don't futz with its flags.
         return Ok(AttachFlagsGuard { fd, old: None });
     }
