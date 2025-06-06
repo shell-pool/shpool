@@ -51,13 +51,13 @@ jobs:
         with:
           inherit-toolchain: true
           bins: cross
-      - uses: taiki-e/setup-cross-toolchain-action@0d2c6fcce937ba2ba77abf40e06449b74d60fa04
+      - uses: taiki-e/setup-cross-toolchain-action@0123528f956f923e7a476f4cc04882bc005e7c89
         with:
           target: ${{ matrix.target }}
         if: startsWith(matrix.os, 'ubuntu') && !contains(matrix.target, '-musl')
       - run: echo "RUSTFLAGS=${RUSTFLAGS} -C target-feature=+crt-static" >> "${GITHUB_ENV}"
         if: endsWith(matrix.target, 'windows-msvc')
-      - uses: taiki-e/upload-rust-binary-action@e7953b6078194a4ae5f5619632e3715db6275561
+      - uses: taiki-e/upload-rust-binary-action@db101489b509ad1c7acce163e118eb36a1650f98
         with:
           bin: shpool
           target: ${{ matrix.target }}
