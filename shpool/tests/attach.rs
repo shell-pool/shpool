@@ -1222,7 +1222,7 @@ fn motd_dump() -> anyhow::Result<()> {
         let tmp_dir_path = if env::var("SHPOOL_LEAVE_TEST_LOGS").is_ok() {
             // leave the tmp files around for later inspection if we have been asked
             // to leave the logs in place.
-            tmp_dir.into_path()
+            tmp_dir.keep()
         } else {
             PathBuf::from(tmp_dir.path())
         };
@@ -1300,7 +1300,7 @@ fn motd_pager() -> anyhow::Result<()> {
         let tmp_dir_path = if env::var("SHPOOL_LEAVE_TEST_LOGS").is_ok() {
             // leave the tmp files around for later inspection if we have been asked
             // to leave the logs in place.
-            tmp_dir.into_path()
+            tmp_dir.keep()
         } else {
             PathBuf::from(tmp_dir.path())
         };
@@ -1357,7 +1357,7 @@ fn motd_debounced_pager_debounces() -> anyhow::Result<()> {
         let tmp_dir_path = if env::var("SHPOOL_LEAVE_TEST_LOGS").is_ok() {
             // leave the tmp files around for later inspection if we have been asked
             // to leave the logs in place.
-            tmp_dir.into_path()
+            tmp_dir.keep()
         } else {
             PathBuf::from(tmp_dir.path())
         };
@@ -1418,7 +1418,7 @@ fn motd_debounced_pager_unbounces() -> anyhow::Result<()> {
         let tmp_dir_path = if env::var("SHPOOL_LEAVE_TEST_LOGS").is_ok() {
             // leave the tmp files around for later inspection if we have been asked
             // to leave the logs in place.
-            tmp_dir.into_path()
+            tmp_dir.keep()
         } else {
             PathBuf::from(tmp_dir.path())
         };
@@ -1482,7 +1482,7 @@ fn motd_env_test_pager_preserves_term_env_var() -> anyhow::Result<()> {
         let tmp_dir_path = if env::var("SHPOOL_LEAVE_TEST_LOGS").is_ok() {
             // leave the tmp files around for later inspection if we have been asked
             // to leave the logs in place.
-            tmp_dir.into_path()
+            tmp_dir.keep()
         } else {
             PathBuf::from(tmp_dir.path())
         };
@@ -1526,7 +1526,7 @@ fn dynamic_config_change() -> anyhow::Result<()> {
         let tmp_dir_path = if env::var("SHPOOL_LEAVE_TEST_LOGS").is_ok() {
             // leave the tmp files around for later inspection if we have been asked
             // to leave the logs in place.
-            tmp_dir.into_path()
+            tmp_dir.keep()
         } else {
             PathBuf::from(tmp_dir.path())
         };
@@ -1600,7 +1600,7 @@ fn autodaemonize() -> anyhow::Result<()> {
     support::dump_err(|| {
         let tmp_dir = tempfile::TempDir::with_prefix("shpool-test-autodaemonize")?;
         let tmp_dir_path = if env::var("SHPOOL_LEAVE_TEST_LOGS").is_ok() {
-            tmp_dir.into_path()
+            tmp_dir.keep()
         } else {
             PathBuf::from(tmp_dir.path())
         };

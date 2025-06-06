@@ -423,7 +423,7 @@ impl std::ops::Drop for Proc {
             eprintln!("err killing daemon proc: {e:?}");
         }
         if std::env::var("SHPOOL_LEAVE_TEST_LOGS").unwrap_or(String::from("")) == "true" {
-            self.local_tmp_dir.take().map(|d| d.into_path());
+            self.local_tmp_dir.take().map(|d| d.keep());
         }
     }
 }
