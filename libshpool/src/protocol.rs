@@ -31,6 +31,7 @@ use super::{consts, tty};
 
 const JOIN_POLL_DUR: time::Duration = time::Duration::from_millis(100);
 const JOIN_HANGUP_DUR: time::Duration = time::Duration::from_millis(300);
+const STDIN_POLL_DUR: time::Duration = time::Duration::from_millis(200);
 
 /// The centralized encoding function that should be used for all protocol
 /// serialization.
@@ -257,6 +258,7 @@ impl Client {
                 loop {
                     let nread = stdin.read(&mut buf).context("reading stdin from user")?;
                     if nread == 0 {
+                        thread::sleep(STDIN_POLL_DUR);
                         continue;
                     }
                     debug!("read {} bytes", nread);
