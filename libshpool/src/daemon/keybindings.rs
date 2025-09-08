@@ -289,6 +289,10 @@ impl Chord {
             return true;
         }
 
+        if key == "\\" {
+            return true;
+        }
+
         if key.len() != 1 {
             return false;
         }
@@ -385,6 +389,7 @@ impl Lexer {
                     for c in word_chars.iter() {
                         match *c {
                             '-' => tokens.push(Token::Dash),
+                            '\\' => tokens.push(Token::Key(String::from("\\"))),
                             'a'..='z' => tokens.push(Token::Key(String::from(*c))),
                             _ => return Err(anyhow!("unexpected char: '{}'", *c)),
                         }
