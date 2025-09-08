@@ -289,7 +289,7 @@ impl Chord {
             return true;
         }
 
-        if key == "\\" {
+        if matches!(key, "\\" | "[" | "]" | "@" | "^" | "_" | "?") {
             return true;
         }
 
@@ -390,6 +390,13 @@ impl Lexer {
                         match *c {
                             '-' => tokens.push(Token::Dash),
                             '\\' => tokens.push(Token::Key(String::from("\\"))),
+                            '[' => tokens.push(Token::Key(String::from("["))),
+                            ']' => tokens.push(Token::Key(String::from("]"))),
+                            '@' => tokens.push(Token::Key(String::from("@"))),
+                            '^' => tokens.push(Token::Key(String::from("^"))),
+                            '_' => tokens.push(Token::Key(String::from("_"))),
+                            '?' => tokens.push(Token::Key(String::from("?"))),
+                            '0'..='9' => tokens.push(Token::Key(String::from(*c))),
                             'a'..='z' => tokens.push(Token::Key(String::from(*c))),
                             _ => return Err(anyhow!("unexpected char: '{}'", *c)),
                         }
