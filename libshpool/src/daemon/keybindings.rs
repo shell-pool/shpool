@@ -528,7 +528,11 @@ mod test {
             ),
             (vec![("Ctrl-0", Action::Detach)], vec![127], BindingResult::Match(Action::Detach)),
             (vec![("Ctrl-\\", Action::Detach)], vec![28], BindingResult::Match(Action::Detach)),
-            (vec![("Ctrl-\\ d", Action::Detach)], vec![28, b'd'], BindingResult::Match(Action::Detach)),
+            (
+                vec![("Ctrl-\\ d", Action::Detach)],
+                vec![28, b'd'],
+                BindingResult::Match(Action::Detach),
+            ),
             (vec![("Ctrl-\\ d", Action::Detach)], vec![28], BindingResult::Partial),
         ];
 
@@ -629,9 +633,23 @@ mod test {
                 "Ctrl-a",
                 vec![Token::Key(String::from("Ctrl")), Token::Dash, Token::Key(String::from("a"))],
             ),
-            ("Ctrl-0", vec![Token::Key(String::from("Ctrl")), Token::Dash, Token::Key(String::from("0"))]),
-            ("Ctrl-\\", vec![Token::Key(String::from("Ctrl")), Token::Dash, Token::Key(String::from("\\"))]),
-            ("Ctrl-\\ d", vec![Token::Key(String::from("Ctrl")), Token::Dash, Token::Key(String::from("\\")), Token::Key(String::from("d"))]),
+            (
+                "Ctrl-0",
+                vec![Token::Key(String::from("Ctrl")), Token::Dash, Token::Key(String::from("0"))],
+            ),
+            (
+                "Ctrl-\\",
+                vec![Token::Key(String::from("Ctrl")), Token::Dash, Token::Key(String::from("\\"))],
+            ),
+            (
+                "Ctrl-\\ d",
+                vec![
+                    Token::Key(String::from("Ctrl")),
+                    Token::Dash,
+                    Token::Key(String::from("\\")),
+                    Token::Key(String::from("d")),
+                ],
+            ),
         ];
 
         let tokenizer = Lexer::new();
