@@ -1,4 +1,12 @@
 
+shpool-protocol (0.3.1) unstable; urgency=low
+
+  Other
+
+  * fix typo in README ([#252](https://github.com/shell-pool/shpool/pull/252))
+
+ -- Shpool Authors <shpool-eng@google.com>  Mon, 08 Sep 2025 19:52:50 +0000
+
 shpool-protocol (0.2.1) unstable; urgency=low
 
   Other
