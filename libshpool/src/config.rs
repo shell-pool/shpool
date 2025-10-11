@@ -15,7 +15,7 @@
 use std::{
     borrow::Cow,
     collections::HashMap,
-    env, fs,
+    fs,
     path::{Path, PathBuf},
     sync::{Arc, RwLock, RwLockReadGuard},
 };

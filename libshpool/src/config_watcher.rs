@@ -15,7 +15,7 @@
 use anyhow::{anyhow, Context as _, Result};
 use crossbeam_channel::{bounded, select, unbounded, Receiver, Sender};
 use notify::{
-    event::ModifyKind, recommended_watcher, Event, EventKind, INotifyWatcher, RecursiveMode,
+    event::ModifyKind, recommended_watcher, Event, EventKind, RecommendedWatcher, RecursiveMode,
     Watcher as _,
 };
 use std::{
@@ -31,7 +31,7 @@ use crate::test_hooks;
 /// Watches on `path`, returnes the watched path, which is the closest existing
 /// ancestor of `path`, and the immediate child that is of interest.
 pub fn best_effort_watch<'a>(
-    watcher: &mut INotifyWatcher,
+    watcher: &mut RecommendedWatcher,
     path: &'a Path,
 ) -> Result<(&'a Path, Option<&'a Path>)> {
     let mut watched_path = Err(anyhow!("empty path"));
@@ -206,7 +206,7 @@ struct ConfigWatcherInner<Handler> {
     handler: Handler,
 
     /// underlying notify-rs watcher
-    watcher: INotifyWatcher,
+    watcher: RecommendedWatcher,
     /// receiving notify events
     notify_rx: Receiver<Result<notify::Event, notify::Error>>,
 
@@ -430,11 +430,11 @@ fn handle_event(event: Event, paths: &HashMap<PathBuf, (PathBuf, PathBuf)>) -> (
 /// failed. Note that this will overwrite any existing state.
 /// Return whether reload is needed.
 fn watch_and_add(
-    watcher: &mut INotifyWatcher,
+    watcher: &mut RecommendedWatcher,
     entry: Entry<PathBuf, (PathBuf, PathBuf)>,
 ) -> Result<bool> {
     // make a version of watch path that doesn't retain a borrow in its return value
-    let best_effort_watch_owned = |watcher: &mut INotifyWatcher, path: &Path| {
+    let best_effort_watch_owned = |watcher: &mut RecommendedWatcher, path: &Path| {
         best_effort_watch(watcher, path)
             .map(|(w, ic)| (w.to_owned(), w.join(ic.unwrap_or_else(|| Path::new("")))))
     };
