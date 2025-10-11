@@ -1172,48 +1172,22 @@ fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
 fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
     use std::os::unix::io::AsRawFd;
 
-    const LOCAL_PEERCRED: libc::c_int = 0x001;
-
-    // xucred struct from macOS
-    #[repr(C)]
-    struct XuCred {
-        cr_version: u32,
-        cr_uid: libc::uid_t,
-        cr_ngroups: i16,
-        cr_groups: [libc::gid_t; 16],
-    }
-
-    // Get peer UID using LOCAL_PEERCRED
-    let mut xucred = XuCred {
-        cr_version: 0,
-        cr_uid: 0,
-        cr_ngroups: 0,
-        cr_groups: [0; 16],
-    };
-    let mut len = std::mem::size_of::<XuCred>() as libc::socklen_t;
+    let mut peer_uid: libc::uid_t = 0;
+    let mut peer_gid: libc::gid_t = 0;
     unsafe {
-        if libc::getsockopt(
-            sock.as_raw_fd(),
-            libc::SOL_LOCAL,
-            LOCAL_PEERCRED,
-            &mut xucred as *mut _ as *mut libc::c_void,
-            &mut len,
-        ) != 0
-        {
+        if libc::getpeereid(sock.as_raw_fd(), &mut peer_uid, &mut peer_gid) != 0 {
             return Err(anyhow!(
-                "could not get peer credentials from socket: {}",
+                "could not get peer uid from socket: {}",
                 io::Error::last_os_error()
             ));
         }
     }
-
-    let peer_uid = unistd::Uid::from_raw(xucred.cr_uid);
+    let peer_uid = unistd::Uid::from_raw(peer_uid);
     let self_uid = unistd::Uid::current();
     if peer_uid != self_uid {
         return Err(anyhow!("shpool prohibits connections across users"));
     }
 
-    // Get peer PID using LOCAL_PEERPID
     let mut peer_pid: libc::pid_t = 0;
     let mut len = std::mem::size_of::<libc::pid_t>() as libc::socklen_t;
     unsafe {
