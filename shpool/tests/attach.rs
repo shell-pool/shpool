@@ -1652,6 +1652,51 @@ fn autodaemonize() -> anyhow::Result<()> {
 
 #[test]
 #[timeout(30000)]
+fn config_tmp_default_dir() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc =
+            support::daemon::Proc::new("tmp_default_dir.toml", DaemonArgs::default())
+                .context("starting daemon proc")?;
+        let mut attach_proc = daemon_proc
+            .attach(
+                "sh1",
+                AttachArgs {
+                    config: Some(String::from("tmp_default_dir.toml")),
+                    ..Default::default()
+                },
+            )
+            .context("starting attach proc")?;
+
+        let mut line_matcher = attach_proc.line_matcher()?;
+
+        attach_proc.run_cmd("pwd")?;
+        line_matcher.scan_until_re("tmp$")?;
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
+fn cli_tmp_dir() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
+        let mut attach_proc = daemon_proc
+            .attach("sh1", AttachArgs { dir: Some(String::from("/tmp")), ..Default::default() })
+            .context("starting attach proc")?;
+
+        let mut line_matcher = attach_proc.line_matcher()?;
+
+        attach_proc.run_cmd("pwd")?;
+        line_matcher.scan_until_re("tmp$")?;
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
 fn version_mismatch_client_newer() -> anyhow::Result<()> {
     support::dump_err(|| {
         let mut daemon_proc = support::daemon::Proc::new(

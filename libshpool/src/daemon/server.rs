@@ -721,7 +721,12 @@ impl Server {
             cmd
         };
 
-        cmd.current_dir(user_info.home_dir.clone())
+        let start_dir = match header.dir.as_deref() {
+            None => user_info.home_dir.clone(),
+            Some(path) => String::from(path),
+        };
+        info!("spawning shell in '{}'", start_dir);
+        cmd.current_dir(start_dir)
             .stdin(process::Stdio::inherit())
             .stdout(process::Stdio::inherit())
             .stderr(process::Stdio::inherit())
