@@ -224,6 +224,11 @@ pub struct Config {
     /// initial shell
     pub env: Option<HashMap<String, String>>,
 
+    /// The directory to start new shells in. If this is '$HOME'
+    /// (the default) this will start in the user's home directory.
+    /// If it is '.', it will start wherever `shpool attach` is invoked.
+    pub default_dir: Option<String>,
+
     /// A list of environment variables to forward from the environment
     /// of the initial shell that invoked `shpool attach` to the newly
     /// launched shell. Note that this config option has no impact when
@@ -303,6 +308,7 @@ impl Config {
             nodaemonize_timeout: self.nodaemonize_timeout.or(another.nodaemonize_timeout),
             shell: self.shell.or(another.shell),
             env: self.env.or(another.env),
+            default_dir: self.default_dir.or(another.default_dir),
             forward_env: self.forward_env.or(another.forward_env),
             initial_path: self.initial_path.or(another.initial_path),
             session_restore_mode: self.session_restore_mode.or(another.session_restore_mode),

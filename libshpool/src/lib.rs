@@ -151,6 +151,14 @@ The command is broken up into a binary to invoke and a list of arguments to
 pass to the binary using the shell-words crate."
         )]
         cmd: Option<String>,
+        #[clap(
+            short,
+            long,
+            long_help = "The directory to start the shell in.
+
+$HOME by default. Use '.' for pwd."
+        )]
+        dir: Option<String>,
         #[clap(help = "The name of the shell session to create or attach to")]
         name: String,
     },
@@ -357,8 +365,8 @@ pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> an
             log_level_handle,
             socket,
         ),
-        Commands::Attach { force, ttl, cmd, name } => {
-            attach::run(config_manager, name, force, ttl, cmd, socket)
+        Commands::Attach { force, ttl, cmd, dir, name } => {
+            attach::run(config_manager, name, force, ttl, cmd, dir, socket)
         }
         Commands::Detach { sessions } => detach::run(sessions, socket),
         Commands::Kill { sessions } => kill::run(sessions, socket),

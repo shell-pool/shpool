@@ -1,0 +1,10 @@
+norc = true
+noecho = true
+shell = "/bin/bash"
+session_restore_mode = "simple"
+prompt_prefix = ""
+default_dir = "/tmp"
+
+[env]
+PS1 = "prompt> "
+TERM = ""

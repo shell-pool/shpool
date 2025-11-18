@@ -213,6 +213,10 @@ pub struct AttachHeader {
     /// If specified, a command to run instead of the users default shell.
     #[serde(default)]
     pub cmd: Option<String>,
+    /// If specified, the directory to start the shell in. If not, $HOME
+    /// should be used.
+    #[serde(default)]
+    pub dir: Option<String>,
 }
 
 impl AttachHeader {

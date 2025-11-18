@@ -47,6 +47,7 @@ pub struct AttachArgs {
     pub extra_env: Vec<(String, String)>,
     pub ttl: Option<time::Duration>,
     pub cmd: Option<String>,
+    pub dir: Option<String>,
 }
 
 pub struct HooksRecorder {
@@ -310,6 +311,10 @@ impl Proc {
         if let Some(cmd_str) = &args.cmd {
             cmd.arg("-c");
             cmd.arg(cmd_str);
+        }
+        if let Some(dir) = &args.dir {
+            cmd.arg("--dir");
+            cmd.arg(dir);
         }
         let proc = cmd.arg(name).spawn().context(format!("spawning attach proc for {name}"))?;
 
