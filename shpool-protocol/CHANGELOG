@@ -1,4 +1,12 @@
 
+shpool-protocol (0.3.2) unstable; urgency=low
+
+  Added
+
+  * add -d/--dir flag ([#271](https://github.com/shell-pool/shpool/pull/271))
+
+ -- Shpool Authors <shpool-eng@google.com>  Tue, 18 Nov 2025 17:11:59 +0000
+
 shpool-protocol (0.3.1) unstable; urgency=low
 
   Other
