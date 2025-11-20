@@ -1122,6 +1122,7 @@ fn prompt_prefix_bash() -> anyhow::Result<()> {
         let mut stdout = child.stdout.take().context("missing stdout")?;
         let mut stdout_str = String::from("");
         stdout.read_to_string(&mut stdout_str).context("slurping stdout")?;
+        eprintln!("stdout_str: {}", stdout_str);
         let stdout_re = Regex::new(".*session_name=sh1 prompt>.*")?;
         assert!(stdout_re.is_match(&stdout_str));
 

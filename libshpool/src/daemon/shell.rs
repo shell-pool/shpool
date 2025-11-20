@@ -106,7 +106,7 @@ pub struct SessionInner {
     pub term_db: Arc<termini::TermInfo>,
     pub daily_messenger: Arc<show_motd::DailyMessenger>,
     pub needs_initial_motd_dump: bool,
-    pub custom_cmd: bool,
+    pub supports_sentinels: bool,
 
     /// The join handle for the always-on background shell->client thread.
     /// Only wrapped in an option so we can spawn the thread after
@@ -202,9 +202,7 @@ impl SessionInner {
 
         // We only scan for the prompt sentinel if the user has not set up a
         // custom command or blanked out the prompt_prefix config option.
-        let prompt_prefix_is_blank =
-            self.config.get().prompt_prefix.as_ref().map(|p| p.is_empty()).unwrap_or(false);
-        let mut has_seen_prompt_sentinel = self.custom_cmd || prompt_prefix_is_blank;
+        let mut has_seen_prompt_sentinel = !self.supports_sentinels;
 
         let daily_messenger = Arc::clone(&self.daily_messenger);
         let mut needs_initial_motd_dump = self.needs_initial_motd_dump;

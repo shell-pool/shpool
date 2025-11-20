@@ -43,10 +43,6 @@ pub fn maybe_inject_prefix(
     prompt_prefix: &str,
     session_name: &str,
 ) -> anyhow::Result<()> {
-    if prompt_prefix.is_empty() {
-        return Ok(());
-    }
-
     let shell_pid = pty_master.child_pid().ok_or(anyhow!("no child pid"))?;
     // scan for the startup sentinel so we know it is safe to sniff the shell
     let mut pty_master = pty_master.is_parent().context("expected parent")?;
@@ -180,9 +176,9 @@ pub struct SentinelScanner {
 
 impl SentinelScanner {
     /// Create a new sentinel scanner.
-    pub fn new(sentinal: &str) -> Self {
+    pub fn new(sentinel: &str) -> Self {
         let mut scanner = Trie::new();
-        scanner.insert(sentinal.bytes(), ());
+        scanner.insert(sentinel.bytes(), ());
 
         SentinelScanner { scanner, cursor: TrieCursor::Start, num_matches: 0 }
     }
