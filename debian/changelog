@@ -1,4 +1,12 @@
 
+shpool (0.9.4) unstable; urgency=low
+
+  Fixed
+
+  * hang when starting with nu shell ([#272](https://github.com/shell-pool/shpool/pull/272))
+
+ -- Shpool Authors <shpool-eng@google.com>  Fri, 21 Nov 2025 16:06:39 +0000
+
 shpool (0.9.3) unstable; urgency=low
 
   Added
