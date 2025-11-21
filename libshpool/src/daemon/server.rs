@@ -852,10 +852,16 @@ impl Server {
             }
         });
 
+        let prompt_prefix_is_blank =
+            self.config.get().prompt_prefix.as_ref().map(|p| p.is_empty()).unwrap_or(false);
+        let supports_sentinels =
+            header.cmd.is_none() && !prompt_prefix_is_blank && !does_not_support_sentinels(&shell);
+        info!("supports_sentianls={}", supports_sentinels);
+
         // Inject the prompt prefix, if any. For custom commands, avoid doing this
         // since we have no idea what the command is so the shell code probably won't
         // work.
-        if header.cmd.is_none() {
+        if supports_sentinels {
             info!("injecting prompt prefix");
             let prompt_prefix = self
                 .config
@@ -884,6 +890,7 @@ impl Server {
             heartbeat: heartbeat_tx,
             heartbeat_ack: heartbeat_ack_rx,
         }));
+
         let mut session_inner = shell::SessionInner {
             name: header.name.clone(),
             shell_to_client_ctl: Arc::clone(&shell_to_client_ctl),
@@ -894,7 +901,7 @@ impl Server {
             term_db,
             daily_messenger: Arc::clone(&self.daily_messenger),
             needs_initial_motd_dump: dump_motd_on_new_session,
-            custom_cmd: header.cmd.is_some(),
+            supports_sentinels,
         };
         let child_pid = session_inner.pty_master.child_pid().ok_or(anyhow!("no child pid"))?;
         session_inner.shell_to_client_join_h =
@@ -1053,6 +1060,13 @@ impl Server {
     fn session_dir<P: AsRef<Path>>(&self, session_name: P) -> PathBuf {
         self.runtime_dir.join("sessions").join(session_name)
     }
+}
+
+// HACK: this is not a good way to detect shells that don't support our
+// sentinel injection approach, but it is better than just hanging when a
+// user tries to start one.
+fn does_not_support_sentinels(shell: &str) -> bool {
+    shell.ends_with("nu")
 }
 
 #[instrument(skip_all)]
