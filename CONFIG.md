@@ -110,6 +110,29 @@ For the moment, control is the only modifier key supported, but the keybinding
 engine is designed to be able to handle more, so if you want a different one,
 you can file a bug with your feature request.
 
+## Initial Directory
+
+By default, shpool will always drop you off in your home directory when it
+creates a new shell, but you can tell it to start in a different place if
+you want. You can either use the `-d/--dir` switch on the `shpool attach`
+command to specify a directory, or you can set a new default in your
+config with
+
+```
+default_dir = "/path/to/default-dir"
+```
+
+Note that the path `.` has a special meaning. It indicates that shpool should
+start your shell in whatever directory `shpool attach` is invoked from. For
+example you can run `shpool attach -d . mysession` to start a session in the
+current directory. You can also put
+
+```
+default_dir = "."
+```
+
+in your config.
+
 ## motd
 
 `shpool` has support for displaying the message of the day (the message `sshd`
