@@ -20,5 +20,5 @@ Steps to reproduce the behavior:
 Run `shpool version` and paste the output here
 
 **Logs**
-Run `journalctl --output cat --user -u shpool` to pull logs related to shpool, then attach the file
+Run `journalctl --output cat --user-unit shpool` to pull logs related to shpool, then attach the file
 to this issue. You may need to trim the output with `tail`.
