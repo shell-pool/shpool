@@ -14,7 +14,7 @@ jobs:
       - run: SHPOOL_LEAVE_TEST_LOGS=true cargo test --all-features
       - name: Archive Logs
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         id: artifact-upload-step
         with:
           name: test-logs
