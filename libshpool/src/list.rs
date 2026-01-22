@@ -15,11 +15,17 @@
 use std::{io, path::PathBuf, time};
 
 use anyhow::Context;
+use chrono::{DateTime, Utc};
 use shpool_protocol::{ConnectHeader, ListReply};
 
 use crate::{protocol, protocol::ClientResult};
 
-pub fn run(socket: PathBuf) -> anyhow::Result<()> {
+pub fn run(
+    socket: PathBuf,
+    show_connected_at: bool,
+    show_disconnected_at: bool,
+    date_format: Option<String>,
+) -> anyhow::Result<()> {
     let mut client = match protocol::Client::new(socket) {
         Ok(ClientResult::JustClient(c)) => c,
         Ok(ClientResult::VersionMismatch { warning, client }) => {
@@ -38,12 +44,54 @@ pub fn run(socket: PathBuf) -> anyhow::Result<()> {
     client.write_connect_header(ConnectHeader::List).context("sending list connect header")?;
     let reply: ListReply = client.read_reply().context("reading reply")?;
 
-    println!("NAME\tSTARTED_AT\tSTATUS");
+    // Helper to format a timestamp
+    let format_ts = |ts: DateTime<Utc>| -> String {
+        match &date_format {
+            Some(fmt) => ts.format(fmt).to_string(),
+            None => ts.to_rfc3339(),
+        }
+    };
+
+    // Helper to format an optional timestamp
+    let format_opt_ts = |unix_ms: Option<i64>| -> String {
+        match unix_ms {
+            Some(ms) => {
+                let ts = time::UNIX_EPOCH + time::Duration::from_millis(ms as u64);
+                let ts = DateTime::<Utc>::from(ts);
+                format_ts(ts)
+            }
+            None => String::from("-"),
+        }
+    };
+
+    // Build header
+    let mut header = String::from("NAME\tSTARTED_AT");
+    if show_connected_at {
+        header.push_str("\tCONNECTED_AT");
+    }
+    if show_disconnected_at {
+        header.push_str("\tDISCONNECTED_AT");
+    }
+    header.push_str("\tSTATUS");
+    println!("{}", header);
+
     for session in reply.sessions.iter() {
         let started_at =
             time::UNIX_EPOCH + time::Duration::from_millis(session.started_at_unix_ms as u64);
-        let started_at = chrono::DateTime::<chrono::Utc>::from(started_at);
-        println!("{}\t{}\t{}", session.name, started_at.to_rfc3339(), session.status);
+        let started_at = DateTime::<Utc>::from(started_at);
+
+        let mut line = format!("{}\t{}", session.name, format_ts(started_at));
+        if show_connected_at {
+            line.push('\t');
+            line.push_str(&format_opt_ts(session.connected_at_unix_ms));
+        }
+        if show_disconnected_at {
+            line.push('\t');
+            line.push_str(&format_opt_ts(session.disconnected_at_unix_ms));
+        }
+        line.push('\t');
+        line.push_str(&session.status.to_string());
+        println!("{}", line);
     }
 
     Ok(())

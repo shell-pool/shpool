@@ -188,7 +188,14 @@ will be used if it is present in the environment.")]
 
     #[clap(about = "lists all the running shell sessions")]
     #[non_exhaustive]
-    List,
+    List {
+        #[clap(long, help = "Show CONNECTED_AT column")]
+        connected_at: bool,
+        #[clap(long, help = "Show DISCONNECTED_AT column")]
+        disconnected_at: bool,
+        #[clap(long, help = "strftime format for all timestamps")]
+        date_format: Option<String>,
+    },
 
     #[clap(about = "Dynamically change daemon log level
 
@@ -370,7 +377,9 @@ pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> an
         }
         Commands::Detach { sessions } => detach::run(sessions, socket),
         Commands::Kill { sessions } => kill::run(sessions, socket),
-        Commands::List => list::run(socket),
+        Commands::List { connected_at, disconnected_at, date_format } => {
+            list::run(socket, connected_at, disconnected_at, date_format)
+        }
         Commands::SetLogLevel { level } => set_log_level::run(level, socket),
     };
 
