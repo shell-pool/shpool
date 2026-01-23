@@ -62,6 +62,8 @@ const SHELL_TO_CLIENT_CTL_TIMEOUT: time::Duration = time::Duration::from_millis(
 #[derive(Debug)]
 pub struct Session {
     pub started_at: time::SystemTime,
+    pub connected_at: Mutex<Option<time::SystemTime>>,
+    pub disconnected_at: Mutex<Option<time::SystemTime>>,
     pub child_pid: libc::pid_t,
     pub child_exit_notifier: Arc<ExitNotifier>,
     pub shell_to_client_ctl: Arc<Mutex<ReaderCtl>>,
