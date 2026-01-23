@@ -189,7 +189,7 @@ will be used if it is present in the environment.")]
     #[clap(about = "lists all the running shell sessions")]
     #[non_exhaustive]
     List {
-        #[clap(short, long, help = "Output as JSON")]
+        #[clap(short, long, help = "Output as JSON, includes extra fields")]
         json: bool,
     },
 
