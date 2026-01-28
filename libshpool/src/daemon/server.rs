@@ -313,8 +313,19 @@ impl Server {
                         .map_err(|e| anyhow!("joining shell->client after child exit: {:?}", e))?
                         .context("within shell->client thread after child exit")?;
                 }
-            } else if let Err(err) = self.hooks.on_client_disconnect(&header.name) {
-                warn!("client_disconnect hook: {:?}", err);
+            } else {
+                // Client disconnected but shell is still running - set last_disconnected_at
+                {
+                    let _s = span!(Level::INFO, "disconnect_lock(shells)").entered();
+                    let shells = self.shells.lock().unwrap();
+                    if let Some(session) = shells.get(&header.name) {
+                        session.lifecycle_timestamps.lock().unwrap().last_disconnected_at =
+                            Some(time::SystemTime::now());
+                    }
+                }
+                if let Err(err) = self.hooks.on_client_disconnect(&header.name) {
+                    warn!("client_disconnect hook: {:?}", err);
+                }
             }
 
             info!("finished attach streaming section");
@@ -366,6 +377,8 @@ impl Server {
                         // the channel is still open so the subshell is still running
                         info!("taking over existing session inner");
                         inner.client_stream = Some(stream.try_clone()?);
+                        session.lifecycle_timestamps.lock().unwrap().last_connected_at =
+                            Some(time::SystemTime::now());
 
                         if inner
                             .shell_to_client_join_h
@@ -432,6 +445,8 @@ impl Server {
                 matches!(motd, MotdDisplayMode::Dump),
             )?;
 
+            session.lifecycle_timestamps.lock().unwrap().last_connected_at =
+                Some(time::SystemTime::now());
             shells.insert(header.name.clone(), Box::new(session));
             // fallthrough to bidi streaming
         } else if let Err(err) = self.hooks.on_reattach(&header.name) {
@@ -526,6 +541,9 @@ impl Server {
                     info!("detached session({}), status = {:?}", session, status);
                     if let shell::ClientConnectionStatus::DetachNone = status {
                         not_attached_sessions.push(session);
+                    } else {
+                        s.lifecycle_timestamps.lock().unwrap().last_disconnected_at =
+                            Some(time::SystemTime::now());
                     }
                 } else {
                     not_found_sessions.push(session);
@@ -607,10 +625,23 @@ impl Server {
                     Err(_) => SessionStatus::Attached,
                 };
 
+                let timestamps = v.lifecycle_timestamps.lock().unwrap();
+                let last_connected_at_unix_ms = timestamps
+                    .last_connected_at
+                    .map(|t| t.duration_since(time::UNIX_EPOCH).map(|d| d.as_millis() as i64))
+                    .transpose()?;
+
+                let last_disconnected_at_unix_ms = timestamps
+                    .last_disconnected_at
+                    .map(|t| t.duration_since(time::UNIX_EPOCH).map(|d| d.as_millis() as i64))
+                    .transpose()?;
+
                 Ok(Session {
                     name: k.to_string(),
                     started_at_unix_ms: v.started_at.duration_since(time::UNIX_EPOCH)?.as_millis()
                         as i64,
+                    last_connected_at_unix_ms,
+                    last_disconnected_at_unix_ms,
                     status,
                 })
             })
@@ -957,6 +988,7 @@ impl Server {
             child_pid,
             child_exit_notifier,
             started_at: time::SystemTime::now(),
+            lifecycle_timestamps: Mutex::new(shell::SessionLifecycleTimestamps::default()),
             inner: Arc::new(Mutex::new(session_inner)),
         })
     }

@@ -395,6 +395,23 @@ impl Proc {
             .context("spawning list proc")
     }
 
+    pub fn list_json(&mut self) -> anyhow::Result<process::Output> {
+        let log_file = self.tmp_dir.join(format!("list_{}.log", self.subproc_counter));
+        eprintln!("spawning list --json proc with log {:?}", &log_file);
+        self.subproc_counter += 1;
+
+        Command::new(shpool_bin()?)
+            .arg("-vv")
+            .arg("--log-file")
+            .arg(&log_file)
+            .arg("--socket")
+            .arg(&self.socket_path)
+            .arg("list")
+            .arg("--json")
+            .output()
+            .context("spawning list --json proc")
+    }
+
     // launches a `shpool set-log-level` process
     pub fn set_log_level(&mut self, level: &str) -> anyhow::Result<process::Output> {
         let log_file = self.tmp_dir.join(format!("set_log_level_{}.log", self.subproc_counter));

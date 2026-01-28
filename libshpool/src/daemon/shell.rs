@@ -58,10 +58,19 @@ const SHELL_TO_CLIENT_POLL_MS: u16 = 100;
 // shell->client thread.
 const SHELL_TO_CLIENT_CTL_TIMEOUT: time::Duration = time::Duration::from_millis(300);
 
+/// Timestamps tracking when sessions were last connected/disconnected.
+/// Combined behind a single lock to avoid taking multiple locks.
+#[derive(Debug, Default)]
+pub struct SessionLifecycleTimestamps {
+    pub last_connected_at: Option<time::SystemTime>,
+    pub last_disconnected_at: Option<time::SystemTime>,
+}
+
 /// Session represent a shell session
 #[derive(Debug)]
 pub struct Session {
     pub started_at: time::SystemTime,
+    pub lifecycle_timestamps: Mutex<SessionLifecycleTimestamps>,
     pub child_pid: libc::pid_t,
     pub child_exit_notifier: Arc<ExitNotifier>,
     pub shell_to_client_ctl: Arc<Mutex<ReaderCtl>>,

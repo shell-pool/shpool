@@ -249,6 +249,10 @@ pub struct Session {
     #[serde(default)]
     pub started_at_unix_ms: i64,
     #[serde(default)]
+    pub last_connected_at_unix_ms: Option<i64>,
+    #[serde(default)]
+    pub last_disconnected_at_unix_ms: Option<i64>,
+    #[serde(default)]
     pub status: SessionStatus,
 }
 

@@ -546,6 +546,7 @@ dependencies = [
  "rmp-serde",
  "serde",
  "serde_derive",
+ "serde_json",
  "shell-words",
  "shpool-protocol",
  "shpool_pty",
