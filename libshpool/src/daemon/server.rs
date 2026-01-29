@@ -144,9 +144,17 @@ impl Server {
     #[instrument(skip_all, fields(cid = conn_id))]
     fn handle_conn(&self, mut stream: UnixStream, conn_id: usize) -> anyhow::Result<()> {
         // We want to avoid timing out while blocking the main thread.
-        stream
-            .set_read_timeout(Some(consts::SOCK_STREAM_TIMEOUT))
-            .context("setting read timout on inbound session")?;
+        // On macOS, set_read_timeout returns EINVAL if the peer has already
+        // closed (e.g., a daemon presence probe). This is documented in the
+        // macOS setsockopt(2) man page. Treat this the same as a broken pipe.
+        if let Err(e) = stream.set_read_timeout(Some(consts::SOCK_STREAM_TIMEOUT)) {
+            #[cfg(target_os = "macos")]
+            if e.raw_os_error() == Some(libc::EINVAL) {
+                info!("EINVAL setting read timeout, peer already closed (presence probe)");
+                return Ok(());
+            }
+            return Err(e).context("setting read timeout on inbound session");
+        }
 
         // advertize our protocol version to the client so that it can
         // warn about mismatches
