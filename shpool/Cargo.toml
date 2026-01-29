@@ -15,6 +15,9 @@ rust-version = "1.74"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+test_hooks = ["libshpool/test_hooks"]
+
 [dependencies]
 clap = { version = "4", features = ["derive"] } # cli parsing
 anyhow = "1" # dynamic, unstructured errors

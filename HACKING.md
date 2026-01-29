@@ -212,3 +212,20 @@ leave log files in place you might run
 ```
 $ SHPOOL_LEAVE_TEST_LOGS=true cargo test --test attach happy_path -- --nocapture
 ```
+
+## Running Tests on macOS
+
+On macOS, some tests in the `config_watcher` module that rely on file
+system events can be flaky when run in parallel. This is because macOS
+uses FSEvents for file system notifications, which delivers events
+asynchronously and with less predictable timing under concurrent load
+compared to Linux's inotify.
+
+To run the tests reliably on macOS, use single-threaded execution:
+
+```
+$ cargo test -- --test-threads=1
+```
+
+This ensures tests run serially and don't interfere with each other's
+file system event delivery.

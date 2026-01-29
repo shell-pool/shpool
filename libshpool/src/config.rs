@@ -155,7 +155,7 @@ impl Manager {
 
     #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows")))]
     fn config_base_dir() -> anyhow::Result<PathBuf> {
-        match env::var("XDG_CONFIG_DIR") {
+        match std::env::var("XDG_CONFIG_DIR") {
             Ok(v) => Ok(PathBuf::from(v)),
             Err(_) => {
                 let user_info = user::info().context("getting user info")?;
