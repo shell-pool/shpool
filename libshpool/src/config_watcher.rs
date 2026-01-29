@@ -299,8 +299,11 @@ impl<Handler> ConfigWatcherInner<Handler> {
                 return Outcome::Timeout;
             }
 
-            // nothing ready to act immediately, notify debug_tx
-            self.debug_tx.send(()).unwrap();
+            // Only signal idle if there's no pending reload deadline.
+            // If there's a pending deadline, we have work to do (wait for timeout).
+            if self.reload_deadline.is_none() {
+                self.debug_tx.send(()).unwrap();
+            }
         }
 
         // finally blocking wait
@@ -718,9 +721,8 @@ mod test {
         fs::create_dir_all(state.target_path.parent().unwrap()).unwrap();
 
         state.watcher.worker_ready();
+        // Write twice in quick succession - both should be within debounce window
         fs::write(&state.target_path, "test").unwrap();
-
-        state.watcher.worker_ready();
         fs::write(&state.target_path, "another").unwrap();
 
         drop_watcher(state.watcher);
@@ -765,7 +767,7 @@ mod test {
         drop_watcher(state.watcher);
 
         let reloads: Vec<_> = state.rx.into_iter().collect();
-        assert_eq!(reloads.len(), 1);
+        assert_eq!(reloads.len(), 1, "expected 1 reload, got {}", reloads.len());
     }
 
     /// Regression test: ConfigWatcher should resolve symlinks in watched paths.
