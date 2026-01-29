@@ -28,6 +28,32 @@ use tracing::{debug, error, instrument, warn};
 
 use crate::test_hooks;
 
+/// Canonicalize a path, resolving symlinks in the existing portion.
+///
+/// This is needed because file system watchers (inotify, FSEvents, etc.) report
+/// canonical paths, so we need to store canonical paths for comparison.
+/// Unlike `std::fs::canonicalize`, this handles paths where the final
+/// components don't exist yet by canonicalizing the longest existing prefix.
+fn canonicalize_path(path: &Path) -> PathBuf {
+    // Try to canonicalize the whole path first
+    if let Ok(canonical) = path.canonicalize() {
+        return canonical;
+    }
+
+    // Find the longest existing ancestor and canonicalize that
+    for ancestor in path.ancestors().skip(1) {
+        if let Ok(canonical_ancestor) = ancestor.canonicalize() {
+            // Append the remaining (non-existent) components
+            if let Ok(remaining) = path.strip_prefix(ancestor) {
+                return canonical_ancestor.join(remaining);
+            }
+        }
+    }
+
+    // Fallback to original path if nothing could be canonicalized
+    path.to_path_buf()
+}
+
 /// Watches on `path`, returnes the watched path, which is the closest existing
 /// ancestor of `path`, and the immediate child that is of interest.
 pub fn best_effort_watch<'a>(
@@ -299,7 +325,8 @@ impl<Handler> ConfigWatcherInner<Handler> {
 
     /// Handle add watch command from `ConfigWatcher`.
     fn add_watch_by_command(&mut self, path: PathBuf) -> Result<()> {
-        match self.paths.entry(path) {
+        let canonical_path = canonicalize_path(&path);
+        match self.paths.entry(canonical_path) {
             Entry::Occupied(e) => Err(anyhow!("{} is already being watched", e.key().display())),
             e @ Entry::Vacant(_) => {
                 let reload = watch_and_add(&mut self.watcher, e)?;
@@ -435,8 +462,11 @@ fn watch_and_add(
 ) -> Result<bool> {
     // make a version of watch path that doesn't retain a borrow in its return value
     let best_effort_watch_owned = |watcher: &mut RecommendedWatcher, path: &Path| {
-        best_effort_watch(watcher, path)
-            .map(|(w, ic)| (w.to_owned(), w.join(ic.unwrap_or_else(|| Path::new("")))))
+        best_effort_watch(watcher, path).map(|(w, ic)| {
+            let watched = w.canonicalize().unwrap_or_else(|_| w.to_path_buf());
+            let immediate = watched.join(ic.unwrap_or_else(|| Path::new("")));
+            (watched, immediate)
+        })
     };
     match best_effort_watch_owned(watcher, entry.key()) {
         Ok((watched_path, immediate_child_path)) => {
@@ -676,7 +706,6 @@ mod test {
 
     // Wait for watcher to do its work and drop the watcher to close the channel
     fn drop_watcher(watcher: ConfigWatcher) {
-        // sleep time larger than 1 debounce time
         thread::sleep(DEBOUNCE_TIME * 2);
         watcher.worker_ready();
     }
@@ -737,5 +766,44 @@ mod test {
 
         let reloads: Vec<_> = state.rx.into_iter().collect();
         assert_eq!(reloads.len(), 1);
+    }
+
+    /// Regression test: ConfigWatcher should resolve symlinks in watched paths.
+    ///
+    /// File system watchers (inotify on Linux, FSEvents on macOS) report
+    /// canonical paths. If we watch through a symlink, we need to canonicalize
+    /// the stored path to match events we receive. Without this, events are
+    /// missed because the symlinked path doesn't match the canonical event
+    /// path.
+    ///
+    /// This commonly manifests on macOS where /var -> /private/var, but affects
+    /// any platform when symlinks are in the watched path.
+    #[test]
+    #[timeout(30000)]
+    fn symlink_path_is_canonicalized() {
+        use std::os::unix::fs::symlink;
+
+        let tmpdir = tempfile::tempdir().unwrap();
+
+        // setup: real dir + symlink to it
+        let real_dir = tmpdir.path().join("real");
+        fs::create_dir_all(&real_dir).unwrap();
+        let link_dir = tmpdir.path().join("link");
+        symlink(&real_dir, &link_dir).unwrap();
+
+        // watch through the symlink
+        let symlinked_target = link_dir.join("config.toml");
+        let (tx, rx) = unbounded();
+        let watcher =
+            ConfigWatcher::with_debounce(move || tx.send(()).unwrap(), DEBOUNCE_TIME).unwrap();
+        watcher.watch(&symlinked_target).unwrap();
+
+        watcher.worker_ready();
+        fs::write(&symlinked_target, "test content").unwrap();
+
+        drop_watcher(watcher);
+
+        let reloads: Vec<_> = rx.into_iter().collect();
+        assert_eq!(reloads.len(), 1, "expected 1 reload, got {}", reloads.len());
     }
 }
