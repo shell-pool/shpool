@@ -110,7 +110,7 @@ pub fn maybe_inject_prefix(
     let exe_path = std::env::current_exe()
         .context("getting current exe path")?
         .to_string_lossy()
-        .to_string();
+        .into_owned();
     let sentinel_cmd = format!("\n {}=prompt {} daemon\n", SENTINEL_FLAG_VAR, exe_path);
     script.push_str(sentinel_cmd.as_str());
 
@@ -126,7 +126,7 @@ fn wait_for_startup(pty_master: &mut shpool_pty::fork::Master) -> anyhow::Result
     let exe_path = std::env::current_exe()
         .context("getting current exe path")?
         .to_string_lossy()
-        .to_string();
+        .into_owned();
     let startup_sentinel_cmd = format!("\n {}=startup {} daemon\n", SENTINEL_FLAG_VAR, exe_path);
 
     pty_master
