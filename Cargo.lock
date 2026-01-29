@@ -959,9 +959,9 @@ dependencies = [
 
 [[package]]
 name = "shpool_pty"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01fbec35414044d1f92bfa2d8eb7faf6e658fb10eae3440e169e5a36c5969ab5"
+checksum = "78cc0114fa23588602dbb02375ef5eead7bfcbdc0f1bed9b54c5e0722e197df8"
 dependencies = [
  "errno 0.2.8",
  "libc",
