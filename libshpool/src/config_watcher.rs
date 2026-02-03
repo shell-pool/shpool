@@ -762,6 +762,7 @@ mod test {
         fs::write(state.base_path.join("other/config.toml"), "test").unwrap();
 
         // mv /base/other /base/sub
+        state.watcher.worker_ready();
         fs::rename(state.base_path.join("other"), state.base_path.join("sub")).unwrap();
 
         drop_watcher(state.watcher);
