@@ -966,7 +966,11 @@ fn lines_big_chunk_restore() -> anyhow::Result<()> {
         let mut daemon_proc =
             support::daemon::Proc::new("restore_many_lines.toml", DaemonArgs::default())
                 .context("starting daemon proc")?;
-        let bidi_done_w = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
+        let mut waiter = daemon_proc
+            .events
+            .take()
+            .unwrap()
+            .waiter(["daemon-wrote-s2c-chunk", "daemon-bidi-stream-done"]);
 
         // BUF_SIZE from src/consts.rs
         let max_chunk_size = 1024 * 16;
@@ -975,6 +979,9 @@ fn lines_big_chunk_restore() -> anyhow::Result<()> {
             let mut attach_proc =
                 daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
             let mut line_matcher = attach_proc.line_matcher()?;
+
+            // wait for shell output to avoid racing against the shell
+            waiter.wait_event("daemon-wrote-s2c-chunk")?;
 
             // generate a bunch of data that will cause the restore buffer to be too large
             // for a single chunk
@@ -988,7 +995,7 @@ fn lines_big_chunk_restore() -> anyhow::Result<()> {
 
         // wait until the daemon has noticed that the connection
         // has dropped before we attempt to open the connection again
-        daemon_proc.events = Some(bidi_done_w.wait_final_event("daemon-bidi-stream-done")?);
+        daemon_proc.events = Some(waiter.wait_final_event("daemon-bidi-stream-done")?);
 
         {
             let mut attach_proc =
