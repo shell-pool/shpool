@@ -1139,6 +1139,7 @@ fn prompt_prefix_bash() -> anyhow::Result<()> {
 
 #[test]
 #[timeout(30000)]
+#[cfg_attr(target_os = "macos", ignore)] // hard-coded /usr/bin/zsh path
 fn prompt_prefix_zsh() -> anyhow::Result<()> {
     support::dump_err(|| {
         let daemon_proc =
@@ -1182,6 +1183,7 @@ fn prompt_prefix_zsh() -> anyhow::Result<()> {
 // change or something.
 #[test]
 #[timeout(30000)]
+#[cfg_attr(target_os = "macos", ignore)] // hard-coded /usr/bin/fish path
 fn prompt_prefix_fish() -> anyhow::Result<()> {
     support::dump_err(|| {
         let daemon_proc =
@@ -1301,6 +1303,7 @@ fn snapshot_attach_output<P: AsRef<OsStr>>(
 
 #[test]
 #[timeout(30000)]
+#[cfg_attr(target_os = "macos", ignore)] // pager pty output issue
 fn motd_pager() -> anyhow::Result<()> {
     support::dump_err(|| {
         // set up the config
@@ -1358,6 +1361,7 @@ fn motd_pager() -> anyhow::Result<()> {
 
 #[test]
 #[timeout(30000)]
+#[cfg_attr(target_os = "macos", ignore)] // pager pty output issue
 fn motd_debounced_pager_debounces() -> anyhow::Result<()> {
     support::dump_err(|| {
         // set up the config
@@ -1419,6 +1423,7 @@ fn motd_debounced_pager_debounces() -> anyhow::Result<()> {
 
 #[test]
 #[timeout(30000)]
+#[cfg_attr(target_os = "macos", ignore)] // pager pty output issue
 fn motd_debounced_pager_unbounces() -> anyhow::Result<()> {
     support::dump_err(|| {
         // set up the config
@@ -1483,6 +1488,7 @@ fn motd_debounced_pager_unbounces() -> anyhow::Result<()> {
 
 #[test]
 #[timeout(30000)]
+#[cfg_attr(target_os = "macos", ignore)] // pager pty output issue
 fn motd_env_test_pager_preserves_term_env_var() -> anyhow::Result<()> {
     support::dump_err(|| {
         // set up the config

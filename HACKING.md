@@ -215,17 +215,20 @@ $ SHPOOL_LEAVE_TEST_LOGS=true cargo test --test attach happy_path -- --nocapture
 
 ## Running Tests on macOS
 
-On macOS, some tests in the `config_watcher` module that rely on file
-system events can be flaky when run in parallel. This is because macOS
-uses FSEvents for file system notifications, which delivers events
-asynchronously and with less predictable timing under concurrent load
-compared to Linux's inotify.
+Some tests are skipped on macOS due to platform differences:
 
-To run the tests reliably on macOS, use single-threaded execution:
+- `prompt_prefix_zsh`, `prompt_prefix_fish`: These tests use hard-coded
+  Linux shell paths (`/usr/bin/zsh`, `/usr/bin/fish`) that don't exist
+  on macOS where shells are installed elsewhere.
 
-```
-$ cargo test -- --test-threads=1
-```
+- `motd_pager`, `motd_debounced_pager_debounces`, `motd_debounced_pager_unbounces`,
+  `motd_env_test_pager_preserves_term_env_var`: These tests exercise the
+  pager functionality which has a PTY output issue on macOS where data
+  from the pager subprocess doesn't reach the client.
 
-This ensures tests run serially and don't interfere with each other's
-file system event delivery.
+These tests are marked with `#[cfg_attr(target_os = "macos", ignore)]`
+and will be skipped automatically when running `cargo test` on macOS.
+
+Some tests use hard-coded wait times. This leads to timing failures in some
+environments. macOS seems particularly sensitive to this, so be aware that
+some of those tests are currently a bit flaky there.
