@@ -3,22 +3,32 @@ on: [pull_request, workflow_call, workflow_dispatch]
 
 jobs:
   test:
-    name: cargo test --all-features
-    runs-on: ubuntu-22.04
+    name: cargo test --all-features (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
       - uses: moonrepo/setup-rust@ede6de059f8046a5e236c94046823e2af11ca670
         with:
           inherit-toolchain: true
-      - run: sudo apt-get install zsh fish libpam0g-dev
-      - run: SHPOOL_LEAVE_TEST_LOGS=true cargo test --all-features
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install zsh fish
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install fish
+      - run: SHPOOL_LEAVE_TEST_LOGS=true RUST_BACKTRACE=full cargo test --all-features
       - name: Archive Logs
         if: always()
         uses: actions/upload-artifact@v5
         id: artifact-upload-step
         with:
-          name: test-logs
-          path: /tmp/shpool-test*/*.log
+          name: test-logs-${{ matrix.os }}
+          path: /tmp/shpool-test/**/*.log
+          retention-days: 14
 
   # miri does not handle all the IO we do, disabled for now.
   #
