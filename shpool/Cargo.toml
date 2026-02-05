@@ -34,5 +34,5 @@ rand = "0.8" # tmp files for tests
 
 # rusty wrapper for unix apis
 [dependencies.nix]
-version = "0.30"
+version = "0.31"
 features = ["poll", "ioctl", "process", "signal", "fs"]
