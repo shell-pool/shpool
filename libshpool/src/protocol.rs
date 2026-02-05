@@ -257,7 +257,7 @@ impl Client {
                 loop {
                     let nread = stdin.read(&mut buf).context("reading stdin from user")?;
                     if nread == 0 {
-                        continue;
+                        return Ok(());
                     }
                     debug!("read {} bytes", nread);
 
@@ -371,12 +371,22 @@ impl Client {
             }
 
             match stdin_to_sock_h.join() {
-                Ok(v) => v?,
+                Ok(v) => {
+                    if let Err(e) = v {
+                        info!("stdin->sock finished with err: {}", e);
+                    }
+                }
                 Err(panic_err) => std::panic::resume_unwind(panic_err),
             }
             match sock_to_stdout_h.join() {
-                Ok(v) => v?,
-                Err(panic_err) => std::panic::resume_unwind(panic_err),
+                Ok(v) => {
+                    if let Err(e) = v {
+                        info!("sock->stdout finished with err: {}", e);
+                    }
+                }
+                Err(panic_err) => {
+                    std::panic::resume_unwind(panic_err);
+                }
             }
 
             Ok(exit_status.load(Ordering::Acquire))

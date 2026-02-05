@@ -50,6 +50,7 @@ pub struct AttachArgs {
     pub ttl: Option<time::Duration>,
     pub cmd: Option<String>,
     pub dir: Option<String>,
+    pub null_stdin: bool,
 }
 
 pub struct HooksRecorder {
@@ -287,7 +288,7 @@ impl Proc {
         let mut cmd = Command::new(shpool_bin()?);
         cmd.stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .stdin(Stdio::piped())
+            .stdin(if args.null_stdin { Stdio::null() } else { Stdio::piped() })
             .arg("--config-file")
             .arg(if let Some(config_file) = args.config {
                 testdata_file(config_file)

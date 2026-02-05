@@ -545,6 +545,7 @@ fn default_keybinding_detach() -> anyhow::Result<()> {
 
     a1.run_raw_cmd(vec![0, 17])?; // Ctrl-Space Ctrl-q
     let exit_status = a1.proc.wait()?;
+    dbg!(exit_status);
     assert!(exit_status.success());
 
     waiter.wait_event("daemon-bidi-stream-done")?;
@@ -1565,6 +1566,39 @@ fn version_mismatch_client_newer() -> anyhow::Result<()> {
     line_matcher.scan_until_re("hi$")?;
 
     Ok(())
+}
+
+#[test]
+#[timeout(30000)]
+fn detaches_on_null_stdin() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+        .context("starting daemon proc")?;
+    let _attach_proc = daemon_proc
+        .attach("sh1", AttachArgs { null_stdin: true, ..Default::default() })
+        .context("starting attach proc")?;
+
+    // not really needed, just here to test the events system
+    daemon_proc.await_event("daemon-about-to-listen")?;
+
+    loop {
+        thread::sleep(time::Duration::from_millis(300));
+
+        let list_json_out = daemon_proc.list_json()?;
+        let list_str = String::from_utf8_lossy(&list_json_out.stdout);
+        eprintln!("LIST OUTPUT: '{}'", list_str);
+
+        let list_blob: serde_json::Value = serde_json::from_str(&list_str)?;
+
+        if list_blob["sessions"].as_array().unwrap().is_empty() {
+            continue;
+        }
+        assert_eq!(list_blob["sessions"][0]["name"].as_str().unwrap(), "sh1");
+        if list_blob["sessions"][0]["status"].as_str().unwrap() != "Disconnected" {
+            continue;
+        }
+
+        return Ok(());
+    }
 }
 
 #[ignore] // TODO: re-enable, this test if flaky
