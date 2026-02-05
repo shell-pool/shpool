@@ -33,8 +33,8 @@ pub const STARTUP_SENTINEL: &str = "SHPOOL_STARTUP_SENTINEL";
 pub const PROMPT_SENTINEL: &str = "SHPOOL_PROMPT_SETUP_SENTINEL";
 
 // A magic env var which indicates that a `shpool daemon` invocation should
-// actually just print the given sentinal then exit. We do this because
-// using `echo` will cause the sentinal value to appear multiple times
+// actually just print the given sentinel then exit. We do this because
+// using `echo` will cause the sentinel value to appear multiple times
 // in the output stream. For the same reason, we don't set the value
 // to an actual sentianl, but instead either "startup" or "prompt".
 pub const SENTINEL_FLAG_VAR: &str = "SHPOOL__INTERNAL__PRINT_SENTINEL";

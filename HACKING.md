@@ -212,3 +212,23 @@ leave log files in place you might run
 ```
 $ SHPOOL_LEAVE_TEST_LOGS=true cargo test --test attach happy_path -- --nocapture
 ```
+
+## Running Tests on macOS
+
+Some tests are skipped on macOS due to platform differences:
+
+- `prompt_prefix_zsh`, `prompt_prefix_fish`: These tests use hard-coded
+  Linux shell paths (`/usr/bin/zsh`, `/usr/bin/fish`) that don't exist
+  on macOS where shells are installed elsewhere.
+
+- `motd_pager`, `motd_debounced_pager_debounces`, `motd_debounced_pager_unbounces`,
+  `motd_env_test_pager_preserves_term_env_var`: These tests exercise the
+  pager functionality which has a PTY output issue on macOS where data
+  from the pager subprocess doesn't reach the client.
+
+These tests are marked with `#[cfg_attr(target_os = "macos", ignore)]`
+and will be skipped automatically when running `cargo test` on macOS.
+
+Some tests use hard-coded wait times. This leads to timing failures in some
+environments. macOS seems particularly sensitive to this, so be aware that
+some of those tests are currently a bit flaky there.

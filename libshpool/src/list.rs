@@ -15,11 +15,12 @@
 use std::{io, path::PathBuf, time};
 
 use anyhow::Context;
+use chrono::{DateTime, Utc};
 use shpool_protocol::{ConnectHeader, ListReply};
 
 use crate::{protocol, protocol::ClientResult};
 
-pub fn run(socket: PathBuf) -> anyhow::Result<()> {
+pub fn run(socket: PathBuf, json_output: bool) -> anyhow::Result<()> {
     let mut client = match protocol::Client::new(socket) {
         Ok(ClientResult::JustClient(c)) => c,
         Ok(ClientResult::VersionMismatch { warning, client }) => {
@@ -38,12 +39,16 @@ pub fn run(socket: PathBuf) -> anyhow::Result<()> {
     client.write_connect_header(ConnectHeader::List).context("sending list connect header")?;
     let reply: ListReply = client.read_reply().context("reading reply")?;
 
-    println!("NAME\tSTARTED_AT\tSTATUS");
-    for session in reply.sessions.iter() {
-        let started_at =
-            time::UNIX_EPOCH + time::Duration::from_millis(session.started_at_unix_ms as u64);
-        let started_at = chrono::DateTime::<chrono::Utc>::from(started_at);
-        println!("{}\t{}\t{}", session.name, started_at.to_rfc3339(), session.status);
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&reply)?);
+    } else {
+        println!("NAME\tSTARTED_AT\tSTATUS");
+        for session in reply.sessions.iter() {
+            let started_at =
+                time::UNIX_EPOCH + time::Duration::from_millis(session.started_at_unix_ms as u64);
+            let started_at = DateTime::<Utc>::from(started_at);
+            println!("{}\t{}\t{}", session.name, started_at.to_rfc3339(), session.status);
+        }
     }
 
     Ok(())

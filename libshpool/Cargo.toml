@@ -1,6 +1,6 @@
 [package]
 name = "libshpool"
-version = "0.9.1"
+version = "0.9.3"
 edition = "2021"
 repository = "https://github.com/shell-pool/shpool"
 authors = ["Ethan Pailes <pailes@google.com>"]
@@ -24,10 +24,11 @@ anyhow = "1" # dynamic, unstructured errors
 chrono = "0.4" # getting current time and formatting it
 serde = "1" # config parsing, connection header formatting
 serde_derive = "1" # config parsing, connection header formatting
+serde_json = "1" # JSON output for list command
 toml = "0.8" # config parsing
 byteorder = "1" # endianness
 signal-hook = "0.3" # signal handling
-shpool_pty = "0.3.1" # spawning shells in ptys
+shpool_pty = "0.3.2" # spawning shells in ptys
 lazy_static = "1" # globals
 crossbeam-channel = "0.5" # channels
 libc = "0.2" # basic libc types
@@ -43,7 +44,7 @@ strip-ansi-escapes = "0.2.0" # cleaning up strings for pager display
 notify = { version = "7", features = ["crossbeam-channel"] }  # watch config file for updates
 libproc = "0.14.8" # sniffing shells by examining the subprocess
 daemonize = "0.5" # autodaemonization
-shpool-protocol = { version = "0.3.0", path = "../shpool-protocol" } # client-server protocol
+shpool-protocol = { version = "0.3.2", path = "../shpool-protocol" } # client-server protocol
 
 # rusty wrapper for unix apis
 [dependencies.nix]

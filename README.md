@@ -37,7 +37,7 @@ cargo install shpool
 If you don't use systemd, you can either port the `systemd/shpool.service`
 file to your own init system and use that, or you can use autodaemonization
 mode to tell shpool to just fork a daemon process on the fly if it notices
-one is not missing. Autodaemonization is enabled by default, so you don't
+one is missing. Autodaemonization is enabled by default, so you don't
 need to do anything special to use it, though you can control its behavior
 with the `nodaemonize` config option and the `-d/-D` command line switches.
 

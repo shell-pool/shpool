@@ -1,6 +1,6 @@
 [package]
 name = "shpool-protocol"
-version = "0.3.0"
+version = "0.3.2"
 edition = "2021"
 authors = ["Ethan Pailes <pailes@google.com>"]
 repository = "https://github.com/shell-pool/shpool"

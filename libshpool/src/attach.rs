@@ -32,6 +32,7 @@ pub fn run(
     force: bool,
     ttl: Option<String>,
     cmd: Option<String>,
+    dir: Option<String>,
     socket: PathBuf,
 ) -> anyhow::Result<()> {
     info!("\n\n======================== STARTING ATTACH ============================\n\n");
@@ -60,7 +61,7 @@ pub fn run(
 
     let mut detached = false;
     let mut tries = 0;
-    while let Err(err) = do_attach(&config_manager, name.as_str(), &ttl, &cmd, &socket) {
+    while let Err(err) = do_attach(&config_manager, name.as_str(), &ttl, &cmd, &dir, &socket) {
         match err.downcast() {
             Ok(BusyError) if !force => {
                 eprintln!("session '{name}' already has a terminal attached");
@@ -110,6 +111,7 @@ fn do_attach(
     name: &str,
     ttl: &Option<time::Duration>,
     cmd: &Option<String>,
+    dir: &Option<String>,
     socket: &PathBuf,
 ) -> anyhow::Result<()> {
     let mut client = dial_client(socket)?;
@@ -130,6 +132,16 @@ fn do_attach(
         }
     }
 
+    let cwd = String::from(env::current_dir().context("getting cwd")?.to_string_lossy());
+    let default_dir = config.get().default_dir.clone().unwrap_or(String::from("$HOME"));
+    let start_dir = match (default_dir.as_str(), dir.as_deref()) {
+        (".", None) => Some(cwd),
+        ("$HOME", None) => None,
+        (d, None) => Some(String::from(d)),
+        (_, Some(".")) => Some(cwd),
+        (_, Some(d)) => Some(String::from(d)),
+    };
+
     client
         .write_connect_header(ConnectHeader::Attach(AttachHeader {
             name: String::from(name),
@@ -143,6 +155,7 @@ fn do_attach(
                 .collect::<Vec<_>>(),
             ttl_secs: ttl.map(|d| d.as_secs()),
             cmd: cmd.clone(),
+            dir: start_dir,
         }))
         .context("writing attach header")?;
 

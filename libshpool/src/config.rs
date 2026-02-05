@@ -15,7 +15,7 @@
 use std::{
     borrow::Cow,
     collections::HashMap,
-    env, fs,
+    fs,
     path::{Path, PathBuf},
     sync::{Arc, RwLock, RwLockReadGuard},
 };
@@ -155,7 +155,7 @@ impl Manager {
 
     #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows")))]
     fn config_base_dir() -> anyhow::Result<PathBuf> {
-        match env::var("XDG_CONFIG_DIR") {
+        match std::env::var("XDG_CONFIG_DIR") {
             Ok(v) => Ok(PathBuf::from(v)),
             Err(_) => {
                 let user_info = user::info().context("getting user info")?;
@@ -223,6 +223,11 @@ pub struct Config {
     /// a table of environment variables to inject into the
     /// initial shell
     pub env: Option<HashMap<String, String>>,
+
+    /// The directory to start new shells in. If this is '$HOME'
+    /// (the default) this will start in the user's home directory.
+    /// If it is '.', it will start wherever `shpool attach` is invoked.
+    pub default_dir: Option<String>,
 
     /// A list of environment variables to forward from the environment
     /// of the initial shell that invoked `shpool attach` to the newly
@@ -303,6 +308,7 @@ impl Config {
             nodaemonize_timeout: self.nodaemonize_timeout.or(another.nodaemonize_timeout),
             shell: self.shell.or(another.shell),
             env: self.env.or(another.env),
+            default_dir: self.default_dir.or(another.default_dir),
             forward_env: self.forward_env.or(another.forward_env),
             initial_path: self.initial_path.or(another.initial_path),
             session_restore_mode: self.session_restore_mode.or(another.session_restore_mode),

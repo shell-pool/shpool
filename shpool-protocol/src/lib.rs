@@ -213,6 +213,10 @@ pub struct AttachHeader {
     /// If specified, a command to run instead of the users default shell.
     #[serde(default)]
     pub cmd: Option<String>,
+    /// If specified, the directory to start the shell in. If not, $HOME
+    /// should be used.
+    #[serde(default)]
+    pub dir: Option<String>,
 }
 
 impl AttachHeader {
@@ -244,6 +248,10 @@ pub struct Session {
     pub name: String,
     #[serde(default)]
     pub started_at_unix_ms: i64,
+    #[serde(default)]
+    pub last_connected_at_unix_ms: Option<i64>,
+    #[serde(default)]
+    pub last_disconnected_at_unix_ms: Option<i64>,
     #[serde(default)]
     pub status: SessionStatus,
 }

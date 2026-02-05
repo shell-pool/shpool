@@ -1,10 +1,10 @@
 norc = true
 noecho = true
 shell = "/bin/bash"
-session_restore_mode = { lines = 5000 }
+session_restore_mode = "simple"
 prompt_prefix = ""
+default_dir = "/tmp"
 
 [env]
 PS1 = "prompt> "
 TERM = ""
-BASH_SILENCE_DEPRECATION_WARNING = "1"
