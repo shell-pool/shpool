@@ -1,4 +1,16 @@
 
+shpool-protocol (0.3.3) unstable; urgency=low
+
+  Added
+
+  * *(list)* add --json flag with connect/disconnect timestamps ([#294](https://github.com/shell-pool/shpool/pull/294))
+
+  Other
+
+  * test on mac in CI ([#302](https://github.com/shell-pool/shpool/pull/302))
+
+ -- Shpool Authors <shpool-eng@google.com>  Thu, 05 Feb 2026 23:03:30 +0000
+
 shpool-protocol (0.3.2) unstable; urgency=low
 
   Added
