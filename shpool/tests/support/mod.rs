@@ -18,6 +18,7 @@ pub mod attach;
 pub mod daemon;
 pub mod events;
 pub mod line_matcher;
+pub mod tmpdir;
 
 pub fn dump_err(f: fn() -> anyhow::Result<()>) -> anyhow::Result<()> {
     let res = f();

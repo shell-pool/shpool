@@ -13,9 +13,8 @@ use std::{
 };
 
 use anyhow::{anyhow, Context};
-use tempfile::TempDir;
 
-use super::{attach, events::Events, shpool_bin, testdata_file, wait_until};
+use super::{attach, events::Events, shpool_bin, testdata_file, tmpdir, wait_until};
 
 /// Proc is a helper handle for a `shpool daemon` subprocess.
 /// It kills the subprocess when it goes out of scope.
@@ -23,10 +22,10 @@ pub struct Proc {
     pub proc: Option<process::Child>,
     subproc_counter: usize,
     pub log_file: PathBuf,
-    local_tmp_dir: Option<TempDir>,
-    pub tmp_dir: PathBuf,
+    pub tmp_dir: tmpdir::Dir,
     pub events: Option<Events>,
     pub socket_path: PathBuf,
+    config_path: PathBuf,
     // Only present when created by new_instrumented()
     pub hook_records: Option<Arc<Mutex<HookRecords>>>,
 }
@@ -105,17 +104,12 @@ pub struct HookRecords {
 
 impl Proc {
     pub fn new<P: AsRef<Path>>(config: P, args: DaemonArgs) -> anyhow::Result<Proc> {
-        let local_tmp_dir = tempfile::Builder::new()
-            .prefix("shpool-test")
-            .rand_bytes(20)
-            .tempdir()
-            .context("creating tmp dir")?;
-        let tmp_dir = local_tmp_dir.path().to_path_buf();
+        let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test")?;
 
-        let socket_path = tmp_dir.join("shpool.socket");
-        let test_hook_socket_path = tmp_dir.join("hook.sock");
+        let socket_path = tmp_dir.path().join("shpool.socket");
+        let test_hook_socket_path = tmp_dir.path().join("hook.sock");
 
-        let log_file = tmp_dir.join("daemon.log");
+        let log_file = tmp_dir.path().join("daemon.log");
         eprintln!("spawning daemon proc with log {:?}", &log_file);
 
         let resolved_config = if config.as_ref().exists() {
@@ -132,7 +126,7 @@ impl Proc {
             .arg("--socket")
             .arg(&socket_path)
             .arg("--config-file")
-            .arg(resolved_config);
+            .arg(&resolved_config);
 
         if args.verbosity == 1 {
             cmd.arg("-v");
@@ -166,12 +160,12 @@ impl Proc {
 
         Ok(Proc {
             proc: Some(proc),
-            local_tmp_dir: Some(local_tmp_dir),
             tmp_dir,
             log_file,
             subproc_counter: 0,
             events,
             socket_path,
+            config_path: resolved_config,
             hook_records: None,
         })
     }
@@ -183,16 +177,18 @@ impl Proc {
     // some self-exec issues with the fact that this daemon runs inside the
     // test binary.
     pub fn new_instrumented<P: AsRef<Path>>(config: P) -> anyhow::Result<Proc> {
-        let local_tmp_dir = tempfile::Builder::new()
-            .prefix("shpool-test")
-            .rand_bytes(20)
-            .tempdir()
-            .context("creating tmp dir")?;
-        let tmp_dir = local_tmp_dir.path().to_path_buf();
+        let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test")?;
 
-        let socket_path = tmp_dir.join("shpool.socket");
+        let socket_path = tmp_dir.path().join("shpool.socket");
 
-        let log_file = tmp_dir.join("daemon.log");
+        let log_file = tmp_dir.path().join("daemon.log");
+
+        let resolved_config = if config.as_ref().exists() {
+            PathBuf::from(config.as_ref())
+        } else {
+            testdata_file(config)
+        };
+
         eprintln!("spawning instrumented daemon thread with log {:?}", &log_file);
 
         let args = libshpool::Args {
@@ -212,7 +208,8 @@ impl Proc {
                     .map_err(|e| anyhow!("conversion error: {:?}", e))?,
             ),
             config_file: Some(
-                testdata_file(config)
+                resolved_config
+                    .clone()
                     .into_os_string()
                     .into_string()
                     .map_err(|e| anyhow!("conversion error: {:?}", e))?,
@@ -253,12 +250,12 @@ impl Proc {
 
         Ok(Proc {
             proc: None,
-            local_tmp_dir: Some(local_tmp_dir),
             tmp_dir,
             log_file,
             subproc_counter: 0,
             events: None,
             socket_path,
+            config_path: resolved_config,
             hook_records: Some(hook_records),
         })
     }
@@ -280,18 +277,24 @@ impl Proc {
     }
 
     pub fn attach(&mut self, name: &str, args: AttachArgs) -> anyhow::Result<attach::Proc> {
-        let log_file = self.tmp_dir.join(format!("attach_{}_{}.log", name, self.subproc_counter));
+        let log_file =
+            self.tmp_dir.path().join(format!("attach_{}_{}.log", name, self.subproc_counter));
         let test_hook_socket_path =
-            self.tmp_dir.join(format!("ah{}_{}.sock", name, self.subproc_counter));
+            self.tmp_dir.path().join(format!("ah{}_{}.sock", name, self.subproc_counter));
         eprintln!("spawning attach proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
         let mut cmd = Command::new(shpool_bin()?);
-        cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).stdin(Stdio::piped());
-        if let Some(config_file) = args.config {
-            cmd.arg("--config-file").arg(testdata_file(config_file));
-        }
-        cmd.arg("-v")
+        cmd.stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::piped())
+            .arg("--config-file")
+            .arg(if let Some(config_file) = args.config {
+                testdata_file(config_file)
+            } else {
+                self.config_path.clone()
+            })
+            .arg("-v")
             .arg("--log-file")
             .arg(&log_file)
             .arg("--socket")
@@ -335,7 +338,7 @@ impl Proc {
     }
 
     pub fn detach(&mut self, sessions: Vec<String>) -> anyhow::Result<process::Output> {
-        let log_file = self.tmp_dir.join(format!("detach_{}.log", self.subproc_counter));
+        let log_file = self.tmp_dir.path().join(format!("detach_{}.log", self.subproc_counter));
         eprintln!("spawning detach proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
@@ -354,7 +357,7 @@ impl Proc {
     }
 
     pub fn kill(&mut self, sessions: Vec<String>) -> anyhow::Result<process::Output> {
-        let log_file = self.tmp_dir.join(format!("kill_{}.log", self.subproc_counter));
+        let log_file = self.tmp_dir.path().join(format!("kill_{}.log", self.subproc_counter));
         eprintln!("spawning kill proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
@@ -391,7 +394,7 @@ impl Proc {
     /// list launches a `shpool list` process, collects the
     /// output and returns it as a string
     pub fn list(&mut self) -> anyhow::Result<process::Output> {
-        let log_file = self.tmp_dir.join(format!("list_{}.log", self.subproc_counter));
+        let log_file = self.tmp_dir.path().join(format!("list_{}.log", self.subproc_counter));
         eprintln!("spawning list proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
@@ -407,7 +410,7 @@ impl Proc {
     }
 
     pub fn list_json(&mut self) -> anyhow::Result<process::Output> {
-        let log_file = self.tmp_dir.join(format!("list_{}.log", self.subproc_counter));
+        let log_file = self.tmp_dir.path().join(format!("list_{}.log", self.subproc_counter));
         eprintln!("spawning list --json proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
@@ -425,7 +428,8 @@ impl Proc {
 
     // launches a `shpool set-log-level` process
     pub fn set_log_level(&mut self, level: &str) -> anyhow::Result<process::Output> {
-        let log_file = self.tmp_dir.join(format!("set_log_level_{}.log", self.subproc_counter));
+        let log_file =
+            self.tmp_dir.path().join(format!("set_log_level_{}.log", self.subproc_counter));
         eprintln!("spawning set-log-level proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
@@ -454,9 +458,6 @@ impl std::ops::Drop for Proc {
     fn drop(&mut self) {
         if let Err(e) = self.proc_kill() {
             eprintln!("err killing daemon proc: {e:?}");
-        }
-        if std::env::var("SHPOOL_LEAVE_TEST_LOGS").unwrap_or(String::from("")) == "true" {
-            self.local_tmp_dir.take().map(|d| d.keep());
         }
     }
 }

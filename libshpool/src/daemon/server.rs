@@ -39,7 +39,7 @@ use shpool_protocol::{
     SessionMessageReply, SessionMessageRequest, SessionMessageRequestPayload, SessionStatus,
     SetLogLevelReply, SetLogLevelRequest, VersionHeader,
 };
-use tracing::{error, info, instrument, span, warn, Level};
+use tracing::{debug, error, info, instrument, span, warn, Level};
 
 use crate::{
     config,
@@ -1101,6 +1101,7 @@ impl Server {
                 }
             }
         }
+        debug!("ENV: {env:?}");
 
         Ok(env)
     }
