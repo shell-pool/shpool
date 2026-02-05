@@ -58,10 +58,19 @@ const SHELL_TO_CLIENT_POLL_MS: u16 = 100;
 // shell->client thread.
 const SHELL_TO_CLIENT_CTL_TIMEOUT: time::Duration = time::Duration::from_millis(300);
 
+/// Timestamps tracking when sessions were last connected/disconnected.
+/// Combined behind a single lock to avoid taking multiple locks.
+#[derive(Debug, Default)]
+pub struct SessionLifecycleTimestamps {
+    pub last_connected_at: Option<time::SystemTime>,
+    pub last_disconnected_at: Option<time::SystemTime>,
+}
+
 /// Session represent a shell session
 #[derive(Debug)]
 pub struct Session {
     pub started_at: time::SystemTime,
+    pub lifecycle_timestamps: Mutex<SessionLifecycleTimestamps>,
     pub child_pid: libc::pid_t,
     pub child_exit_notifier: Arc<ExitNotifier>,
     pub shell_to_client_ctl: Arc<Mutex<ReaderCtl>>,
@@ -160,6 +169,22 @@ where
     })
 }
 
+/// Shutdown a socket, ignoring ENOTCONN errors which can occur on macOS
+/// when the peer has already disconnected.
+fn shutdown_socket(
+    stream: &std::os::unix::net::UnixStream,
+    how: std::net::Shutdown,
+) -> anyhow::Result<()> {
+    match stream.shutdown(how) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotConnected => {
+            debug!("ignoring ENOTCONN on socket shutdown");
+            Ok(())
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// Messages to the shell->client thread to add or remove a client connection.
 pub enum ClientConnectionMsg {
     /// Accept a newly connected client
@@ -253,7 +278,7 @@ impl SessionInner {
                                 do_reattach = true;
                                 let ack = if let ClientConnectionMsg::New(mut old_conn) = client_conn {
                                     Self::write_exit_chunk(&mut old_conn.sink, 0);
-                                    old_conn.stream.shutdown(net::Shutdown::Both)?;
+                                    shutdown_socket(&old_conn.stream, net::Shutdown::Both)?;
                                     ClientConnectionStatus::Replaced
                                 } else {
                                     ClientConnectionStatus::New
@@ -289,7 +314,7 @@ impl SessionInner {
                                 let ack = if let ClientConnectionMsg::New(mut old_conn) = client_conn {
                                     info!("disconnect, shutting down client stream");
                                     Self::write_exit_chunk(&mut old_conn.sink, 0);
-                                    old_conn.stream.shutdown(net::Shutdown::Both)?;
+                                    shutdown_socket(&old_conn.stream, net::Shutdown::Both)?;
                                     ClientConnectionStatus::Detached
                                 } else {
                                     info!("disconnect, no client stream to shut down");
@@ -308,7 +333,7 @@ impl SessionInner {
                                     // write an exit status frame so the attach process
                                     // can exit with the same exit code as the child shell
                                     Self::write_exit_chunk(&mut old_conn.sink, exit_status);
-                                    old_conn.stream.shutdown(net::Shutdown::Both)?;
+                                    shutdown_socket(&old_conn.stream, net::Shutdown::Both)?;
 
                                     ClientConnectionStatus::Detached
                                 } else {
@@ -643,7 +668,7 @@ impl SessionInner {
 
                     // the shell->client didn't close the client stream for us, so we'll need
                     // to handle that ourselves
-                    client_stream.shutdown(net::Shutdown::Both)?;
+                    shutdown_socket(&client_stream, net::Shutdown::Both)?;
                 } else {
                     let status = shell_to_client_ctl.client_connection_ack.recv_timeout(SHELL_TO_CLIENT_CTL_TIMEOUT)
                         .context("waiting for client connection ack (2)")?;
@@ -676,8 +701,7 @@ impl SessionInner {
 
         let c_done = child_done.load(Ordering::Acquire);
         if c_done {
-            client_stream
-                .shutdown(std::net::Shutdown::Both)
+            shutdown_socket(&client_stream, std::net::Shutdown::Both)
                 .context("shutting down client stream")?;
         }
 

@@ -1,3 +1,6 @@
+// NOTE: Socket paths in this module are kept short to stay under sun_path
+// limits (~104-108 bytes). macOS compounds this with long temp prefixes.
+
 use std::{
     default::Default,
     env,
@@ -110,7 +113,7 @@ impl Proc {
         let tmp_dir = local_tmp_dir.path().to_path_buf();
 
         let socket_path = tmp_dir.join("shpool.socket");
-        let test_hook_socket_path = tmp_dir.join("shpool-daemon-test-hook.socket");
+        let test_hook_socket_path = tmp_dir.join("hook.sock");
 
         let log_file = tmp_dir.join("daemon.log");
         eprintln!("spawning daemon proc with log {:?}", &log_file);
@@ -279,7 +282,7 @@ impl Proc {
     pub fn attach(&mut self, name: &str, args: AttachArgs) -> anyhow::Result<attach::Proc> {
         let log_file = self.tmp_dir.join(format!("attach_{}_{}.log", name, self.subproc_counter));
         let test_hook_socket_path =
-            self.tmp_dir.join(format!("attach_test_hook_{}_{}.socket", name, self.subproc_counter));
+            self.tmp_dir.join(format!("ah{}_{}.sock", name, self.subproc_counter));
         eprintln!("spawning attach proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
@@ -300,6 +303,14 @@ impl Proc {
             .arg("attach");
         if let Ok(xdg_runtime_dir) = env::var("XDG_RUNTIME_DIR") {
             cmd.env("XDG_RUNTIME_DIR", xdg_runtime_dir);
+        }
+        // HOME is needed on macOS (where XDG_RUNTIME_DIR is typically unset)
+        if let Ok(home) = env::var("HOME") {
+            cmd.env("HOME", home);
+        }
+        // PATH is needed for the shell subprocess
+        if let Ok(path) = env::var("PATH") {
+            cmd.env("PATH", path);
         }
         if args.force {
             cmd.arg("-f");
@@ -393,6 +404,23 @@ impl Proc {
             .arg("list")
             .output()
             .context("spawning list proc")
+    }
+
+    pub fn list_json(&mut self) -> anyhow::Result<process::Output> {
+        let log_file = self.tmp_dir.join(format!("list_{}.log", self.subproc_counter));
+        eprintln!("spawning list --json proc with log {:?}", &log_file);
+        self.subproc_counter += 1;
+
+        Command::new(shpool_bin()?)
+            .arg("-vv")
+            .arg("--log-file")
+            .arg(&log_file)
+            .arg("--socket")
+            .arg(&self.socket_path)
+            .arg("list")
+            .arg("--json")
+            .output()
+            .context("spawning list --json proc")
     }
 
     // launches a `shpool set-log-level` process

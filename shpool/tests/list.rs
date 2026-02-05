@@ -1,6 +1,6 @@
 use std::process::Command;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use ntest::timeout;
 use regex::Regex;
 
@@ -175,6 +175,46 @@ fn two_sessions() -> anyhow::Result<()> {
         dbg!(&stdout);
         assert!(sh1_re.is_match(&stdout));
         assert!(sh2_re.is_match(&stdout));
+
+        Ok(())
+    })
+}
+
+#[test]
+#[timeout(30000)]
+fn json_output() -> anyhow::Result<()> {
+    support::dump_err(|| {
+        let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
+        let bidi_enter_w = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-enter"]);
+
+        let _sess1 = daemon_proc.attach("sh1", Default::default())?;
+
+        daemon_proc.events = Some(bidi_enter_w.wait_final_event("daemon-bidi-stream-enter")?);
+
+        let out = daemon_proc.list_json()?;
+        assert!(out.status.success(), "list --json proc did not exit successfully");
+
+        let stderr = String::from_utf8_lossy(&out.stderr[..]);
+        assert_eq!(stderr.len(), 0, "expected no stderr");
+
+        let stdout = String::from_utf8_lossy(&out.stdout[..]);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&stdout).context("parsing JSON output")?;
+
+        let sessions = parsed
+            .get("sessions")
+            .ok_or_else(|| anyhow!("missing 'sessions' field in JSON output"))?
+            .as_array()
+            .ok_or_else(|| anyhow!("'sessions' is not an array"))?;
+
+        assert!(!sessions.is_empty(), "expected at least one session");
+
+        let first_session = &sessions[0];
+        assert!(
+            first_session.get("last_connected_at_unix_ms").is_some(),
+            "missing 'last_connected_at_unix_ms' field"
+        );
 
         Ok(())
     })
