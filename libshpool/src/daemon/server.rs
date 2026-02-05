@@ -144,9 +144,17 @@ impl Server {
     #[instrument(skip_all, fields(cid = conn_id))]
     fn handle_conn(&self, mut stream: UnixStream, conn_id: usize) -> anyhow::Result<()> {
         // We want to avoid timing out while blocking the main thread.
-        stream
-            .set_read_timeout(Some(consts::SOCK_STREAM_TIMEOUT))
-            .context("setting read timout on inbound session")?;
+        // On macOS, set_read_timeout returns EINVAL if the peer has already
+        // closed (e.g., a daemon presence probe). This is documented in the
+        // macOS setsockopt(2) man page. Treat this the same as a broken pipe.
+        if let Err(e) = stream.set_read_timeout(Some(consts::SOCK_STREAM_TIMEOUT)) {
+            #[cfg(target_os = "macos")]
+            if e.raw_os_error() == Some(libc::EINVAL) {
+                info!("EINVAL setting read timeout, peer already closed (presence probe)");
+                return Ok(());
+            }
+            return Err(e).context("setting read timeout on inbound session");
+        }
 
         // advertize our protocol version to the client so that it can
         // warn about mismatches
@@ -1138,12 +1146,14 @@ where
     protocol::encode_to(&header, serializeable_stream).context("writing reply")?;
 
     stream.set_write_timeout(None).context("unsetting write timout on inbound session")?;
+
     Ok(())
 }
 
 /// check_peer makes sure that a process dialing in on the shpool
 /// control socket has the same UID as the current user and that
 /// both have the same executable path.
+#[cfg(target_os = "linux")]
 fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
     use nix::sys::socket;
 
@@ -1166,9 +1176,69 @@ fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
+    use std::os::unix::io::AsRawFd;
+
+    let mut peer_uid: libc::uid_t = 0;
+    let mut peer_gid: libc::gid_t = 0;
+    // Safety: getpeereid is standard BSD FFI, all pointers are valid
+    unsafe {
+        if libc::getpeereid(sock.as_raw_fd(), &mut peer_uid, &mut peer_gid) != 0 {
+            return Err(anyhow!(
+                "could not get peer uid from socket: {}",
+                io::Error::last_os_error()
+            ));
+        }
+    }
+    let peer_uid = unistd::Uid::from_raw(peer_uid);
+    let self_uid = unistd::Uid::current();
+    if peer_uid != self_uid {
+        return Err(anyhow!("shpool prohibits connections across users"));
+    }
+
+    let mut peer_pid: libc::pid_t = 0;
+    let mut len = std::mem::size_of::<libc::pid_t>() as libc::socklen_t;
+    // Safety: getsockopt is standard POSIX FFI, all pointers and sizes are valid
+    unsafe {
+        if libc::getsockopt(
+            sock.as_raw_fd(),
+            libc::SOL_LOCAL,
+            libc::LOCAL_PEERPID,
+            &mut peer_pid as *mut _ as *mut libc::c_void,
+            &mut len,
+        ) != 0
+        {
+            return Err(anyhow!(
+                "could not get peer pid from socket: {}",
+                io::Error::last_os_error()
+            ));
+        }
+    }
+
+    let peer_pid = unistd::Pid::from_raw(peer_pid);
+    let self_pid = unistd::Pid::this();
+    let peer_exe = exe_for_pid(peer_pid).context("could not resolve exe from the pid")?;
+    let self_exe = exe_for_pid(self_pid).context("could not resolve our own exe")?;
+    if peer_exe != self_exe {
+        warn!("attach binary differs from daemon binary");
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
 fn exe_for_pid(pid: unistd::Pid) -> anyhow::Result<PathBuf> {
     let path = std::fs::read_link(format!("/proc/{pid}/exe"))?;
     Ok(path)
+}
+
+#[cfg(target_os = "macos")]
+fn exe_for_pid(pid: unistd::Pid) -> anyhow::Result<PathBuf> {
+    use libproc::proc_pid::pidpath;
+    let path = pidpath(pid.as_raw())
+        .map_err(|e| anyhow!("could not get exe path for pid {}: {:?}", pid, e))?;
+    Ok(PathBuf::from(path))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

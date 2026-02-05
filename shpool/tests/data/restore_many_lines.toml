@@ -7,3 +7,4 @@ prompt_prefix = ""
 [env]
 PS1 = "prompt> "
 TERM = ""
+BASH_SILENCE_DEPRECATION_WARNING = "1"
