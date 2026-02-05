@@ -1182,6 +1182,7 @@ fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
 
     let mut peer_uid: libc::uid_t = 0;
     let mut peer_gid: libc::gid_t = 0;
+    // Safety: getpeereid is standard BSD FFI, all pointers are valid
     unsafe {
         if libc::getpeereid(sock.as_raw_fd(), &mut peer_uid, &mut peer_gid) != 0 {
             return Err(anyhow!(
@@ -1198,6 +1199,7 @@ fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
 
     let mut peer_pid: libc::pid_t = 0;
     let mut len = std::mem::size_of::<libc::pid_t>() as libc::socklen_t;
+    // Safety: getsockopt is standard POSIX FFI, all pointers and sizes are valid
     unsafe {
         if libc::getsockopt(
             sock.as_raw_fd(),
