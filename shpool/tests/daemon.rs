@@ -17,17 +17,16 @@ use regex::Regex;
 
 mod support;
 
-use crate::support::daemon::{AttachArgs, DaemonArgs};
+use crate::support::{
+    daemon::{AttachArgs, DaemonArgs},
+    tmpdir,
+};
 
 #[test]
 #[timeout(30000)]
 fn start() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let tmp_dir = tempfile::Builder::new()
-            .prefix("shpool-test")
-            .rand_bytes(20)
-            .tempdir()
-            .context("creating tmp dir")?;
+        let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test")?;
 
         let mut child = Command::new(support::shpool_bin()?)
             .stdout(Stdio::piped())
@@ -64,13 +63,10 @@ fn start() -> anyhow::Result<()> {
 
 #[test]
 #[timeout(30000)]
+#[cfg_attr(target_os = "macos", ignore)] // systemd activation is a linux only feature
 fn systemd_activation() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let tmp_dir = tempfile::Builder::new()
-            .prefix("shpool-test")
-            .rand_bytes(20)
-            .tempdir()
-            .context("creating tmp dir")?;
+        let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test")?;
         let sock_path = tmp_dir.path().join("shpool.socket");
         let activation_sock = UnixListener::bind(&sock_path)?;
 
@@ -156,11 +152,7 @@ fn systemd_activation() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn config() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let tmp_dir = tempfile::Builder::new()
-            .prefix("shpool-test")
-            .rand_bytes(20)
-            .tempdir()
-            .context("creating tmp dir")?;
+        let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test")?;
 
         let mut child = Command::new(support::shpool_bin()?)
             .stdout(Stdio::piped())

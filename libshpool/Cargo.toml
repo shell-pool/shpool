@@ -48,7 +48,7 @@ shpool-protocol = { version = "0.3.2", path = "../shpool-protocol" } # client-se
 
 # rusty wrapper for unix apis
 [dependencies.nix]
-version = "0.30"
+version = "0.31"
 features = ["poll", "ioctl", "socket", "user", "process", "signal", "term", "fs"]
 
 [dependencies.tracing-subscriber]
