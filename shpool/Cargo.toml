@@ -30,8 +30,9 @@ tempfile = "3" # keeping tests hermetic
 regex = "1" # test assertions
 serde_json = "1" # json parsing
 ntest = "0.9" # test timeouts
+rand = "0.8" # tmp files for tests
 
 # rusty wrapper for unix apis
 [dependencies.nix]
-version = "0.30"
+version = "0.31"
 features = ["poll", "ioctl", "process", "signal", "fs"]

@@ -8,6 +8,14 @@ the whole terminal and provide window splitting and tiling features, `shpool`
 only provides persistent sessions. The biggest advantage of this approach is
 that `shpool` does not break native scrollback or copy-paste.
 
+## Platform Support
+
+`shpool` runs on linux and mac. Linux is the primary supported platform
+and mac currently still has a few tests which don't pass. HACKING.md
+has more info on the state of mac support. You may want to examine the
+test tree to see which tests are currently disabled to see the current
+state of mac support.
+
 ## Installation
 
 ### Installing from crates.io

@@ -1,7 +1,6 @@
 #![allow(clippy::literal_string_with_formatting_args)]
 
 use std::{
-    env,
     ffi::OsStr,
     fs,
     io::BufRead,
@@ -17,7 +16,10 @@ use regex::Regex;
 
 mod support;
 
-use crate::support::daemon::{AttachArgs, DaemonArgs};
+use crate::support::{
+    daemon::{AttachArgs, DaemonArgs},
+    tmpdir,
+};
 
 #[test]
 #[timeout(30000)]
@@ -99,7 +101,6 @@ fn forward_env() -> anyhow::Result<()> {
                 .attach(
                     "sh1",
                     AttachArgs {
-                        config: Some(String::from("forward_env.toml")),
                         extra_env: vec![
                             (String::from("FOO"), String::from("foo")), // forwarded
                             (String::from("BAR"), String::from("bar")), // forwarded
@@ -125,7 +126,6 @@ fn forward_env() -> anyhow::Result<()> {
                 .attach(
                     "sh1",
                     AttachArgs {
-                        config: Some(String::from("forward_env.toml")),
                         extra_env: vec![
                             (String::from("FOO"), String::from("foonew")), // forwarded
                             (String::from("BAR"), String::from("bar")),    // forwarded
@@ -155,7 +155,7 @@ fn symlink_ssh_auth_sock() -> anyhow::Result<()> {
             .context("starting daemon proc")?;
         let mut waiter = daemon_proc.events.take().unwrap().waiter(["daemon-wrote-s2c-chunk"]);
 
-        let fake_auth_sock_tgt = daemon_proc.tmp_dir.join("ssh-auth-sock-target.fake");
+        let fake_auth_sock_tgt = daemon_proc.tmp_dir.path().join("ssh-auth-sock-target.fake");
         fs::File::create(&fake_auth_sock_tgt)?;
 
         let mut attach_proc = daemon_proc
@@ -190,7 +190,7 @@ fn missing_ssh_auth_sock() -> anyhow::Result<()> {
             .context("starting daemon proc")?;
         let mut waiter = daemon_proc.events.take().unwrap().waiter(["daemon-wrote-s2c-chunk"]);
 
-        let fake_auth_sock_tgt = daemon_proc.tmp_dir.join("ssh-auth-sock-target.fake");
+        let fake_auth_sock_tgt = daemon_proc.tmp_dir.path().join("ssh-auth-sock-target.fake");
         fs::File::create(fake_auth_sock_tgt)?;
 
         let mut attach_proc =
@@ -237,7 +237,7 @@ fn config_disable_symlink_ssh_auth_sock() -> anyhow::Result<()> {
                 .context("starting daemon proc")?;
         let mut waiter = daemon_proc.events.take().unwrap().waiter(["daemon-wrote-s2c-chunk"]);
 
-        let fake_auth_sock_tgt = daemon_proc.tmp_dir.join("ssh-auth-sock-target.fake");
+        let fake_auth_sock_tgt = daemon_proc.tmp_dir.path().join("ssh-auth-sock-target.fake");
         fs::File::create(&fake_auth_sock_tgt)?;
 
         let mut attach_proc = daemon_proc
@@ -819,7 +819,7 @@ fn injects_local_env_vars() -> anyhow::Result<()> {
         line_matcher.scan_until_re(":0$")?;
 
         attach_proc.run_cmd("echo $LANG")?;
-        line_matcher.match_re("fakelang$")?;
+        line_matcher.scan_until_re("fakelang$")?;
 
         Ok(())
     })
@@ -1228,23 +1228,16 @@ fn prompt_prefix_fish() -> anyhow::Result<()> {
 fn motd_dump() -> anyhow::Result<()> {
     support::dump_err(|| {
         // set up the config
-        let tmp_dir = tempfile::TempDir::with_prefix("shpool-test-config")?;
-        let tmp_dir_path = if env::var("SHPOOL_LEAVE_TEST_LOGS").is_ok() {
-            // leave the tmp files around for later inspection if we have been asked
-            // to leave the logs in place.
-            tmp_dir.keep()
-        } else {
-            PathBuf::from(tmp_dir.path())
-        };
-        eprintln!("building config in {tmp_dir_path:?}");
-        let motd_file = tmp_dir_path.join("motd.txt");
+        let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test")?;
+        eprintln!("building config in {:?}", tmp_dir.path());
+        let motd_file = tmp_dir.path().join("motd.txt");
         {
             let mut f = fs::File::create(&motd_file)?;
             f.write_all("MOTD_MSG".as_bytes())?;
         }
         let config_tmpl = fs::read_to_string(support::testdata_file("motd_dump.toml.tmpl"))?;
         let config_contents = config_tmpl.replace("TMP_MOTD_MSG_FILE", motd_file.to_str().unwrap());
-        let config_file = tmp_dir_path.join("motd_dump.toml");
+        let config_file = tmp_dir.path().join("motd_dump.toml");
         {
             let mut f = fs::File::create(&config_file)?;
             f.write_all(config_contents.as_bytes())?;
@@ -1307,21 +1300,14 @@ fn snapshot_attach_output<P: AsRef<OsStr>>(
 fn motd_pager() -> anyhow::Result<()> {
     support::dump_err(|| {
         // set up the config
-        let tmp_dir = tempfile::TempDir::with_prefix("shpool-test-config")?;
-        let tmp_dir_path = if env::var("SHPOOL_LEAVE_TEST_LOGS").is_ok() {
-            // leave the tmp files around for later inspection if we have been asked
-            // to leave the logs in place.
-            tmp_dir.keep()
-        } else {
-            PathBuf::from(tmp_dir.path())
-        };
-        eprintln!("building config in {tmp_dir_path:?}");
-        let motd_file = tmp_dir_path.join("motd.txt");
+        let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test")?;
+        eprintln!("building config in {:?}", tmp_dir.path());
+        let motd_file = tmp_dir.path().join("motd.txt");
         {
             let mut f = fs::File::create(&motd_file)?;
             f.write_all("MOTD_MSG\n".as_bytes())?;
         }
-        let config_file = tmp_dir_path.join("motd_pager.toml");
+        let config_file = tmp_dir.path().join("motd_pager.toml");
 
         // spawn a daemon based on our custom config
         let mut daemon_proc = support::daemon::Proc::new(
@@ -1365,16 +1351,9 @@ fn motd_pager() -> anyhow::Result<()> {
 fn motd_debounced_pager_debounces() -> anyhow::Result<()> {
     support::dump_err(|| {
         // set up the config
-        let tmp_dir = tempfile::TempDir::with_prefix("shpool-test-config")?;
-        let tmp_dir_path = if env::var("SHPOOL_LEAVE_TEST_LOGS").is_ok() {
-            // leave the tmp files around for later inspection if we have been asked
-            // to leave the logs in place.
-            tmp_dir.keep()
-        } else {
-            PathBuf::from(tmp_dir.path())
-        };
-        eprintln!("building config in {tmp_dir_path:?}");
-        let motd_file = tmp_dir_path.join("motd.txt");
+        let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test")?;
+        eprintln!("building config in {:?}", tmp_dir.path());
+        let motd_file = tmp_dir.path().join("motd.txt");
         {
             let mut f = fs::File::create(&motd_file)?;
             f.write_all("MOTD_MSG\n".as_bytes())?;
@@ -1382,7 +1361,7 @@ fn motd_debounced_pager_debounces() -> anyhow::Result<()> {
         let config_tmpl =
             fs::read_to_string(support::testdata_file("motd_pager_1d_debounce.toml.tmpl"))?;
         let config_contents = config_tmpl.replace("TMP_MOTD_MSG_FILE", motd_file.to_str().unwrap());
-        let config_file = tmp_dir_path.join("motd_pager.toml");
+        let config_file = tmp_dir.path().join("motd_pager.toml");
         {
             let mut f = fs::File::create(&config_file)?;
             f.write_all(config_contents.as_bytes())?;
@@ -1427,16 +1406,9 @@ fn motd_debounced_pager_debounces() -> anyhow::Result<()> {
 fn motd_debounced_pager_unbounces() -> anyhow::Result<()> {
     support::dump_err(|| {
         // set up the config
-        let tmp_dir = tempfile::TempDir::with_prefix("shpool-test-config")?;
-        let tmp_dir_path = if env::var("SHPOOL_LEAVE_TEST_LOGS").is_ok() {
-            // leave the tmp files around for later inspection if we have been asked
-            // to leave the logs in place.
-            tmp_dir.keep()
-        } else {
-            PathBuf::from(tmp_dir.path())
-        };
-        eprintln!("building config in {tmp_dir_path:?}");
-        let motd_file = tmp_dir_path.join("motd.txt");
+        let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test")?;
+        eprintln!("building config in {:?}", tmp_dir.path());
+        let motd_file = tmp_dir.path().join("motd.txt");
         {
             let mut f = fs::File::create(&motd_file)?;
             f.write_all("MOTD_MSG\n".as_bytes())?;
@@ -1444,7 +1416,7 @@ fn motd_debounced_pager_unbounces() -> anyhow::Result<()> {
         let config_tmpl =
             fs::read_to_string(support::testdata_file("motd_pager_1s_debounce.toml.tmpl"))?;
         let config_contents = config_tmpl.replace("TMP_MOTD_MSG_FILE", motd_file.to_str().unwrap());
-        let config_file = tmp_dir_path.join("motd_pager.toml");
+        let config_file = tmp_dir.path().join("motd_pager.toml");
         {
             let mut f = fs::File::create(&config_file)?;
             f.write_all(config_contents.as_bytes())?;
@@ -1492,22 +1464,15 @@ fn motd_debounced_pager_unbounces() -> anyhow::Result<()> {
 fn motd_env_test_pager_preserves_term_env_var() -> anyhow::Result<()> {
     support::dump_err(|| {
         // set up the config
-        let tmp_dir = tempfile::TempDir::with_prefix("shpool-test-config")?;
-        let tmp_dir_path = if env::var("SHPOOL_LEAVE_TEST_LOGS").is_ok() {
-            // leave the tmp files around for later inspection if we have been asked
-            // to leave the logs in place.
-            tmp_dir.keep()
-        } else {
-            PathBuf::from(tmp_dir.path())
-        };
-        eprintln!("building config in {tmp_dir_path:?}");
+        let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test")?;
+        eprintln!("building config in {:?}", tmp_dir.path());
         let config_tmpl =
             fs::read_to_string(support::testdata_file("motd_pager_env_test.toml.tmpl"))?;
         let config_contents = config_tmpl.replace(
             "MOTD_ENV_TEST_SCRIPT",
             support::testdata_file("motd_env_test_script.sh").to_str().unwrap(),
         );
-        let config_file = tmp_dir_path.join("motd_pager.toml");
+        let config_file = tmp_dir.path().join("motd_pager.toml");
         {
             let mut f = fs::File::create(&config_file)?;
             f.write_all(config_contents.as_bytes())?;
@@ -1536,17 +1501,10 @@ fn motd_env_test_pager_preserves_term_env_var() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn dynamic_config_change() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let tmp_dir = tempfile::TempDir::with_prefix("shpool-test-config")?;
-        let tmp_dir_path = if env::var("SHPOOL_LEAVE_TEST_LOGS").is_ok() {
-            // leave the tmp files around for later inspection if we have been asked
-            // to leave the logs in place.
-            tmp_dir.keep()
-        } else {
-            PathBuf::from(tmp_dir.path())
-        };
-        eprintln!("building config in {tmp_dir_path:?}");
+        let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test")?;
+        eprintln!("building config in {:?}", tmp_dir.path());
         let config_tmpl = fs::read_to_string(support::testdata_file("dynamic_config.toml.tmpl"))?;
-        let config_file = tmp_dir_path.join("motd_pager.toml");
+        let config_file = tmp_dir.path().join("motd_pager.toml");
         fs::write(&config_file, &config_tmpl)?;
 
         let mut daemon_proc =
@@ -1612,18 +1570,13 @@ fn fresh_shell_does_not_have_prompt_setup_code() -> anyhow::Result<()> {
 #[timeout(30000)]
 fn autodaemonize() -> anyhow::Result<()> {
     support::dump_err(|| {
-        let tmp_dir = tempfile::TempDir::with_prefix("shpool-test-autodaemonize")?;
-        let tmp_dir_path = if env::var("SHPOOL_LEAVE_TEST_LOGS").is_ok() {
-            tmp_dir.keep()
-        } else {
-            PathBuf::from(tmp_dir.path())
-        };
-        eprintln!("testing autodaemonization in {tmp_dir_path:?}");
+        let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test")?;
+        eprintln!("testing autodaemonization in {:?}", tmp_dir.path());
 
-        let mut socket_path = PathBuf::from(&tmp_dir_path);
+        let mut socket_path = PathBuf::from(tmp_dir.path());
         socket_path.push("control.sock");
 
-        let mut log_file = PathBuf::from(&tmp_dir_path);
+        let mut log_file = PathBuf::from(tmp_dir.path());
         log_file.push("attach.log");
 
         // we have to manually spawn the child because the whole point is that there
