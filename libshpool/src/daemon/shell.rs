@@ -27,7 +27,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Context};
-use nix::{sys::signal, unistd::Pid};
+use nix::{poll::PollFlags, sys::signal, unistd::Pid};
 use shpool_protocol::{Chunk, ChunkKind, TtySize};
 use tracing::{debug, error, info, instrument, span, trace, warn, Level};
 
@@ -40,6 +40,8 @@ use crate::{
 };
 
 const SHELL_KILL_TIMEOUT: time::Duration = time::Duration::from_millis(500);
+
+const SHELL_EXIT_WAIT_DUR: time::Duration = time::Duration::from_millis(500);
 
 const SUPERVISOR_POLL_DUR: time::Duration = time::Duration::from_millis(300);
 
@@ -197,7 +199,7 @@ pub enum ClientConnectionMsg {
     Disconnect,
 }
 
-pub struct ReaderArgs {
+pub struct ShellToClientArgs {
     pub conn_id: usize,
     pub tty_size: TtySize,
     pub scrollback_lines: usize,
@@ -209,6 +211,7 @@ pub struct ReaderArgs {
     pub heartbeat: crossbeam_channel::Receiver<()>,
     // true if the client is still live, false if it has hung up on us
     pub heartbeat_ack: crossbeam_channel::Sender<bool>,
+    pub child_exit_notifier: Arc<ExitNotifier>,
 }
 
 impl SessionInner {
@@ -218,7 +221,7 @@ impl SessionInner {
     #[instrument(skip_all, fields(s = self.name))]
     pub fn spawn_shell_to_client(
         &self,
-        args: ReaderArgs,
+        args: ShellToClientArgs,
     ) -> anyhow::Result<thread::JoinHandle<anyhow::Result<()>>> {
         use nix::poll;
 
@@ -249,7 +252,7 @@ impl SessionInner {
             let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
             let mut poll_fds = [poll::PollFd::new(
                 watchable_master.borrow_fd().ok_or(anyhow!("no master fd"))?,
-                poll::PollFlags::POLLIN,
+                PollFlags::POLLIN | PollFlags::POLLHUP | PollFlags::POLLERR,
             )];
 
             // block until we get the first connection attached so that we don't drop
@@ -470,6 +473,24 @@ impl SessionInner {
                 }
                 if nready != 1 {
                     return Err(anyhow!("shell->client thread: expected exactly 1 ready fd"));
+                }
+                let hangup = poll_fds[0]
+                    .revents()
+                    .map(|r| r.intersects(PollFlags::POLLHUP | PollFlags::POLLERR))
+                    .unwrap_or(false);
+                if hangup {
+                    info!("pty master hung up, exiting shell->client thread");
+
+                    // If we have an attached client conn, make a best effort attempt
+                    // to forward the exit status.
+                    if let ClientConnectionMsg::New(mut conn) = client_conn {
+                        if let Some(exit_status) =
+                            args.child_exit_notifier.wait(Some(SHELL_EXIT_WAIT_DUR))
+                        {
+                            Self::write_exit_chunk(&mut conn.sink, exit_status);
+                        }
+                    }
+                    return Ok(());
                 }
                 let len = match pty_master.read(&mut buf) {
                     Ok(l) => l,

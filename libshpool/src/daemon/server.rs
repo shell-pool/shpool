@@ -307,9 +307,12 @@ impl Server {
                 if let Err(err) = self.hooks.on_shell_disconnect(&header.name) {
                     warn!("shell_disconnect hook: {:?}", err);
                 }
-                let _s = span!(Level::INFO, "2_lock(shells)").entered();
-                let mut shells = self.shells.lock().unwrap();
-                shells.remove(&header.name);
+
+                {
+                    let _s = span!(Level::INFO, "2_lock(shells)").entered();
+                    let mut shells = self.shells.lock().unwrap();
+                    shells.remove(&header.name);
+                }
 
                 // The child shell has exited, so the shell->client thread should
                 // attempt to read from its stdout and get an error, causing
@@ -872,6 +875,7 @@ impl Server {
         let waitable_child_pid = fork.child_pid().ok_or(anyhow!("missing child pid"))?;
         let session_name = header.name.clone();
         let notifiable_child_exit_notifier = Arc::clone(&child_exit_notifier);
+        let shell_to_client_child_exit_notifier = Arc::clone(&child_exit_notifier);
         thread::spawn(move || {
             let _s = span!(Level::INFO, "child_watcher", s = session_name, cid = conn_id).entered();
 
@@ -962,7 +966,7 @@ impl Server {
         };
         let child_pid = session_inner.pty_master.child_pid().ok_or(anyhow!("no child pid"))?;
         session_inner.shell_to_client_join_h =
-            Some(session_inner.spawn_shell_to_client(shell::ReaderArgs {
+            Some(session_inner.spawn_shell_to_client(shell::ShellToClientArgs {
                 conn_id,
                 tty_size: header.local_tty_size.clone(),
                 scrollback_lines: match (
@@ -981,6 +985,7 @@ impl Server {
                 tty_size_change_ack: tty_size_change_ack_tx,
                 heartbeat: heartbeat_rx,
                 heartbeat_ack: heartbeat_ack_tx,
+                child_exit_notifier: shell_to_client_child_exit_notifier,
             })?);
 
         if let Some(ttl_secs) = header.ttl_secs {
