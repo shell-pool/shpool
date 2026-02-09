@@ -1,4 +1,27 @@
 
+shpool (0.9.4) unstable; urgency=low
+
+  Added
+
+  * mac port
+  * *(list)* add --json flag with connect/disconnect timestamps ([#294](https://github.com/shell-pool/shpool/pull/294))
+
+  Fixed
+
+  * cpu pegging when shpool attach stdin is null ([#306](https://github.com/shell-pool/shpool/pull/306))
+  * hang when starting with nu shell ([#272](https://github.com/shell-pool/shpool/pull/272))
+  * bug where shpool gets wedged on shell hup ([#308](https://github.com/shell-pool/shpool/pull/308))
+
+  Other
+
+  * rip out useless test helper ([#305](https://github.com/shell-pool/shpool/pull/305))
+  * bump nix from 0.30.1 to 0.31.1 ([#296](https://github.com/shell-pool/shpool/pull/296))
+  * test on mac in CI ([#302](https://github.com/shell-pool/shpool/pull/302))
+  * bump tracing-subscriber from 0.3.19 to 0.3.20 ([#250](https://github.com/shell-pool/shpool/pull/250))
+  * refactor shell descriptor selection ([#274](https://github.com/shell-pool/shpool/pull/274))
+
+ -- Shpool Authors <shpool-eng@google.com>  Mon, 09 Feb 2026 19:12:34 +0000
+
 shpool (0.9.3) unstable; urgency=low
 
   Added
