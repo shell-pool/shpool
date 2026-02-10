@@ -1621,3 +1621,72 @@ fn up_arrow_no_crash() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[test]
+#[timeout(30000)]
+#[cfg_attr(target_os = "macos", ignore)]
+fn dynamic_session_restore_mode() -> anyhow::Result<()> {
+    let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test")?;
+    let config_tmpl = fs::read_to_string(support::testdata_file("dynamic_restore.toml.tmpl"))?;
+    let config_file = tmp_dir.path().join("shpool.toml");
+
+    // Start with "simple" mode
+    let config_contents = config_tmpl.replace("REPLACE_ME", "\"simple\"");
+    fs::write(&config_file, &config_contents)?;
+
+    let mut daemon_proc = support::daemon::Proc::new(&config_file, DaemonArgs::default())
+        .context("starting daemon proc")?;
+
+    // Register all expected events up front.
+    let mut waiter = daemon_proc.events.take().unwrap().waiter([
+        "daemon-bidi-stream-done", // s1 detach
+        "daemon-reload-config",    // config reload
+        "daemon-bidi-stream-done", // s2 detach
+    ]);
+
+    // Create session s1
+    {
+        let mut a1 = daemon_proc.attach("s1", Default::default()).context("starting s1")?;
+        let mut lm1 = a1.line_matcher()?;
+        a1.run_cmd("echo foo")?;
+        lm1.scan_until_re("foo$")?;
+    } // detach s1
+    waiter.wait_event("daemon-bidi-stream-done")?;
+
+    // Change config to { lines = 2 }
+    let config_contents = config_tmpl.replace("REPLACE_ME", "{ lines = 2 }");
+    fs::write(&config_file, config_contents)?;
+
+    waiter.wait_event("daemon-reload-config")?;
+
+    // Create session s2
+    {
+        let mut a2 = daemon_proc.attach("s2", Default::default()).context("starting s2")?;
+        let mut lm2 = a2.line_matcher()?;
+        a2.run_cmd("echo bar")?;
+        lm2.scan_until_re("bar$")?;
+    } // detach s2
+    daemon_proc.events = Some(waiter.wait_final_event("daemon-bidi-stream-done")?);
+
+    // Verify s1 still has "simple" behavior (no restore)
+    {
+        let mut a1 = daemon_proc.attach("s1", Default::default()).context("reattaching s1")?;
+        let mut lm1 = a1.line_matcher()?;
+        lm1.never_matches("foo$")?;
+
+        a1.run_cmd("echo s1_alive")?;
+        lm1.scan_until_re("s1_alive$")?;
+
+        a1.proc.kill()?;
+    }
+
+    // Verify s2 has "lines = 2" behavior (restores bar)
+    {
+        let mut a2 = daemon_proc.attach("s2", Default::default()).context("reattaching s2")?;
+        let mut lm2 = a2.line_matcher()?;
+        // It SHOULD see "bar" again on re-attach
+        lm2.scan_until_re("bar$")?;
+    }
+
+    Ok(())
+}
