@@ -245,6 +245,12 @@ pub struct Config {
     /// existing session.
     pub session_restore_mode: Option<SessionRestoreMode>,
 
+    /// Selects the virtual terminal to use for lines and screen
+    /// mode session restoration. By default, this is Vt100,
+    /// but you can opt into the experimental Vterm engine
+    /// if you want to try it out.
+    pub session_restore_engine: Option<SessionRestoreEngine>,
+
     /// The number of lines worth of output to keep in the output
     /// spool which is maintained along side a shell session.
     /// By default, 10000 lines.
@@ -312,6 +318,7 @@ impl Config {
             forward_env: self.forward_env.or(another.forward_env),
             initial_path: self.initial_path.or(another.initial_path),
             session_restore_mode: self.session_restore_mode.or(another.session_restore_mode),
+            session_restore_engine: self.session_restore_engine.or(another.session_restore_engine),
             output_spool_lines: self.output_spool_lines.or(another.output_spool_lines),
             vt100_output_spool_width: self
                 .vt100_output_spool_width
@@ -350,6 +357,16 @@ pub enum SessionRestoreMode {
     /// Emit enough output data to restore the last n lines of
     /// history from the output spool.
     Lines(u16),
+}
+
+#[derive(Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionRestoreEngine {
+    /// Use the shpool_vt100 crate for session restore.
+    #[default]
+    Vt100,
+    /// Use the shpool-vterm crate for session restore.
+    Vterm,
 }
 
 #[derive(Deserialize, Debug, Clone, Default)]
@@ -412,6 +429,12 @@ mod test {
             [[keybinding]]
             binding = "Ctrl-q a"
             action = "detach"
+            "#,
+            r#"
+            session_restore_engine = "vt100"
+            "#,
+            r#"
+            session_restore_engine = "vterm"
             "#,
         ];
 
