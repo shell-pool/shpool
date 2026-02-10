@@ -977,8 +977,6 @@ impl Server {
                     (None, Some(config::SessionRestoreMode::Lines(l))) => *l as usize,
                     (None, _) => DEFAULT_OUTPUT_SPOOL_LINES,
                 },
-                session_restore_mode:
-                    self.config.get().session_restore_mode.clone().unwrap_or_default(),
                 client_connection: client_connection_rx,
                 client_connection_ack: client_connection_ack_tx,
                 tty_size_change: tty_size_change_rx,
