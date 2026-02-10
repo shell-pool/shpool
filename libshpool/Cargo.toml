@@ -36,6 +36,7 @@ log = "0.4" # logging facade (not used directly, but required if we have tracing
 tracing = "0.1" # logging and performance monitoring facade
 rmp-serde = "1" # serialization for the control protocol
 shpool_vt100 = "0.1.3" # terminal emulation for the scrollback buffer
+shpool-vterm = "0.1.0" # alt terminal emulation for the scrollback buffer
 shell-words = "1" # parsing the -c/--cmd argument
 motd = { version = "0.2.2", default-features = false, features = [] } # getting the message-of-the-day
 termini = "1.0.0" # terminfo database

@@ -203,7 +203,6 @@ pub struct ShellToClientArgs {
     pub conn_id: usize,
     pub tty_size: TtySize,
     pub scrollback_lines: usize,
-    pub session_restore_mode: config::SessionRestoreMode,
     pub client_connection: crossbeam_channel::Receiver<ClientConnectionMsg>,
     pub client_connection_ack: crossbeam_channel::Sender<ClientConnectionStatus>,
     pub tty_size_change: crossbeam_channel::Receiver<TtySize>,
@@ -242,13 +241,8 @@ impl SessionInner {
         let closure = move || {
             let _s = span!(Level::INFO, "shell->client", s = name, cid = args.conn_id).entered();
 
-            let mut output_spool = session_restore::new(
-                config,
-                // TODO: #173 - fetch session restore mode from config dynamically
-                &args.session_restore_mode,
-                &args.tty_size,
-                args.scrollback_lines,
-            );
+            let mut output_spool =
+                session_restore::new(config, &args.tty_size, args.scrollback_lines);
             let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
             let mut poll_fds = [poll::PollFd::new(
                 watchable_master.borrow_fd().ok_or(anyhow!("no master fd"))?,
@@ -432,7 +426,7 @@ impl SessionInner {
                 }
 
                 if do_reattach {
-                    info!("executing reattach protocol (mode={:?})", &args.session_restore_mode);
+                    info!("executing reattach protocol");
                     let restore_buf = output_spool.restore_buffer();
                     if let (true, ClientConnectionMsg::New(conn)) =
                         (!restore_buf.is_empty(), &mut client_conn)
