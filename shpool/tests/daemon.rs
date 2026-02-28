@@ -1,7 +1,10 @@
 use std::{
     fmt::Write,
     io::Read,
-    os::unix::{net::UnixListener, process::CommandExt as _},
+    os::unix::{
+        net::{UnixListener, UnixStream},
+        process::CommandExt as _,
+    },
     path,
     process::{Command, Stdio},
     time,
@@ -251,6 +254,48 @@ fn cleanup_socket() -> anyhow::Result<()> {
     daemon_proc.proc_wait()?;
 
     assert!(!path::Path::new(&daemon_proc.socket_path).exists());
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
+fn stale_socket_autodaemonize() -> anyhow::Result<()> {
+    let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test")?;
+    let socket_path = tmp_dir.path().join("shpool.socket");
+
+    // Create a stale socket: UnixListener::drop() closes the fd but does NOT
+    // remove the socket file on Linux/macOS, leaving a dead file on disk.
+    {
+        let _listener = UnixListener::bind(&socket_path).context("binding stale socket")?;
+    }
+    assert!(socket_path.exists(), "stale socket file should persist after listener drop");
+    assert!(
+        matches!(
+            UnixStream::connect(&socket_path).map_err(|e| e.kind()),
+            Err(std::io::ErrorKind::ConnectionRefused)
+        ),
+        "expected ConnectionRefused on stale socket"
+    );
+
+    // shpool list --daemonize should succeed despite the stale socket file.
+    // Without the fix this times out with "control socket never came up".
+    let log_file = tmp_dir.path().join("shpool.log");
+    let out = Command::new(support::shpool_bin()?)
+        .arg("--daemonize")
+        .arg("--socket")
+        .arg(&socket_path)
+        .arg("--log-file")
+        .arg(&log_file)
+        .arg("--config-file")
+        .arg(support::testdata_file("norc.toml"))
+        .arg("list")
+        .output()
+        .context("running shpool list --daemonize")?;
+
+    // Best-effort cleanup of the background daemon spawned by --daemonize.
+    Command::new("pkill").arg("-f").arg(socket_path.to_string_lossy().as_ref()).output().ok();
+
+    assert!(out.status.success(), "shpool list should succeed despite stale socket");
     Ok(())
 }
 

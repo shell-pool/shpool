@@ -65,6 +65,14 @@ pub fn run(
         }
         Err(e) => {
             info!("no systemd activation socket: {:?}", e);
+            // If a stale socket file exists (file on disk, nothing listening),
+            // remove it before binding so we don't get EADDRINUSE.
+            if let Err(connect_err) = std::os::unix::net::UnixStream::connect(&socket) {
+                if connect_err.kind() == std::io::ErrorKind::ConnectionRefused {
+                    info!("removing stale socket file at {:?}", socket);
+                    std::fs::remove_file(&socket).context("removing stale socket before bind")?;
+                }
+            }
             (Some(socket.clone()), UnixListener::bind(&socket).context("binding to socket")?)
         }
     };

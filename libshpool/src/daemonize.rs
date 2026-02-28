@@ -33,11 +33,24 @@ where
 {
     let control_sock = control_sock.as_ref();
 
-    if UnixStream::connect(control_sock).is_ok() {
-        info!("daemon already running on {:?}, no need to autodaemonize", control_sock);
-        // There is already a daemon listening on the control socket, we
-        // don't need to do anything.
-        return Ok(());
+    match UnixStream::connect(control_sock) {
+        Ok(_) => {
+            info!("daemon already running on {:?}, no need to autodaemonize", control_sock);
+            // There is already a daemon listening on the control socket, we
+            // don't need to do anything.
+            return Ok(());
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
+            // The socket file exists but nothing is listening (stale socket).
+            // Remove it so the new daemon can bind successfully.
+            info!("stale socket at {:?}, removing before autodaemonizing", control_sock);
+            std::fs::remove_file(control_sock)
+                .with_context(|| format!("removing stale socket at {:?}", control_sock))?;
+        }
+        Err(_) => {
+            // Socket file does not exist or other error; fall through to spawn
+            // daemon.
+        }
     }
     info!("no daemon running on {:?}, autodaemonizing", control_sock);
 
