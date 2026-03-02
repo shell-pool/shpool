@@ -26,6 +26,7 @@ use super::{config, duration, protocol, protocol::ClientResult, test_hooks, tty:
 
 const MAX_FORCE_RETRIES: usize = 20;
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     config_manager: config::Manager,
     name: String,
