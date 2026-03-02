@@ -3,6 +3,17 @@
 
 Some tips for working on shpool.
 
+## AI Policy
+
+Do not use AI to generate issues or bug reports. Instead, just write what
+you prompted the AI with.
+
+When creating PRs, it's fine to use AI to write tests and understand the codebase.
+Application code can be fine as well, but make sure to review carefully
+and prevent the accumulation of bloat or needless abstraction. If you do use
+AI to generate code, you must review and test it carefully yourself. Do not
+send patches you don't understand.
+
 ## Installing From Source
 
 ### Install a rust toolchain
