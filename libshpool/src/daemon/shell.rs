@@ -53,7 +53,7 @@ const REATTACH_RESIZE_DELAY: time::Duration = time::Duration::from_millis(50);
 
 // The shell->client thread should poll frequently so detach/reattach control
 // messages are noticed quickly without spinning the CPU.
-const SHELL_TO_CLIENT_POLL_MS: u16 = 10;
+const SHELL_TO_CLIENT_POLL_MS: u16 = 50;
 
 // How long to wait before giving up while trying to talk to the
 // shell->client thread.
