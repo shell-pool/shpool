@@ -86,6 +86,47 @@ fn custom_cmd() -> anyhow::Result<()> {
 
 #[test]
 #[timeout(30000)]
+fn background_custom_cmd() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new(
+        "norc.toml",
+        DaemonArgs { listen_events: false, ..DaemonArgs::default() },
+    )
+    .context("starting daemon proc")?;
+    let marker_path = daemon_proc.tmp_dir.path().join("background-marker");
+    let cmd = format!("sh -c 'echo started > {}; exec sh'", marker_path.to_string_lossy());
+    let disconnected_re = Regex::new("sh1.*disconnected").expect("valid regex");
+
+    let mut bg_attach = daemon_proc
+        .attach(
+            "sh1",
+            AttachArgs { background: true, cmd: Some(cmd), null_stdin: true, ..Default::default() },
+        )
+        .context("starting background attach proc")?;
+    let bg_status = bg_attach.proc.wait().context("waiting for background attach proc")?;
+    assert!(bg_status.success(), "background attach did not exit successfully");
+
+    daemon_proc.wait_until_list_matches(|list_stdout| disconnected_re.is_match(list_stdout))?;
+
+    for _ in 0..50 {
+        if marker_path.exists() {
+            break;
+        }
+        thread::sleep(time::Duration::from_millis(100));
+    }
+    assert!(marker_path.exists(), "background command did not run");
+
+    let mut tty = daemon_proc
+        .attach("sh1", Default::default())
+        .context("re-attaching to background session")?;
+    let mut line_matcher = tty.line_matcher()?;
+    tty.run_cmd("echo reattached")?;
+    line_matcher.scan_until_re("reattached$")?;
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
 fn forward_env() -> anyhow::Result<()> {
     let mut daemon_proc = support::daemon::Proc::new("forward_env.toml", DaemonArgs::default())
         .context("starting daemon proc")?;
@@ -468,6 +509,62 @@ fn busy() -> anyhow::Result<()> {
     let mut tty2 = daemon_proc.attach("sh1", Default::default()).context("attaching from tty2")?;
     let mut line_matcher2 = tty2.stderr_line_matcher()?;
     line_matcher2.scan_until_re("already has a terminal attached$")?;
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
+fn busy_background() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new(
+        "norc.toml",
+        DaemonArgs { listen_events: false, ..DaemonArgs::default() },
+    )
+    .context("starting daemon proc")?;
+
+    let mut tty1 = daemon_proc.attach("sh1", Default::default()).context("attaching from tty1")?;
+    let mut line_matcher1 = tty1.line_matcher()?;
+    tty1.run_cmd("echo foo")?;
+    line_matcher1.scan_until_re("foo$")?;
+
+    let mut tty2 = daemon_proc
+        .attach("sh1", AttachArgs { background: true, ..Default::default() })
+        .context("background attaching from tty2")?;
+    let mut line_matcher2 = tty2.stderr_line_matcher()?;
+    line_matcher2.scan_until_re("already has a terminal attached$")?;
+    assert!(tty2.proc.wait()?.success(), "busy background attach should exit successfully");
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
+fn busy_background_force() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new(
+        "norc.toml",
+        DaemonArgs { listen_events: false, ..DaemonArgs::default() },
+    )
+    .context("starting daemon proc")?;
+    let disconnected_re = Regex::new("sh1.*disconnected").expect("valid regex");
+
+    let mut tty1 = daemon_proc.attach("sh1", Default::default()).context("attaching from tty1")?;
+    let mut line_matcher1 = tty1.line_matcher()?;
+    tty1.run_cmd("echo foo")?;
+    line_matcher1.scan_until_re("foo$")?;
+
+    let mut tty2 = daemon_proc
+        .attach("sh1", AttachArgs { background: true, force: true, ..Default::default() })
+        .context("force background attaching from tty2")?;
+    assert!(tty2.proc.wait()?.success(), "force background attach should exit successfully");
+
+    daemon_proc.wait_until_list_matches(|list_stdout| disconnected_re.is_match(list_stdout))?;
+
+    let mut tty3 = daemon_proc
+        .attach("sh1", Default::default())
+        .context("attaching from tty3 after force background")?;
+    let mut line_matcher3 = tty3.line_matcher()?;
+    tty3.run_cmd("echo recovered")?;
+    line_matcher3.scan_until_re("recovered$")?;
 
     Ok(())
 }
