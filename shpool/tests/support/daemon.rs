@@ -46,6 +46,7 @@ impl std::default::Default for DaemonArgs {
 pub struct AttachArgs {
     pub config: Option<String>,
     pub force: bool,
+    pub background: bool,
     pub extra_env: Vec<(String, String)>,
     pub ttl: Option<time::Duration>,
     pub cmd: Option<String>,
@@ -318,6 +319,9 @@ impl Proc {
         }
         if args.force {
             cmd.arg("-f");
+        }
+        if args.background {
+            cmd.arg("-b");
         }
         if let Some(ttl) = args.ttl {
             cmd.arg("--ttl");

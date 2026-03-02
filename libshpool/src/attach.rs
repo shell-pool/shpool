@@ -20,16 +20,18 @@ use shpool_protocol::{
     ResizeRequest, SessionMessageReply, SessionMessageRequest, SessionMessageRequestPayload,
     TtySize,
 };
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use super::{config, duration, protocol, protocol::ClientResult, test_hooks, tty::TtySizeExt as _};
 
 const MAX_FORCE_RETRIES: usize = 20;
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     config_manager: config::Manager,
     name: String,
     force: bool,
+    background: bool,
     ttl: Option<String>,
     cmd: Option<String>,
     dir: Option<String>,
@@ -47,7 +49,9 @@ pub fn run(
         return Ok(());
     }
 
-    SignalHandler::new(name.clone(), socket.clone()).spawn()?;
+    if !background {
+        SignalHandler::new(name.clone(), socket.clone()).spawn()?;
+    }
 
     let ttl = match &ttl {
         Some(src) => match duration::parse(src.as_str()) {
@@ -61,40 +65,71 @@ pub fn run(
 
     let mut detached = false;
     let mut tries = 0;
-    while let Err(err) = do_attach(&config_manager, name.as_str(), &ttl, &cmd, &dir, &socket) {
-        match err.downcast() {
-            Ok(BusyError) if !force => {
-                eprintln!("session '{name}' already has a terminal attached");
-                return Ok(());
-            }
-            Ok(BusyError) => {
-                if !detached {
-                    let mut client = dial_client(&socket)?;
-                    client
-                        .write_connect_header(ConnectHeader::Detach(DetachRequest {
-                            sessions: vec![name.clone()],
-                        }))
-                        .context("writing detach request header")?;
-                    let detach_reply: DetachReply = client.read_reply().context("reading reply")?;
-                    if !detach_reply.not_found_sessions.is_empty() {
-                        warn!("could not find session '{}' to detach it", name);
+    let attach_client = loop {
+        match do_attach(&config_manager, name.as_str(), background, &ttl, &cmd, &dir, &socket) {
+            Ok(client) => break client,
+            Err(err) => match err.downcast() {
+                Ok(BusyError) if !force => {
+                    eprintln!("session '{name}' already has a terminal attached");
+                    return Ok(());
+                }
+                Ok(BusyError) => {
+                    if !detached {
+                        let mut client = dial_client(&socket, background)?;
+                        client
+                            .write_connect_header(ConnectHeader::Detach(DetachRequest {
+                                sessions: vec![name.clone()],
+                            }))
+                            .context("writing detach request header")?;
+                        let detach_reply: DetachReply =
+                            client.read_reply().context("reading reply")?;
+                        if !detach_reply.not_found_sessions.is_empty() {
+                            warn!("could not find session '{}' to detach it", name);
+                        }
+
+                        detached = true;
                     }
+                    thread::sleep(time::Duration::from_millis(100));
 
-                    detached = true;
+                    if tries > MAX_FORCE_RETRIES {
+                        eprintln!("session '{name}' already has a terminal which remains attached even after attempting to detach it");
+                        return Err(anyhow!("could not detach session, forced attach failed"));
+                    }
+                    tries += 1;
                 }
-                thread::sleep(time::Duration::from_millis(100));
-
-                if tries > MAX_FORCE_RETRIES {
-                    eprintln!("session '{name}' already has a terminal which remains attached even after attempting to detach it");
-                    return Err(anyhow!("could not detach session, forced attach failed"));
-                }
-                tries += 1;
-            }
-            Err(err) => return Err(err),
+                Err(err) => return Err(err),
+            },
         }
+    };
+
+    if background {
+        // Close the attached connection first so the daemon can observe EOF.
+        // We still send an explicit Detach on a fresh connection as a best-effort
+        // fallback in case EOF processing is delayed.
+        drop(attach_client);
+        let mut client = dial_client(&socket, true)?;
+        client
+            .write_connect_header(ConnectHeader::Detach(DetachRequest {
+                sessions: vec![name.clone()],
+            }))
+            .context("writing detach request header")?;
+        let detach_reply: DetachReply = client.read_reply().context("reading reply")?;
+        if !detach_reply.not_found_sessions.is_empty() {
+            warn!("could not find session '{}' to detach it", name);
+        }
+        if !detach_reply.not_attached_sessions.is_empty() {
+            debug!(
+                "session '{}' was already detached while processing background detach request (expected)",
+                name
+            );
+        }
+        return Ok(());
     }
 
-    Ok(())
+    match attach_client.pipe_bytes() {
+        Ok(exit_status) => std::process::exit(exit_status),
+        Err(e) => Err(e),
+    }
 }
 
 #[derive(Debug)]
@@ -106,15 +141,20 @@ impl fmt::Display for BusyError {
 }
 impl std::error::Error for BusyError {}
 
+/// Attach to a session and return the connected client without piping stdio.
+///
+/// `background` is forwarded to `dial_client` to suppress the interactive
+/// version-mismatch prompt on stdin; no other behavior changes.
 fn do_attach(
     config: &config::Manager,
     name: &str,
+    background: bool,
     ttl: &Option<time::Duration>,
     cmd: &Option<String>,
     dir: &Option<String>,
     socket: &PathBuf,
-) -> anyhow::Result<()> {
-    let mut client = dial_client(socket)?;
+) -> anyhow::Result<protocol::Client> {
+    let mut client = dial_client(socket, background)?;
 
     let tty_size = match TtySize::from_fd(0) {
         Ok(s) => s,
@@ -131,7 +171,7 @@ fn do_attach(
             local_env_keys.push(var);
         }
     }
-    info!("local env keys: {forward_env:?}");
+    info!("local env keys: {local_env_keys:?}");
 
     let cwd = String::from(env::current_dir().context("getting cwd")?.to_string_lossy());
     let default_dir = config.get().default_dir.clone().unwrap_or(String::from("$HOME"));
@@ -191,23 +231,26 @@ fn do_attach(
         }
     }
 
-    match client.pipe_bytes() {
-        Ok(exit_status) => std::process::exit(exit_status),
-        Err(e) => Err(e),
-    }
+    Ok(client)
 }
 
-fn dial_client(socket: &PathBuf) -> anyhow::Result<protocol::Client> {
+fn dial_client(socket: &PathBuf, background: bool) -> anyhow::Result<protocol::Client> {
     match protocol::Client::new(socket) {
         Ok(ClientResult::JustClient(c)) => Ok(c),
         Ok(ClientResult::VersionMismatch { warning, client }) => {
-            eprintln!("warning: {warning}, try restarting your daemon");
-            eprintln!("hit enter to continue anyway or ^C to exit");
+            if background {
+                eprintln!(
+                    "warning: {warning}, proceeding in background mode; try restarting your daemon"
+                );
+            } else {
+                eprintln!("warning: {warning}, try restarting your daemon");
+                eprintln!("hit enter to continue anyway or ^C to exit");
 
-            let _ = io::stdin()
-                .lines()
-                .next()
-                .context("waiting for a continue through a version mismatch")?;
+                let _ = io::stdin()
+                    .lines()
+                    .next()
+                    .context("waiting for a continue through a version mismatch")?;
+            }
 
             Ok(client)
         }
