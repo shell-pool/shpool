@@ -64,6 +64,7 @@ impl SessionSpool for NullSpool {
     fn resize(&mut self, _: TtySize) {}
 
     fn restore_buffer(&self) -> Vec<u8> {
+        info!("generating null restore buf");
         vec![]
     }
 
@@ -121,10 +122,10 @@ impl SessionSpool for Vt100Lines {
 /// Creates a spool given a `mode`.
 pub fn new(
     config: config::Manager,
-    mode: &SessionRestoreMode,
     size: &TtySize,
     scrollback_lines: usize,
 ) -> Box<dyn SessionSpool + 'static> {
+    let mode = config.get().session_restore_mode.clone().unwrap_or_default();
     let vterm_width = config.vterm_width();
     match mode {
         SessionRestoreMode::Simple => Box::new(NullSpool),
@@ -134,7 +135,7 @@ pub fn new(
         }),
         SessionRestoreMode::Lines(nlines) => Box::new(Vt100Lines {
             parser: shpool_vt100::Parser::new(size.rows, vterm_width, scrollback_lines),
-            nlines: *nlines,
+            nlines,
             config,
         }),
     }
