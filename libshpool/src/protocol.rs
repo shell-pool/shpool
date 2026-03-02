@@ -23,14 +23,18 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use byteorder::{LittleEndian, ReadBytesExt as _, WriteBytesExt as _};
+use nix::unistd::isatty;
 use serde::{Deserialize, Serialize};
 use shpool_protocol::{Chunk, ChunkKind, ConnectHeader, VersionHeader};
 use tracing::{debug, error, info, instrument, span, trace, warn, Level};
 
 use super::{consts, tty};
 
-const JOIN_POLL_DUR: time::Duration = time::Duration::from_millis(100);
-const JOIN_HANGUP_DUR: time::Duration = time::Duration::from_millis(300);
+const DETACH_TTY_FAST_WAIT_DUR: time::Duration = time::Duration::from_millis(10);
+const MAX_DETACH_WAIT_DUR: time::Duration = time::Duration::from_millis(300);
+const DETACH_BACKOFF_INITIAL_DUR: time::Duration = time::Duration::from_millis(1);
+// Cap backoff steps so slow-path stays responsive while still avoiding busy waits.
+const DETACH_BACKOFF_MAX_STEP_DUR: time::Duration = time::Duration::from_millis(25);
 
 /// The centralized encoding function that should be used for all protocol
 /// serialization.
@@ -333,18 +337,49 @@ impl Client {
                 if sock_to_stdout_h.is_finished() {
                     nfinished_threads += 1;
                 }
+
                 if nfinished_threads > 0 {
                     if nfinished_threads < 2 {
-                        thread::sleep(JOIN_HANGUP_DUR);
-                        nfinished_threads = 0;
-                        if stdin_to_sock_h.is_finished() {
-                            info!("recheck: stdin->sock thread done");
-                            nfinished_threads += 1;
+                        // Fast-path: when server->client already ended (detach/disconnect),
+                        // stdin->sock can stay blocked on stdin. In that case, do a very
+                        // short grace wait and then exit quickly.
+                        // Slow-path: for other shutdown orders, keep compatibility by
+                        // waiting up to 300ms with backoff.
+                        let mut total_wait = time::Duration::ZERO;
+                        let mut next_sleep = DETACH_BACKOFF_INITIAL_DUR;
+                        let mut stdin_done = stdin_to_sock_h.is_finished();
+                        let mut stdout_done = sock_to_stdout_h.is_finished();
+
+                        let stdin_is_tty = isatty(io::stdin()).unwrap_or(false);
+                        // Keep max_wait fixed for this detach sequence. Recomputing it inside
+                        // the loop could accidentally switch paths mid-cleanup.
+                        let max_wait = if stdin_is_tty && stdout_done && !stdin_done {
+                            DETACH_TTY_FAST_WAIT_DUR
+                        } else {
+                            MAX_DETACH_WAIT_DUR
+                        };
+
+                        loop {
+                            stdin_done = stdin_to_sock_h.is_finished();
+                            stdout_done = sock_to_stdout_h.is_finished();
+                            nfinished_threads = (stdin_done as usize) + (stdout_done as usize);
+
+                            if nfinished_threads >= 2 {
+                                break;
+                            }
+                            if total_wait >= max_wait {
+                                break;
+                            }
+
+                            let remaining = max_wait - total_wait;
+                            let sleep_for = cmp::min(next_sleep, remaining);
+                            thread::sleep(sleep_for);
+                            total_wait += sleep_for;
+                            // Exponential backoff with a capped step to avoid busy waits.
+                            next_sleep =
+                                cmp::min(next_sleep + next_sleep, DETACH_BACKOFF_MAX_STEP_DUR);
                         }
-                        if sock_to_stdout_h.is_finished() {
-                            info!("recheck: sock->stdout thread done");
-                            nfinished_threads += 1;
-                        }
+
                         if nfinished_threads < 2 {
                             // If one of the worker threads is done and the
                             // other is not exiting, we are likely blocked on
@@ -355,8 +390,8 @@ impl Client {
                             // us to use simple blocking IO.
                             warn!(
                                 "exiting due to a stuck IO thread stdin_to_sock_finished={} sock_to_stdout_finished={}",
-                                stdin_to_sock_h.is_finished(),
-                                sock_to_stdout_h.is_finished()
+                                stdin_done,
+                                stdout_done
                             );
                             // make sure that we restore the tty flags on the input
                             // tty before exiting the process.
@@ -367,7 +402,8 @@ impl Client {
                     }
                     break;
                 }
-                thread::sleep(JOIN_POLL_DUR);
+
+                thread::sleep(consts::JOIN_POLL_DURATION);
             }
 
             match stdin_to_sock_h.join() {

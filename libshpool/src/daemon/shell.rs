@@ -51,10 +51,9 @@ const SUPERVISOR_POLL_DUR: time::Duration = time::Duration::from_millis(300);
 // size.
 const REATTACH_RESIZE_DELAY: time::Duration = time::Duration::from_millis(50);
 
-// The shell->client thread should wake up relatively frequently so it can
-// detect reattach, but we don't need to go crazy since reattach is not part of
-// the inner loop.
-const SHELL_TO_CLIENT_POLL_MS: u16 = 100;
+// The shell->client thread should poll frequently so detach/reattach control
+// messages are noticed quickly without spinning the CPU.
+const SHELL_TO_CLIENT_POLL_MS: u16 = 10;
 
 // How long to wait before giving up while trying to talk to the
 // shell->client thread.
@@ -835,7 +834,11 @@ impl SessionInner {
 
                                 use keybindings::Action::*;
                                 match action {
-                                    Detach => self.action_detach()?,
+                                    Detach => {
+                                        self.action_detach()?;
+                                        debug!("exiting client->shell thread after detach");
+                                        return Ok(());
+                                    }
                                     NoOp => {}
                                 }
                             }
@@ -888,7 +891,19 @@ impl SessionInner {
                         return Ok(());
                     }
 
-                    thread::sleep(consts::HEARTBEAT_DURATION);
+                    let mut slept = time::Duration::ZERO;
+                    let sleep_step = consts::JOIN_POLL_DURATION;
+                    while slept < consts::HEARTBEAT_DURATION {
+                        if stop.load(Ordering::Relaxed) {
+                            info!("recvd stop msg");
+                            return Ok(());
+                        }
+
+                        let remaining = consts::HEARTBEAT_DURATION - slept;
+                        let step = if remaining < sleep_step { remaining } else { sleep_step };
+                        thread::sleep(step);
+                        slept += step;
+                    }
                     {
                         let shell_to_client_ctl = self.shell_to_client_ctl.lock().unwrap();
                         match shell_to_client_ctl
