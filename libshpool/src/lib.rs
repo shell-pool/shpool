@@ -129,6 +129,12 @@ pub enum Commands {
         #[clap(short, long, help = "If a tty is already attached to the session, detach it first")]
         force: bool,
         #[clap(
+            short = 'b',
+            long,
+            help = "Create/attach the session and immediately detach (use with --force to detach any existing client first)"
+        )]
+        background: bool,
+        #[clap(
             long,
             long_help = "Automatically kill the session after the given time
 
@@ -368,8 +374,8 @@ pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> an
             log_level_handle,
             socket,
         ),
-        Commands::Attach { force, ttl, cmd, dir, name } => {
-            attach::run(config_manager, name, force, ttl, cmd, dir, socket)
+        Commands::Attach { force, background, ttl, cmd, dir, name } => {
+            attach::run(config_manager, name, force, background, ttl, cmd, dir, socket)
         }
         Commands::Detach { sessions } => detach::run(sessions, socket),
         Commands::Kill { sessions } => kill::run(sessions, socket),
