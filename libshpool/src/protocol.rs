@@ -33,7 +33,8 @@ use super::{consts, tty};
 const DETACH_TTY_FAST_WAIT_DUR: time::Duration = time::Duration::from_millis(10);
 const MAX_DETACH_WAIT_DUR: time::Duration = time::Duration::from_millis(300);
 const DETACH_BACKOFF_INITIAL_DUR: time::Duration = time::Duration::from_millis(1);
-// Cap backoff steps so slow-path stays responsive while still avoiding busy waits.
+// Cap backoff steps so slow-path stays responsive while still avoiding busy
+// waits.
 const DETACH_BACKOFF_MAX_STEP_DUR: time::Duration = time::Duration::from_millis(25);
 
 /// The centralized encoding function that should be used for all protocol
@@ -54,7 +55,7 @@ where
     Ok(())
 }
 
-/// The centralized decoding focuntion that should be used for all protocol
+/// The centralized decoding function that should be used for all protocol
 /// deserialization.
 pub fn decode_from<T, R>(r: R) -> anyhow::Result<T>
 where
