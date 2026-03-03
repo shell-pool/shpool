@@ -19,7 +19,7 @@ send patches you don't understand.
 ### Install a rust toolchain
 
 If you have not already done so, install a rust toolchain.
-The minimum rust version for shpool is `1.74.0`, so make sure that
+The minimum rust version for shpool is `1.85.0`, so make sure that
 `cargo --version` reports that version or higher before attempting
 to build shpool. The easiest way to install an up to date
 rust toolchain is with [`rustup`](https://rustup.rs/),

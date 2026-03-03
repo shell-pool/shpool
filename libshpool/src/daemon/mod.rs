@@ -45,7 +45,12 @@ pub fn run(
 ) -> anyhow::Result<()> {
     if let Ok(daemonize) = env::var(consts::AUTODAEMONIZE_VAR) {
         if daemonize == "true" {
-            env::remove_var(consts::AUTODAEMONIZE_VAR); // avoid looping
+            // Safety: this is executing before we have forked any threads,
+            // so we are still in single-threaded mode, therefore it is safe
+            // to mutate the global env.
+            unsafe {
+                env::remove_var(consts::AUTODAEMONIZE_VAR); // avoid looping
+            }
 
             let pid_file = socket.with_file_name("daemonized-shpool.pid");
 
