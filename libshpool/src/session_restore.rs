@@ -15,7 +15,7 @@
 use shpool_protocol::TtySize;
 use tracing::info;
 
-use crate::config::{self, SessionRestoreMode};
+use crate::config::{self, SessionRestoreEngine, SessionRestoreMode};
 
 // To prevent data getting dropped, we set this to be large, but we don't want
 // to use u16::MAX, since the vt100 crate eagerly fills in its rows, and doing
@@ -119,24 +119,59 @@ impl SessionSpool for Vt100Lines {
     }
 }
 
+/// A spool that restores the last screenful of content using shpool-vterm.
+pub struct Vterm {
+    term: shpool_vterm::Term,
+    mode: SessionRestoreMode,
+}
+
+impl SessionSpool for Vterm {
+    fn resize(&mut self, size: TtySize) {
+        self.term
+            .resize(shpool_vterm::Size { height: size.rows as usize, width: size.cols as usize });
+    }
+
+    fn restore_buffer(&self) -> Vec<u8> {
+        match self.mode {
+            SessionRestoreMode::Simple => vec![],
+            SessionRestoreMode::Screen => self.term.contents(shpool_vterm::ContentRegion::Screen),
+            SessionRestoreMode::Lines(nlines) => {
+                self.term.contents(shpool_vterm::ContentRegion::BottomLines(nlines as usize))
+            }
+        }
+    }
+
+    fn process(&mut self, bytes: &[u8]) {
+        self.term.process(bytes);
+    }
+}
+
 /// Creates a spool given a `mode`.
 pub fn new(
     config: config::Manager,
     size: &TtySize,
     scrollback_lines: usize,
 ) -> Box<dyn SessionSpool + 'static> {
+    let restore_engine = config.get().session_restore_engine.clone().unwrap_or_default();
     let mode = config.get().session_restore_mode.clone().unwrap_or_default();
     let vterm_width = config.vterm_width();
-    match mode {
-        SessionRestoreMode::Simple => Box::new(NullSpool),
-        SessionRestoreMode::Screen => Box::new(Vt100Screen {
+    match (mode, restore_engine) {
+        (SessionRestoreMode::Simple, _) => Box::new(NullSpool),
+        (SessionRestoreMode::Screen, SessionRestoreEngine::Vt100) => Box::new(Vt100Screen {
             parser: shpool_vt100::Parser::new(size.rows, vterm_width, scrollback_lines),
             config,
         }),
-        SessionRestoreMode::Lines(nlines) => Box::new(Vt100Lines {
+        (SessionRestoreMode::Lines(nlines), SessionRestoreEngine::Vt100) => Box::new(Vt100Lines {
             parser: shpool_vt100::Parser::new(size.rows, vterm_width, scrollback_lines),
             nlines,
             config,
+        }),
+        (mode, SessionRestoreEngine::Vterm) => Box::new(Vterm {
+            term: shpool_vterm::Term::new(
+                scrollback_lines,
+                shpool_vterm::Size { width: size.cols as usize, height: size.rows as usize },
+            ),
+            mode,
         }),
     }
 }
