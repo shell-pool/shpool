@@ -32,7 +32,7 @@ use shpool_protocol::{Chunk, ChunkKind, TtySize};
 use tracing::{debug, error, info, instrument, span, trace, warn, Level};
 
 use crate::{
-    consts,
+    common, consts,
     daemon::{config, exit_notify::ExitNotifier, keybindings, pager::PagerCtl, prompt, show_motd},
     protocol::ChunkExt as _,
     session_restore, test_hooks,
@@ -886,23 +886,14 @@ impl SessionInner {
 
                 loop {
                     trace!("checking stop_rx");
-                    if stop.load(Ordering::Relaxed) {
+                    let stop_early = common::sleep_unless(
+                        consts::HEARTBEAT_DURATION,
+                        || stop.load(Ordering::Relaxed),
+                        common::PollStrategy::Uniform { interval: consts::JOIN_POLL_DURATION },
+                    );
+                    if stop_early {
                         info!("recvd stop msg");
                         return Ok(());
-                    }
-
-                    let mut slept = time::Duration::ZERO;
-                    let sleep_step = consts::JOIN_POLL_DURATION;
-                    while slept < consts::HEARTBEAT_DURATION {
-                        if stop.load(Ordering::Relaxed) {
-                            info!("recvd stop msg");
-                            return Ok(());
-                        }
-
-                        let remaining = consts::HEARTBEAT_DURATION - slept;
-                        let step = if remaining < sleep_step { remaining } else { sleep_step };
-                        thread::sleep(step);
-                        slept += step;
                     }
                     {
                         let shell_to_client_ctl = self.shell_to_client_ctl.lock().unwrap();
