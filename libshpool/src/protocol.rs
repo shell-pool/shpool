@@ -340,7 +340,7 @@ impl Client {
 
                 if nfinished_threads > 0 {
                     if nfinished_threads < 2 {
-                        // Fast-path: when server->client already ended (detach/disconnect),
+                        // Fast-path: when sock->stdout already ended (detach/disconnect),
                         // stdin->sock can stay blocked on stdin. In that case, do a very
                         // short grace wait and then exit quickly. This is independent
                         // of stdin being a TTY or a pipe.
