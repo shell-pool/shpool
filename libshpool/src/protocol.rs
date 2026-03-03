@@ -23,14 +23,13 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use byteorder::{LittleEndian, ReadBytesExt as _, WriteBytesExt as _};
-use nix::unistd::isatty;
 use serde::{Deserialize, Serialize};
 use shpool_protocol::{Chunk, ChunkKind, ConnectHeader, VersionHeader};
 use tracing::{debug, error, info, instrument, span, trace, warn, Level};
 
-use super::{consts, tty};
+use super::{common, consts, tty};
 
-const DETACH_TTY_FAST_WAIT_DUR: time::Duration = time::Duration::from_millis(10);
+const DETACH_DISCONNECT_FAST_WAIT_DUR: time::Duration = time::Duration::from_millis(10);
 const MAX_DETACH_WAIT_DUR: time::Duration = time::Duration::from_millis(300);
 const DETACH_BACKOFF_INITIAL_DUR: time::Duration = time::Duration::from_millis(1);
 // Cap backoff steps so slow-path stays responsive while still avoiding busy
@@ -346,39 +345,36 @@ impl Client {
                         // short grace wait and then exit quickly.
                         // Slow-path: for other shutdown orders, keep compatibility by
                         // waiting up to 300ms with backoff.
-                        let mut total_wait = time::Duration::ZERO;
-                        let mut next_sleep = DETACH_BACKOFF_INITIAL_DUR;
                         let mut stdin_done = stdin_to_sock_h.is_finished();
                         let mut stdout_done = sock_to_stdout_h.is_finished();
 
-                        let stdin_is_tty = isatty(io::stdin()).unwrap_or(false);
                         // Keep max_wait fixed for this detach sequence. Recomputing it inside
                         // the loop could accidentally switch paths mid-cleanup.
-                        let max_wait = if stdin_is_tty && stdout_done && !stdin_done {
-                            DETACH_TTY_FAST_WAIT_DUR
+                        let max_wait = if stdout_done && !stdin_done {
+                            DETACH_DISCONNECT_FAST_WAIT_DUR
                         } else {
                             MAX_DETACH_WAIT_DUR
                         };
 
-                        loop {
+                        let finished_waiting = common::sleep_unless(
+                            max_wait,
+                            || {
+                                stdin_done = stdin_to_sock_h.is_finished();
+                                stdout_done = sock_to_stdout_h.is_finished();
+                                nfinished_threads = (stdin_done as usize) + (stdout_done as usize);
+                                nfinished_threads >= 2
+                            },
+                            common::PollStrategy::Backoff {
+                                initial_interval: DETACH_BACKOFF_INITIAL_DUR,
+                                factor: 2,
+                                max_interval: DETACH_BACKOFF_MAX_STEP_DUR,
+                            },
+                        );
+
+                        if !finished_waiting {
                             stdin_done = stdin_to_sock_h.is_finished();
                             stdout_done = sock_to_stdout_h.is_finished();
                             nfinished_threads = (stdin_done as usize) + (stdout_done as usize);
-
-                            if nfinished_threads >= 2 {
-                                break;
-                            }
-                            if total_wait >= max_wait {
-                                break;
-                            }
-
-                            let remaining = max_wait - total_wait;
-                            let sleep_for = cmp::min(next_sleep, remaining);
-                            thread::sleep(sleep_for);
-                            total_wait += sleep_for;
-                            // Exponential backoff with a capped step to avoid busy waits.
-                            next_sleep =
-                                cmp::min(next_sleep + next_sleep, DETACH_BACKOFF_MAX_STEP_DUR);
                         }
 
                         if nfinished_threads < 2 {
