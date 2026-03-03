@@ -342,7 +342,8 @@ impl Client {
                     if nfinished_threads < 2 {
                         // Fast-path: when server->client already ended (detach/disconnect),
                         // stdin->sock can stay blocked on stdin. In that case, do a very
-                        // short grace wait and then exit quickly.
+                        // short grace wait and then exit quickly. This is independent
+                        // of stdin being a TTY or a pipe.
                         // Slow-path: for other shutdown orders, keep compatibility by
                         // waiting up to 300ms with backoff.
                         let mut stdin_done = stdin_to_sock_h.is_finished();
@@ -372,6 +373,8 @@ impl Client {
                         );
 
                         if !finished_waiting {
+                            // Re-probe after timeout because thread state can change
+                            // during the final sleep inside sleep_unless.
                             stdin_done = stdin_to_sock_h.is_finished();
                             stdout_done = sock_to_stdout_h.is_finished();
                             nfinished_threads = (stdin_done as usize) + (stdout_done as usize);

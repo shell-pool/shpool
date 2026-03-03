@@ -14,8 +14,7 @@
 
 //! The common module is a grab bag of shared utility functions.
 
-use std::env;
-use std::{thread, time};
+use std::{env, thread, time};
 
 use anyhow::anyhow;
 
@@ -25,6 +24,8 @@ pub enum PollStrategy {
     /// Poll at a fixed interval.
     Uniform { interval: time::Duration },
     /// Poll with exponential backoff up to a maximum interval.
+    ///
+    /// Values <= 1 disable growth and behave like uniform polling.
     Backoff { initial_interval: time::Duration, factor: u32, max_interval: time::Duration },
 }
 
