@@ -7,6 +7,9 @@ assignees: ''
 
 ---
 
+**AI Policy Ack**
+Please read the AI policy in HACKING.md and ack that you've done so here.
+
 **What happened**
 Please explain what went wrong with your usage of shpool.
 
