@@ -1,7 +1,7 @@
 [package]
 name = "libshpool"
 version = "0.9.4"
-edition = "2021"
+edition = "2024"
 repository = "https://github.com/shell-pool/shpool"
 authors = ["Ethan Pailes <pailes@google.com>"]
 readme = "README.md"
@@ -13,7 +13,7 @@ disconnects.
 '''
 license = "Apache-2.0"
 keywords = ["tmux", "tty", "terminal", "shell", "persistence"]
-rust-version = "1.74"
+rust-version = "1.85"
 
 [features]
 test_hooks = [] # for internal testing only, don't enable this feature

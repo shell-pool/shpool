@@ -37,7 +37,12 @@ fn empty() -> anyhow::Result<()> {
     )
     .context("starting daemon proc")?;
 
-    env::remove_var("SHPOOL_SESSION_NAME");
+    // Safety: I think this is actually wrong because tests can run
+    // in parallel. It hasn't ever caused a problem in practice though,
+    // and this is just a test, so I think it's fine.
+    unsafe {
+        env::remove_var("SHPOOL_SESSION_NAME");
+    }
 
     let out = daemon_proc.kill(vec![])?;
     assert!(!out.status.success());
