@@ -274,10 +274,12 @@ impl SessionInner {
                                 info!("got new connection (rows={}, cols={})", conn.size.rows, conn.size.cols);
                                 do_reattach = true;
                                 let ack = if let ClientConnectionMsg::New(mut old_conn) = client_conn {
+                                    info!("have existing conn, clobbering");
                                     Self::write_exit_chunk(&mut old_conn.sink, 0);
                                     shutdown_socket(&old_conn.stream, net::Shutdown::Both)?;
                                     ClientConnectionStatus::Replaced
                                 } else {
+                                    info!("establishing new connection");
                                     ClientConnectionStatus::New
                                 };
 
@@ -297,6 +299,7 @@ impl SessionInner {
                                 };
                                 oversize.set_fd(pty_master.raw_fd().ok_or(anyhow!("no master fd"))?)?;
 
+                                info!("resizing for new conn");
                                 // Prepare a resize command for pty to execute later.
                                 resize_cmd = Some(ResizeCmd {
                                     size: conn.size.clone(),
@@ -373,6 +376,7 @@ impl SessionInner {
                         }
                     }
                     recv(args.heartbeat) -> _ => {
+                        trace!("got heartbeat rcp");
                         let client_present = if let ClientConnectionMsg::New(conn) = &mut client_conn {
                             let chunk = Chunk { kind: ChunkKind::Heartbeat, buf: &[] };
                             match chunk.write_to(&mut conn.sink).and_then(|_| conn.sink.flush()) {
@@ -393,6 +397,7 @@ impl SessionInner {
                             false
                         };
 
+                        trace!("sending heartbeat resp");
                         args.heartbeat_ack.send(client_present)
                             .context("sending heartbeat ack")?;
                     }
@@ -404,6 +409,7 @@ impl SessionInner {
 
                 let mut executed_resize = false;
                 if let Some(resize_cmd) = resize_cmd.as_ref() {
+                    debug!("have resize cmd, resizing");
                     if resize_cmd.when.saturating_duration_since(time::Instant::now())
                         == time::Duration::ZERO
                     {
@@ -428,6 +434,7 @@ impl SessionInner {
                 if do_reattach {
                     info!("executing reattach protocol");
                     let restore_buf = output_spool.restore_buffer();
+                    info!("computed restore buf");
                     if let (true, ClientConnectionMsg::New(conn)) =
                         (!restore_buf.is_empty(), &mut client_conn)
                     {
@@ -446,6 +453,7 @@ impl SessionInner {
                         }
                     }
                 }
+                debug!("completed reattach block, polling");
 
                 // TODO(ethan): what if poll times out on a tick when we have just
                 // set up a restore chunk? It looks like we will just drop the
@@ -461,6 +469,7 @@ impl SessionInner {
                         return Err(e)?;
                     }
                 };
+                trace!("poll done nready={}", nready);
                 if nready == 0 {
                     // if timeout
                     continue;
@@ -472,6 +481,7 @@ impl SessionInner {
                     .revents()
                     .map(|r| r.intersects(PollFlags::POLLHUP | PollFlags::POLLERR))
                     .unwrap_or(false);
+                trace!("poll hup={}", hangup);
                 if hangup {
                     info!("pty master hung up, exiting shell->client thread");
 
@@ -486,6 +496,7 @@ impl SessionInner {
                     }
                     return Ok(());
                 }
+                trace!("about to read()");
                 let len = match pty_master.read(&mut buf) {
                     Ok(l) => l,
                     Err(e) => {
@@ -493,6 +504,7 @@ impl SessionInner {
                         return Err(e).context("reading pty master chunk")?;
                     }
                 };
+                trace!("read {} bytes", len);
                 if len == 0 {
                     continue;
                 }
@@ -536,6 +548,7 @@ impl SessionInner {
 
                     let write_result =
                         chunk.write_to(&mut conn.sink).and_then(|_| conn.sink.flush());
+                    trace!("flushed result");
                     if let Err(err) = write_result {
                         info!("client_stream write err, assuming hangup: {:?}", err);
                         reset_client_conn = true;
@@ -544,6 +557,7 @@ impl SessionInner {
                     }
                 }
                 if reset_client_conn {
+                    trace!("resetting client conn");
                     client_conn = ClientConnectionMsg::Disconnect;
                 }
             }
