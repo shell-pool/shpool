@@ -1,4 +1,23 @@
 
+shpool (0.9.5) unstable; urgency=low
+
+  Added
+
+  * add experimental shpool-vterm engine ([#311](https://github.com/shell-pool/shpool/pull/311))
+  * add attach background mode ([#321](https://github.com/shell-pool/shpool/pull/321))
+  * dynamically load session restore mode ([#310](https://github.com/shell-pool/shpool/pull/310))
+
+  Fixed
+
+  * fix stale daemon cleanup ([#318](https://github.com/shell-pool/shpool/pull/318))
+  * reduce detach latency and stabilize detach path ([#324](https://github.com/shell-pool/shpool/pull/324))
+
+  Other
+
+  * bump MSRV to 1.85 ([#325](https://github.com/shell-pool/shpool/pull/325))
+
+ -- Shpool Authors <shpool-eng@google.com>  Tue, 10 Mar 2026 14:52:30 +0000
+
 shpool (0.9.4) unstable; urgency=low
 
   Added
