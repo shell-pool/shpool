@@ -32,7 +32,7 @@ use shpool_protocol::{Chunk, ChunkKind, TtySize};
 use tracing::{debug, error, info, instrument, span, trace, warn, Level};
 
 use crate::{
-    consts,
+    common, consts,
     daemon::{config, exit_notify::ExitNotifier, keybindings, pager::PagerCtl, prompt, show_motd},
     protocol::ChunkExt as _,
     session_restore, test_hooks,
@@ -51,10 +51,9 @@ const SUPERVISOR_POLL_DUR: time::Duration = time::Duration::from_millis(300);
 // size.
 const REATTACH_RESIZE_DELAY: time::Duration = time::Duration::from_millis(50);
 
-// The shell->client thread should wake up relatively frequently so it can
-// detect reattach, but we don't need to go crazy since reattach is not part of
-// the inner loop.
-const SHELL_TO_CLIENT_POLL_MS: u16 = 100;
+// The shell->client thread should poll frequently so detach/reattach control
+// messages are noticed quickly without spinning the CPU.
+const SHELL_TO_CLIENT_POLL_MS: u16 = 50;
 
 // How long to wait before giving up while trying to talk to the
 // shell->client thread.
@@ -835,7 +834,11 @@ impl SessionInner {
 
                                 use keybindings::Action::*;
                                 match action {
-                                    Detach => self.action_detach()?,
+                                    Detach => {
+                                        self.action_detach()?;
+                                        debug!("exiting client->shell thread after detach");
+                                        return Ok(());
+                                    }
                                     NoOp => {}
                                 }
                             }
@@ -883,12 +886,15 @@ impl SessionInner {
 
                 loop {
                     trace!("checking stop_rx");
-                    if stop.load(Ordering::Relaxed) {
+                    let stop_early = common::sleep_unless(
+                        consts::HEARTBEAT_DURATION,
+                        || stop.load(Ordering::Relaxed),
+                        common::PollStrategy::Uniform { interval: consts::JOIN_POLL_DURATION },
+                    );
+                    if stop_early {
                         info!("recvd stop msg");
                         return Ok(());
                     }
-
-                    thread::sleep(consts::HEARTBEAT_DURATION);
                     {
                         let shell_to_client_ctl = self.shell_to_client_ctl.lock().unwrap();
                         match shell_to_client_ctl
