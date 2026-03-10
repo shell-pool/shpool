@@ -26,7 +26,7 @@ pub enum PollStrategy {
     /// Poll with exponential backoff up to a maximum interval.
     ///
     /// Values <= 1 disable growth and behave like uniform polling.
-    Backoff { initial_interval: time::Duration, factor: u32, max_interval: time::Duration },
+    Backoff { initial_interval: time::Duration, factor: f32, max_interval: time::Duration },
 }
 
 /// Sleeps for up to `total_sleep`, but returns early if `stop` becomes true.
@@ -66,9 +66,8 @@ where
         thread::sleep(remaining.min(next_interval));
 
         if let PollStrategy::Backoff { factor, max_interval, .. } = poll_strategy {
-            if factor > 1 {
-                let grown = next_interval.checked_mul(factor).unwrap_or(max_interval);
-                next_interval = grown.min(max_interval);
+            if factor > 1.0 {
+                next_interval = std::cmp::min(next_interval.mul_f32(factor), max_interval);
             }
         }
     }
@@ -130,7 +129,7 @@ mod tests {
             },
             PollStrategy::Backoff {
                 initial_interval: Duration::from_millis(1),
-                factor: 2,
+                factor: 2.0,
                 max_interval: Duration::from_millis(4),
             },
         );

@@ -367,7 +367,7 @@ impl Client {
                             },
                             common::PollStrategy::Backoff {
                                 initial_interval: DETACH_BACKOFF_INITIAL_DUR,
-                                factor: 2,
+                                factor: 2.0,
                                 max_interval: DETACH_BACKOFF_MAX_STEP_DUR,
                             },
                         );
