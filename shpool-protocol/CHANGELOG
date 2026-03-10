@@ -1,4 +1,12 @@
 
+shpool-protocol (0.3.4) unstable; urgency=low
+
+  Other
+
+  * bump MSRV to 1.85 ([#325](https://github.com/shell-pool/shpool/pull/325))
+
+ -- Shpool Authors <shpool-eng@google.com>  Tue, 10 Mar 2026 14:52:30 +0000
+
 shpool-protocol (0.3.3) unstable; urgency=low
 
   Added
