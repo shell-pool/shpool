@@ -531,7 +531,9 @@ complete -c {bin_name} -n '__fish_{bin_name}_needs_log_level' -f -a 'off error w
 
 #[cfg(test)]
 mod completion_tests {
-    use super::write_completion;
+    use clap::Parser;
+
+    use super::{write_completion, Args};
 
     #[test]
     fn bash_completion_includes_dynamic_session_lookup() {
@@ -569,6 +571,16 @@ mod completion_tests {
         assert!(script.contains(
             "complete -c shpool -n '__fish_shpool_needs_log_level' -f -a 'off error warn info debug trace'"
         ));
+    }
+
+    #[test]
+    fn completion_rejects_powershell_shell() {
+        let err = Args::try_parse_from(["shpool", "completion", "powershell"])
+            .expect_err("powershell should not be accepted as a completion target");
+        let err = err.to_string();
+
+        assert!(err.contains("invalid value 'powershell'"));
+        assert!(err.contains("[possible values: bash, elvish, fish, zsh]"));
     }
 }
 
