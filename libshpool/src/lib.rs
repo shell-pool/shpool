@@ -16,13 +16,13 @@ use std::{
     collections::hash_map::DefaultHasher,
     env, fs,
     hash::{Hash, Hasher},
-    io,
-    path::PathBuf,
+    io::{self, Write},
+    path::{Path, PathBuf},
     sync::{Mutex, MutexGuard},
 };
 
 use anyhow::{anyhow, Context};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 pub use hooks::Hooks;
 use tracing::error;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
@@ -55,7 +55,7 @@ mod user;
 /// if it is set. Clap won't do a good job with its
 /// automatic version support for a library.
 #[derive(Parser, Debug, Default)]
-#[clap(author, about)]
+#[clap(author, about, name = "shpool")]
 pub struct Args {
     #[clap(
         short,
@@ -108,6 +108,7 @@ the daemon is launched by systemd."
     // See https://rust-lang.github.io/rfcs/2008-non-exhaustive.html#functional-record-updates
     // (the attribute behaves as if there is implicitly a field like this
     // that is private).
+    #[clap(skip)]
     #[doc(hidden)]
     pub __non_exhaustive: (),
 }
@@ -199,6 +200,15 @@ will be used if it is present in the environment.")]
         json: bool,
     },
 
+    #[clap(about = "Generate shell completion script for bash, fish, zsh, or elvish")]
+    #[non_exhaustive]
+    Completion {
+        #[clap(help = "The shell type to generate completions for")]
+        shell: CompletionShell,
+        #[clap(short, long, help = "Write completions to a file instead of stdout")]
+        output: Option<PathBuf>,
+    },
+
     #[clap(about = "Dynamically change daemon log level
 
 This command changes the log level of the shpool daemon without
@@ -216,6 +226,361 @@ impl Args {
     /// version then exit.
     pub fn version(&self) -> bool {
         matches!(self.command, Commands::Version)
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum CompletionShell {
+    Bash,
+    Elvish,
+    Fish,
+    Zsh,
+}
+
+impl From<CompletionShell> for clap_complete::aot::Shell {
+    fn from(value: CompletionShell) -> Self {
+        match value {
+            CompletionShell::Bash => clap_complete::aot::Shell::Bash,
+            CompletionShell::Elvish => clap_complete::aot::Shell::Elvish,
+            CompletionShell::Fish => clap_complete::aot::Shell::Fish,
+            CompletionShell::Zsh => clap_complete::aot::Shell::Zsh,
+        }
+    }
+}
+
+/// Writes a shell completion script to `writer`.
+///
+/// Bash and fish are augmented with runtime lookups for live session names.
+fn write_completion<W: Write>(
+    shell: clap_complete::aot::Shell,
+    mut writer: W,
+) -> anyhow::Result<()> {
+    let mut cmd = Args::command();
+    let bin_name = cmd.get_name().to_owned();
+    let mut generated = Vec::new();
+    clap_complete::generate(shell, &mut cmd, &bin_name, &mut generated);
+
+    match shell {
+        clap_complete::aot::Shell::Bash => {
+            let script = String::from_utf8(generated)
+                .context("generated bash completion was not valid UTF-8")?;
+            writer
+                .write_all(augment_bash_completion(script, &bin_name)?.as_bytes())
+                .context("writing bash completion")
+        }
+        clap_complete::aot::Shell::Fish => {
+            let script = String::from_utf8(generated)
+                .context("generated fish completion was not valid UTF-8")?;
+            writer
+                .write_all(augment_fish_completion(script, &bin_name).as_bytes())
+                .context("writing fish completion")
+        }
+        _ => writer.write_all(&generated).context("writing completion"),
+    }
+}
+
+fn write_completion_output(shell: CompletionShell, output: Option<&Path>) -> anyhow::Result<()> {
+    match output {
+        Some(file_path) => {
+            if let Some(parent_dir) = file_path.parent() {
+                if !parent_dir.as_os_str().is_empty() {
+                    fs::create_dir_all(parent_dir).with_context(|| {
+                        format!("Failed to create directory: {}", parent_dir.display())
+                    })?;
+                }
+            }
+            let mut file = fs::File::create(file_path)
+                .with_context(|| format!("Failed to create file: {}", file_path.display()))?;
+            write_completion(shell.into(), &mut file)
+        }
+        None => write_completion(shell.into(), io::stdout()),
+    }
+}
+
+/// Wraps clap's generated bash completion so dynamic session names can be
+/// queried at completion time via `shpool list`.
+fn augment_bash_completion(script: String, bin_name: &str) -> anyhow::Result<String> {
+    let generated_fn = format!("_{bin_name}_generated");
+    let wrapper_fn = format!("_{bin_name}");
+    let wrapper_decl = format!("{wrapper_fn}() {{");
+    anyhow::ensure!(
+        script.contains(&wrapper_decl),
+        "generated bash completion no longer contains expected function declaration: {wrapper_decl}"
+    );
+    let script = script.replacen(&wrapper_decl, &format!("{generated_fn}() {{"), 1);
+    let completion_registration = format!(
+        "if [[ \"${{BASH_VERSINFO[0]}}\" -eq 4 && \"${{BASH_VERSINFO[1]}}\" -ge 4 || \"${{BASH_VERSINFO[0]}}\" -gt 4 ]]; then\n    complete -F {wrapper_fn} -o nosort -o bashdefault -o default {bin_name}\nelse\n    complete -F {wrapper_fn} -o bashdefault -o default {bin_name}\nfi"
+    );
+    let script = script.replacen(&completion_registration, "", 1);
+
+    Ok(format!(
+        r#"{script}
+
+_{bin_name}_collect_global_args() {{
+    _{bin_name}_global_args=()
+    local word
+    local index=1
+
+    while [[ $index -lt ${{#COMP_WORDS[@]}} ]]; do
+        word="${{COMP_WORDS[$index]}}"
+        case "$word" in
+            # Keep in sync with the Commands enum in libshpool/src/lib.rs.
+            version|daemon|attach|detach|kill|list|completion|set-log-level|help)
+                break
+                ;;
+            -l|--log-file|-s|--socket|-c|--config-file)
+                _{bin_name}_global_args+=("$word")
+                ((index++))
+                if [[ $index -lt ${{#COMP_WORDS[@]}} ]]; then
+                    _{bin_name}_global_args+=("${{COMP_WORDS[$index]}}")
+                fi
+                ;;
+            -v|--verbose|-d|--daemonize|-D|--no-daemonize)
+                _{bin_name}_global_args+=("$word")
+                ;;
+        esac
+        ((index++))
+    done
+}}
+
+_{bin_name}_session_words() {{
+    _{bin_name}_collect_global_args
+    command {bin_name} "${{_{bin_name}_global_args[@]}}" list 2>/dev/null | awk 'NR > 1 {{ print $1 }}'
+}}
+
+_{bin_name}_current_subcommand() {{
+    local word
+    local index=1
+
+    while [[ $index -lt ${{#COMP_WORDS[@]}} ]]; do
+        word="${{COMP_WORDS[$index]}}"
+        case "$word" in
+            # Keep in sync with the Commands enum in libshpool/src/lib.rs.
+            version|daemon|attach|detach|kill|list|completion|set-log-level|help)
+                printf '%s\n' "$word"
+                return 0
+                ;;
+            -l|--log-file|-s|--socket|-c|--config-file)
+                ((index++))
+                ;;
+        esac
+        ((index++))
+    done
+
+    return 1
+}}
+
+{wrapper_fn}() {{
+    local cur prev cmd
+
+    COMPREPLY=()
+    cur="${{COMP_WORDS[COMP_CWORD]}}"
+    prev=""
+    if [[ $COMP_CWORD -gt 0 ]]; then
+        prev="${{COMP_WORDS[COMP_CWORD-1]}}"
+    fi
+    cmd="$(_{bin_name}_current_subcommand)"
+
+    case "$cmd" in
+        attach)
+            case "$prev" in
+                --ttl|--cmd|-c|--dir|-d)
+                    {generated_fn} "$@"
+                    return 0
+                    ;;
+            esac
+            if [[ $cur != -* ]]; then
+                COMPREPLY=( $(compgen -W "$(_{bin_name}_session_words)" -- "$cur") )
+                return 0
+            fi
+            ;;
+        detach|kill)
+            if [[ $cur != -* ]]; then
+                COMPREPLY=( $(compgen -W "$(_{bin_name}_session_words)" -- "$cur") )
+                return 0
+            fi
+            ;;
+    esac
+
+    {generated_fn} "$@"
+}}
+
+if [[ "${{BASH_VERSINFO[0]}}" -eq 4 && "${{BASH_VERSINFO[1]}}" -ge 4 || "${{BASH_VERSINFO[0]}}" -gt 4 ]]; then
+    complete -F _{bin_name} -o nosort -o bashdefault -o default {bin_name}
+else
+    complete -F _{bin_name} -o bashdefault -o default {bin_name}
+fi
+"#
+    ))
+}
+
+/// Augments clap's generated fish completion with runtime session name lookups.
+fn augment_fish_completion(script: String, bin_name: &str) -> String {
+    format!(
+        r#"{script}
+
+function __fish_{bin_name}_completion_global_args
+    set -l words (commandline -opc)
+    set -e words[1]
+    set -l globals
+    set -l expects_value 0
+
+    for word in $words
+        if test $expects_value -eq 1
+            set -a globals $word
+            set expects_value 0
+            continue
+        end
+
+        switch $word
+            # Keep in sync with the Commands enum in libshpool/src/lib.rs.
+            case version daemon attach detach kill list completion set-log-level help
+                break
+            case -l --log-file -s --socket -c --config-file
+                set -a globals $word
+                set expects_value 1
+            case -v --verbose -d --daemonize -D --no-daemonize
+                set -a globals $word
+        end
+    end
+
+    printf '%s\n' $globals
+end
+
+function __fish_{bin_name}_sessions
+    set -l globals (__fish_{bin_name}_completion_global_args)
+    command {bin_name} $globals list 2>/dev/null | awk 'NR > 1 {{ print $1 }}'
+end
+
+function __fish_{bin_name}_needs_attach_session
+    set -l words (commandline -opc)
+    set -e words[1]
+    set -l expects_value 0
+    set -l seen_attach 0
+    set -l positional_count 0
+
+    for word in $words
+        if test $expects_value -eq 1
+            set expects_value 0
+            continue
+        end
+
+        if test $seen_attach -eq 0
+            switch $word
+                case attach
+                    set seen_attach 1
+                case -l --log-file -s --socket -c --config-file
+                    set expects_value 1
+            end
+            continue
+        end
+
+        switch $word
+            case --ttl --cmd -c --dir -d
+                set expects_value 1
+            case -f --force -b --background -h --help
+            case '-*'
+            case '*'
+                set positional_count (math $positional_count + 1)
+        end
+    end
+
+    test $seen_attach -eq 1; and test $positional_count -eq 0
+end
+
+function __fish_{bin_name}_needs_log_level
+    set -l words (commandline -opc)
+    set -e words[1]
+    set -l expects_value 0
+    set -l seen_command 0
+    set -l value_count 0
+
+    for word in $words
+        if test $expects_value -eq 1
+            set expects_value 0
+            continue
+        end
+
+        if test $seen_command -eq 0
+            switch $word
+                case set-log-level
+                    set seen_command 1
+                case -l --log-file -s --socket -c --config-file
+                    set expects_value 1
+            end
+            continue
+        end
+
+        switch $word
+            case -h --help
+            case '-*'
+            case '*'
+                set value_count (math $value_count + 1)
+        end
+    end
+
+    test $seen_command -eq 1; and test $value_count -eq 0
+end
+
+complete -c {bin_name} -n '__fish_{bin_name}_needs_attach_session' -f -a '(__fish_{bin_name}_sessions)'
+complete -c {bin_name} -n '__fish_seen_subcommand_from detach kill' -f -a '(__fish_{bin_name}_sessions)'
+complete -c {bin_name} -n '__fish_{bin_name}_needs_log_level' -f -a 'off error warn info debug trace'
+"#
+    )
+}
+
+#[cfg(test)]
+mod completion_tests {
+    use clap::Parser;
+
+    use super::{write_completion, Args};
+
+    #[test]
+    fn bash_completion_includes_dynamic_session_lookup() {
+        let mut output = Vec::new();
+        write_completion(clap_complete::aot::Shell::Bash, &mut output)
+            .expect("bash completion generation should succeed");
+        let script = String::from_utf8(output).expect("bash completion should be utf-8");
+
+        assert!(script.contains("_shpool_generated() {"));
+        assert!(script.contains("_shpool_session_words() {"));
+        assert!(script.contains(
+            "command shpool \"${_shpool_global_args[@]}\" list 2>/dev/null | awk 'NR > 1 { print $1 }'"
+        ));
+        assert!(!script.contains("[NON_EXHAUSTIVE]"));
+        assert!(script.contains("complete -F _shpool -o bashdefault -o default shpool"));
+        assert_eq!(script.matches("complete -F _shpool").count(), 2);
+    }
+
+    #[test]
+    fn fish_completion_includes_dynamic_session_lookup() {
+        let mut output = Vec::new();
+        write_completion(clap_complete::aot::Shell::Fish, &mut output)
+            .expect("fish completion generation should succeed");
+        let script = String::from_utf8(output).expect("fish completion should be utf-8");
+
+        assert!(script.contains("function __fish_shpool_sessions"));
+        assert!(script.contains("function __fish_shpool_needs_attach_session"));
+        assert!(
+            script.contains("command shpool $globals list 2>/dev/null | awk 'NR > 1 { print $1 }'")
+        );
+        assert!(!script.contains("[NON_EXHAUSTIVE]"));
+        assert!(script.contains(
+            "complete -c shpool -n '__fish_seen_subcommand_from detach kill' -f -a '(__fish_shpool_sessions)'"
+        ));
+        assert!(script.contains(
+            "complete -c shpool -n '__fish_shpool_needs_log_level' -f -a 'off error warn info debug trace'"
+        ));
+    }
+
+    #[test]
+    fn completion_rejects_powershell_shell() {
+        let err = Args::try_parse_from(["shpool", "completion", "powershell"])
+            .expect_err("powershell should not be accepted as a completion target");
+        let err = err.to_string();
+
+        assert!(err.contains("invalid value 'powershell'"));
+        assert!(err.contains("[possible values: bash, elvish, fish, zsh]"));
     }
 }
 
@@ -289,6 +654,11 @@ pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> an
         _ => {}
     }
 
+    if let Commands::Completion { shell, output } = &args.command {
+        write_completion_output(*shell, output.as_deref())?;
+        return Ok(());
+    }
+
     let log_level_filter = if args.verbose == 0 {
         tracing_subscriber::filter::LevelFilter::INFO
     } else if args.verbose == 1 {
@@ -349,7 +719,12 @@ pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> an
 
     if !config_manager.get().nodaemonize.unwrap_or(false) || args.daemonize {
         let arg0 = env::args().next().ok_or(anyhow!("arg0 missing"))?;
-        if !args.no_daemonize && !matches!(args.command, Commands::Daemon) {
+        if !args.no_daemonize
+            && !matches!(
+                args.command,
+                Commands::Version | Commands::Daemon | Commands::Completion { .. }
+            )
+        {
             daemonize::maybe_fork_daemon(&config_manager, &args, arg0, &socket)?;
         }
     }
@@ -380,6 +755,7 @@ pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> an
         Commands::Detach { sessions } => detach::run(sessions, socket),
         Commands::Kill { sessions } => kill::run(sessions, socket),
         Commands::List { json } => list::run(socket, json),
+        Commands::Completion { .. } => unreachable!("completion handled before runtime setup"),
         Commands::SetLogLevel { level } => set_log_level::run(level, socket),
     };
 
