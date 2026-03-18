@@ -203,7 +203,7 @@ Use the full path to the binary instead:
 
 ```
 Host = main edit
-    Hostname mac.example.com
+    Hostname remote.host.example.com
 
     RemoteCommand /opt/homebrew/bin/shpool attach -f %k
     RequestTTY yes
