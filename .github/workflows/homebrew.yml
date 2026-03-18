@@ -16,7 +16,7 @@ jobs:
           formula-name: shpool
           formula-path: Formula/shpool.rb
           homebrew-tap: shell-pool/shpool
-          base-branch: main
+          base-branch: master
           download-url: https://github.com/shell-pool/shpool/archive/refs/tags/${{ github.ref_name }}.tar.gz
           commit-message: |
             Update Homebrew formula to {{version}}
