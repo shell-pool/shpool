@@ -23,7 +23,6 @@ class Shpool < Formula
   end
 
   test do
-    # Daemon requires a TTY to function fully, so just verify the binary runs
-    assert_match version.to_s, shell_output("#{bin}/shpool --version")
+    assert_match version.to_s, shell_output("#{bin}/shpool version")
   end
 end
