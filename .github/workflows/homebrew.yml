@@ -1,0 +1,24 @@
+name: Update Homebrew formula
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  update-formula:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: mislav/bump-homebrew-formula-action@v3
+        with:
+          formula-name: shpool
+          formula-path: Formula/shpool.rb
+          homebrew-tap: shell-pool/shpool
+          base-branch: main
+          download-url: https://github.com/shell-pool/shpool/archive/refs/tags/${{ github.ref_name }}.tar.gz
+          commit-message: |
+            Update Homebrew formula to {{version}}
+        env:
+          COMMITTER_TOKEN: ${{ secrets.GITHUB_TOKEN }}
