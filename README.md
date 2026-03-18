@@ -49,6 +49,15 @@ one is missing. Autodaemonization is enabled by default, so you don't
 need to do anything special to use it, though you can control its behavior
 with the `nodaemonize` config option and the `-d/-D` command line switches.
 
+### Installing with Homebrew
+
+On macOS, `shpool` can be installed via the project's [Homebrew tap](https://github.com/shell-pool/homebrew-shpool):
+
+```
+brew tap shell-pool/shpool
+brew install shpool
+```
+
 ## Usage
 
 Generally `shpool` is used to provide persistent sessions when
