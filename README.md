@@ -49,6 +49,23 @@ one is missing. Autodaemonization is enabled by default, so you don't
 need to do anything special to use it, though you can control its behavior
 with the `nodaemonize` config option and the `-d/-D` command line switches.
 
+### Installing via Homebrew
+
+If you have [Homebrew](https://brew.sh) installed, you can install `shpool` using
+the project's own tap:
+
+```
+brew tap shell-pool/shpool
+brew install shpool
+```
+
+To have the `shpool` daemon start automatically at login and restart if it
+crashes, you can register it as a service:
+
+```
+brew services start shpool
+```
+
 ## Usage
 
 Generally `shpool` is used to provide persistent sessions when
