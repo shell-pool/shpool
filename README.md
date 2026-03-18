@@ -58,6 +58,12 @@ brew tap shell-pool/shpool
 brew install shpool
 ```
 
+To have the daemon start automatically at login:
+
+```
+brew services start shpool
+```
+
 ## Usage
 
 Generally `shpool` is used to provide persistent sessions when
