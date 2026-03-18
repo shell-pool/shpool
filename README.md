@@ -66,6 +66,12 @@ crashes, you can register it as a service:
 brew services start shell-pool/shpool/shpool
 ```
 
+> [!NOTE]
+> On macOS hosts, SSH connects using a non-login shell that does not source
+> your profile, so `shpool` may not be on `$PATH`. Use the full path to the
+> binary in your `RemoteCommand`. See [Connecting to a macOS host](#connecting-to-a-macos-host)
+> for a ready-to-use example.
+
 ## Usage
 
 Generally `shpool` is used to provide persistent sessions when
@@ -188,6 +194,23 @@ Host = main edit
 
 You can then attach to these sessions with `ssh main` or `ssh edit`.
 `%k` expands to the "host" named on the command line.
+
+##### Connecting to a macOS host
+
+SSH on macOS runs `RemoteCommand` in a non-login, non-interactive shell that
+does not source your shell profile, so `shpool` will not be found on `$PATH`.
+Use the full path to the binary instead:
+
+```
+Host = main edit
+    Hostname mac.example.com
+
+    RemoteCommand /opt/homebrew/bin/shpool attach -f %k
+    RequestTTY yes
+```
+
+If you installed `shpool` somewhere other than `/opt/homebrew/bin`, adjust the
+path accordingly (`which shpool` on the host will tell you).
 
 ##### shell function
 
