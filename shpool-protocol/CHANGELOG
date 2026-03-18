@@ -1,4 +1,12 @@
 
+shpool-protocol (0.3.5) unstable; urgency=low
+
+  Other
+
+  * add Homebrew installation instructions for macOS ([#333](https://github.com/shell-pool/shpool/pull/333))
+
+ -- Shpool Authors <shpool-eng@google.com>  Wed, 18 Mar 2026 18:24:03 +0000
+
 shpool-protocol (0.3.4) unstable; urgency=low
 
   Other
