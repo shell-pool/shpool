@@ -10,15 +10,37 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
     steps:
-      - uses: mislav/bump-homebrew-formula-action@v3
+      - uses: actions/checkout@v4
         with:
-          formula-name: shpool
-          formula-path: Formula/shpool.rb
-          homebrew-tap: shell-pool/shpool
-          base-branch: master
-          download-url: https://github.com/shell-pool/shpool/archive/refs/tags/${{ github.ref_name }}.tar.gz
-          commit-message: |
-            Update Homebrew formula to {{version}}
+          ref: master
+
+      - name: Update formula version and SHA256
+        run: |
+          VERSION="${{ github.ref_name }}"
+          URL="https://github.com/shell-pool/shpool/archive/refs/tags/${VERSION}.tar.gz"
+          SHA256=$(curl -sL "$URL" | shasum -a 256 | awk '{print $1}')
+
+          sed -i "s|url \".*\"|url \"${URL}\"|" Formula/shpool.rb
+          sed -i "s|sha256 \".*\"|sha256 \"${SHA256}\"|" Formula/shpool.rb
+
+      - name: Open PR
+        run: |
+          VERSION="${{ github.ref_name }}"
+          BRANCH="homebrew-formula-${VERSION}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add Formula/shpool.rb
+          git commit -m "Update Homebrew formula to ${VERSION}"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --title "Update Homebrew formula to ${VERSION}" \
+            --body "Automated update of \`Formula/shpool.rb\` for release ${VERSION}." \
+            --base master \
+            --head "$BRANCH"
         env:
-          COMMITTER_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
