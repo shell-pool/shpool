@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+# shpool-menu is a script to select a shpool session using fzf.
+# If you enter a session that doesn't exist, it will create that session.
+
+SHELL_NAME="$(shpool list | sed '1d' | awk '{print $1}' | fzf --bind 'tab:replace-query' --print-query | cut -f1 | tail -1)"
+
+if [ -z "$SHELL_NAME" ]; then
+    exit 1
+fi
+
+shpool attach "${SHELL_NAME}"
