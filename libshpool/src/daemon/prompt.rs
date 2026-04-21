@@ -129,8 +129,13 @@ fn wait_for_startup(pty_master: &mut shpool_pty::fork::Master) -> anyhow::Result
         .write_all(startup_sentinel_cmd.as_bytes())
         .context("running startup sentinel script")?;
 
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     let mut buf: [u8; 2048] = [0; 2048];
     loop {
+        if std::time::Instant::now() > deadline {
+            warn!("timed out waiting for startup sentinel after 30s");
+            return Err(anyhow!("timed out waiting for startup sentinel"));
+        }
         let len = pty_master.read(&mut buf).context("reading chunk to scan for startup")?;
         if len == 0 {
             continue;

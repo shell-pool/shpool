@@ -1,0 +1,13 @@
+norc = true
+noecho = true
+# Use cat as the shell - it never produces the startup sentinel,
+# simulating a slow/hanging shell startup that triggers the deadlock.
+shell = "/bin/cat"
+session_restore_mode = "simple"
+# Non-empty prompt_prefix enables sentinel injection, which triggers
+# wait_for_startup in spawn_subshell.
+prompt_prefix = "test> "
+
+[env]
+PS1 = "prompt> "
+TERM = ""
