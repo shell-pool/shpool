@@ -14,6 +14,8 @@ and prevent the accumulation of bloat or needless abstraction. If you do use
 AI to generate code, you must review and test it carefully yourself. Do not
 send patches you don't understand.
 
+When creating PRs or filing issues, disclose your AI usage.
+
 ## Installing From Source
 
 ### Install a rust toolchain
