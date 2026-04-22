@@ -46,6 +46,8 @@ notify = { version = "7", features = ["crossbeam-channel"] }  # watch config fil
 libproc = "0.14.8" # sniffing shells by examining the subprocess
 daemonize = "0.5" # autodaemonization
 shpool-protocol = { version = "0.3.4", path = "../shpool-protocol" } # client-server protocol
+ratatui = "0.29" # TUI framework for `shpool tui`
+crossterm = "0.28" # terminal backend for ratatui
 
 # rusty wrapper for unix apis
 [dependencies.nix]
@@ -60,3 +62,4 @@ features = ["std", "fmt", "tracing-log", "smallvec"]
 [dev-dependencies]
 ntest = "0.9" # test timeouts
 assert_matches = "1.5" # assert_matches macro
+insta = "1" # snapshot tests for TUI view rendering
