@@ -2,7 +2,9 @@
 
 mod command;
 mod event;
+mod keymap;
 mod model;
+mod suspend;
 
 use std::path::PathBuf;
 
