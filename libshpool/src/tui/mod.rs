@@ -1,5 +1,9 @@
 //! `shpool tui` — interactive session manager.
 
+mod command;
+mod event;
+mod model;
+
 use std::path::PathBuf;
 
 use anyhow::Result;
