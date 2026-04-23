@@ -1,0 +1,10 @@
+---
+source: libshpool/src/tui/view.rs
+expression: "render_to_string(&m, 70, 5)"
+snapshot_kind: text
+---
+ shpool sessions (1)                                                  
+  name  created  active                                               
+*>main  5m       5m                                                   
+                                                                      
+'main' is attached elsewhere — force attach?   [y/N]

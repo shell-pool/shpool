@@ -6,6 +6,7 @@ mod keymap;
 mod model;
 mod suspend;
 mod update;
+mod view;
 
 use std::path::PathBuf;
 
