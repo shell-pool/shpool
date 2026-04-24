@@ -1,9 +1,11 @@
 //! `shpool tui` — interactive session manager.
 
+mod attach;
 mod command;
 mod event;
 mod keymap;
 mod model;
+mod store;
 mod suspend;
 mod update;
 mod view;
