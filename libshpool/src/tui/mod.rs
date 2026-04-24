@@ -31,7 +31,7 @@ use std::{
 use anyhow::{Context, Result};
 use crossterm::{
     cursor::Hide,
-    event::{self as xterm_event, KeyEventKind},
+    event::{self as xterm_event, DisableFocusChange, EnableFocusChange, KeyEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -96,7 +96,11 @@ pub fn run(
 /// bound to stdout.
 fn enter_tui() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
     enable_raw_mode().context("enabling raw mode")?;
-    execute!(io::stdout(), EnterAlternateScreen, Hide).context("entering alt screen")?;
+    // EnableFocusChange is best-effort: terminals that don't implement
+    // the escape sequence just ignore it, and we never receive
+    // FocusGained events from them — benign no-op.
+    execute!(io::stdout(), EnterAlternateScreen, Hide, EnableFocusChange)
+        .context("entering alt screen")?;
     let backend = CrosstermBackend::new(io::stdout());
     let terminal = Terminal::new(backend).context("creating terminal")?;
     Ok(terminal)
@@ -108,7 +112,8 @@ fn leave_tui(mut terminal: Terminal<CrosstermBackend<io::Stdout>>) -> Result<()>
     // Clear + show cursor first so the user's shell prompt lands in
     // a sensible place.
     use crossterm::cursor::Show;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, Show).context("leaving alt screen")?;
+    execute!(terminal.backend_mut(), DisableFocusChange, LeaveAlternateScreen, Show)
+        .context("leaving alt screen")?;
     disable_raw_mode().context("disabling raw mode")?;
     Ok(())
 }
@@ -257,10 +262,10 @@ fn now_ms() -> i64 {
 /// update. Resize events are absorbed here — we don't bother the
 /// model with them.
 ///
-/// This function only returns `Event::Key(...)`. RefreshFailed /
+/// Returns `Event::Key(...)` or `Event::FocusGained`. RefreshFailed /
 /// AttachExited / etc. all come from the executor; having the
-/// read-key path return the same `Event` type as the executor
-/// keeps the main loop simple.
+/// read-key path return the same `Event` type as the executor keeps
+/// the main loop simple.
 fn read_one_event() -> Result<Event> {
     loop {
         match xterm_event::read()? {
@@ -271,10 +276,11 @@ fn read_one_event() -> Result<Event> {
             xterm_event::Event::Key(k) if k.kind == KeyEventKind::Press => {
                 return Ok(Event::Key(k));
             }
+            xterm_event::Event::FocusGained => return Ok(Event::FocusGained),
             // Resize: the next `terminal.draw` will pick up the new
             // size on its own. Loop around to read another event.
             xterm_event::Event::Resize(_, _) => continue,
-            // Mouse / paste / focus / key-release: ignore for now.
+            // Mouse / paste / focus-lost / key-release: ignore.
             _ => continue,
         }
     }

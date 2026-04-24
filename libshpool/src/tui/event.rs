@@ -12,6 +12,11 @@ pub enum Event {
     /// directly — `update` pattern-matches on key code + modifiers.
     Key(KeyEvent),
 
+    /// The terminal window regained focus. Triggers a refresh: if
+    /// the user switched away and came back, session state may have
+    /// changed while they weren't looking.
+    FocusGained,
+
     /// The daemon answered a List request; here's the fresh data.
     SessionsRefreshed(Vec<Session>),
 

@@ -25,6 +25,7 @@ pub fn update(model: &mut Model, event: Event) -> Option<Command> {
 
     let cmd = match event {
         Event::Key(key) => handle_key(model, key),
+        Event::FocusGained => Some(Command::Refresh),
         Event::SessionsRefreshed(sessions) => {
             model.apply_refresh(sessions);
             None
@@ -484,6 +485,24 @@ mod tests {
         let mut m = Model::new();
         let cmd = update(&mut m, Event::RefreshFailed("boom".into()));
         assert_eq!(cmd, None);
+    }
+
+    #[test]
+    fn focus_gained_triggers_refresh() {
+        let mut m = Model::new();
+        let cmd = update(&mut m, Event::FocusGained);
+        assert_eq!(cmd, Some(Command::Refresh));
+    }
+
+    #[test]
+    fn focus_gained_does_not_clear_error() {
+        // Only keystrokes clear the transient error — an async event
+        // like FocusGained shouldn't dismiss a message the user
+        // hasn't acknowledged.
+        let mut m = Model::new();
+        m.set_error("sticky");
+        update(&mut m, Event::FocusGained);
+        assert_eq!(m.error.as_deref(), Some("sticky"));
     }
 
     #[test]
