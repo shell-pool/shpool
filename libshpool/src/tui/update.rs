@@ -87,7 +87,7 @@ fn handle_key(model: &mut Model, key: KeyEvent) -> Option<Command> {
 }
 
 fn handle_key_normal(model: &mut Model, key: KeyEvent) -> Option<Command> {
-    let Some(action) = normal_action(&key) else { return None };
+    let action = normal_action(&key)?;
 
     match action {
         NormalAction::SelectPrev => {
@@ -105,9 +105,7 @@ fn handle_key_normal(model: &mut Model, key: KeyEvent) -> Option<Command> {
             // ago and the daemon hasn't reflected it yet). Just
             // emit Command::Attach and let the executor make that
             // decision with fresh data right before spawning.
-            let Some(session) = model.sessions.get(model.selected) else {
-                return None;
-            };
+            let session = model.sessions.get(model.selected)?;
             Some(Command::Attach { name: session.name.clone(), force: false })
         }
         NormalAction::NewSession => {
@@ -115,9 +113,7 @@ fn handle_key_normal(model: &mut Model, key: KeyEvent) -> Option<Command> {
             None
         }
         NormalAction::KillSelected => {
-            let Some(session) = model.sessions.get(model.selected) else {
-                return None;
-            };
+            let session = model.sessions.get(model.selected)?;
             model.mode = Mode::ConfirmKill(session.name.clone());
             None
         }
