@@ -6,13 +6,19 @@ Some tips for working on shpool.
 ## AI Policy
 
 Do not use AI to generate issues or bug reports. Instead, just write what
-you prompted the AI with.
+you prompted the AI with. It's fine (and encouraged!) to use AI to generate
+example code to include in an issue to spark a discussion.
 
 When creating PRs, it's fine to use AI to write tests and understand the codebase.
 Application code can be fine as well, but make sure to review carefully
 and prevent the accumulation of bloat or needless abstraction. If you do use
 AI to generate code, you must review and test it carefully yourself. Do not
 send patches you don't understand.
+
+If you submit a PR that feels substantially AI generated, it may be re-written
+to match the style of the existing codebase at the discretion of the
+maintainers. That should not discourage you from submitting such PRs, as
+they can be very useful even if we just use them for inspiration.
 
 When creating PRs or filing issues, disclose your AI usage.
 
@@ -212,20 +218,6 @@ $ rr replay --debugger=rust-gdb --onprocess=<PID>
 
 where `<PID>` is taken from the output of `rr ps`.
 
-## Preserving Logs in Tests
-
-By default, tests will clean up log files emitted by the various
-shpool subprocesses they spawn. In order get the tests to leave
-log files around for later inspection, you can set the
-`SHPOOL_LEAVE_TEST_LOGS` environment variable to `true`.
-
-For example to run `happy_path` from the `attach` suite and
-leave log files in place you might run
-
-```
-$ SHPOOL_LEAVE_TEST_LOGS=true cargo test --test attach happy_path -- --nocapture
-```
-
 ## Running Tests on macOS
 
 Some tests are skipped on macOS due to platform differences:
@@ -245,3 +237,17 @@ and will be skipped automatically when running `cargo test` on macOS.
 Some tests use hard-coded wait times. This leads to timing failures in some
 environments. macOS seems particularly sensitive to this, so be aware that
 some of those tests are currently a bit flaky there.
+
+## Preserving Logs in Tests
+
+By default, tests will clean up log files emitted by the various
+shpool subprocesses they spawn. In order get the tests to leave
+log files around for later inspection, you can set the
+`SHPOOL_LEAVE_TEST_LOGS` environment variable to `true`.
+
+For example to run `happy_path` from the `attach` suite and
+leave log files in place you might run
+
+```
+$ SHPOOL_LEAVE_TEST_LOGS=true cargo test --test attach happy_path -- --nocapture
+```
