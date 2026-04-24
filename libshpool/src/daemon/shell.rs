@@ -27,7 +27,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Context};
-use nix::{poll::PollFlags, sys::signal, unistd::Pid};
+use nix::{poll, poll::PollFlags, sys::signal, unistd::Pid};
 use shpool_protocol::{Chunk, ChunkKind, TtySize};
 use tracing::{debug, error, info, instrument, span, trace, warn, Level};
 
@@ -221,8 +221,6 @@ impl SessionInner {
         &self,
         args: ShellToClientArgs,
     ) -> anyhow::Result<thread::JoinHandle<anyhow::Result<()>>> {
-        use nix::poll;
-
         let term_db = Arc::clone(&self.term_db);
         let mut prompt_sentinel_scanner = prompt::SentinelScanner::new(consts::PROMPT_SENTINEL);
 

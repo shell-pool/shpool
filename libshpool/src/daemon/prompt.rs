@@ -15,15 +15,30 @@
 // This file contains the logic for injecting the `prompt_annotation`
 // config option into a user's prompt for known shells.
 
-use std::io::{Read, Write};
+use std::{
+    io::{Read, Write},
+    time,
+};
 
 use anyhow::{anyhow, Context};
-use tracing::{debug, info, instrument, warn};
+use nix::{poll, poll::PollFlags};
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::{
     consts::{SENTINEL_FLAG_VAR, STARTUP_SENTINEL},
     daemon::trie::{Trie, TrieCursor},
+    test_hooks,
 };
+
+// We don't need an agressive poll cadence because the normal case is
+// that we exit the startup sentinal loop after some data comes in and
+// we scan the sentinal successfully. We only need to wake up every so
+// often to check if we've hit our timeout, which is long.
+const SENTINEL_POLL_MS: u16 = 500;
+
+// Even the most sluggish dotfile setup ought to be done within
+// 90 seconds.
+const SENTINEL_POLL_TIMEOUT: time::Duration = time::Duration::from_secs(90);
 
 #[derive(Debug, Clone)]
 enum KnownShell {
@@ -120,6 +135,7 @@ pub fn maybe_inject_prefix(
 
 #[instrument(skip_all)]
 fn wait_for_startup(pty_master: &mut shpool_pty::fork::Master) -> anyhow::Result<()> {
+    test_hooks::emit("wait-for-startup-enter");
     let mut startup_sentinel_scanner = SentinelScanner::new(STARTUP_SENTINEL);
     let exe_path =
         std::env::current_exe().context("getting current exe path")?.to_string_lossy().into_owned();
@@ -129,8 +145,33 @@ fn wait_for_startup(pty_master: &mut shpool_pty::fork::Master) -> anyhow::Result
         .write_all(startup_sentinel_cmd.as_bytes())
         .context("running startup sentinel script")?;
 
+    let watchable_master = *pty_master;
+    let mut poll_fds = [poll::PollFd::new(
+        watchable_master.borrow_fd().ok_or(anyhow!("no master fd"))?,
+        PollFlags::POLLIN | PollFlags::POLLHUP | PollFlags::POLLERR,
+    )];
+
+    let deadline = time::Instant::now() + SENTINEL_POLL_TIMEOUT;
     let mut buf: [u8; 2048] = [0; 2048];
     loop {
+        if time::Instant::now() > deadline {
+            return Err(anyhow!("timed out waiting for shell startup"));
+        }
+        let nready = match poll::poll(&mut poll_fds, SENTINEL_POLL_MS) {
+            Ok(n) => n,
+            Err(e) => {
+                error!("polling pty master: {:?}", e);
+                return Err(e)?;
+            }
+        };
+        if nready == 0 {
+            // if timeout
+            continue;
+        }
+        if nready != 1 {
+            return Err(anyhow!("sentinal scan: expected exactly 1 ready fd"));
+        }
+
         let len = pty_master.read(&mut buf).context("reading chunk to scan for startup")?;
         if len == 0 {
             continue;
