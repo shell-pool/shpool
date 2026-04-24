@@ -145,9 +145,9 @@ fn wait_for_startup(pty_master: &mut shpool_pty::fork::Master) -> anyhow::Result
         .write_all(startup_sentinel_cmd.as_bytes())
         .context("running startup sentinel script")?;
 
-    let watchable_master = *pty_master;
+    let watchable_master = pty_master.clone();
     let mut poll_fds = [poll::PollFd::new(
-        watchable_master.borrow_fd().ok_or(anyhow!("no master fd"))?,
+        watchable_master.borrow_fd(),
         PollFlags::POLLIN | PollFlags::POLLHUP | PollFlags::POLLERR,
     )];
 
