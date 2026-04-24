@@ -232,7 +232,7 @@ impl SessionInner {
         let mut needs_initial_motd_dump = self.needs_initial_motd_dump;
 
         let mut pty_master = self.pty_master.is_parent()?;
-        let watchable_master = pty_master;
+        let watchable_master = pty_master.clone();
         let name = self.name.clone();
         let config = self.config.clone();
         let closure = move || {
@@ -242,7 +242,7 @@ impl SessionInner {
                 session_restore::new(config, &args.tty_size, args.scrollback_lines);
             let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
             let mut poll_fds = [poll::PollFd::new(
-                watchable_master.borrow_fd().ok_or(anyhow!("no master fd"))?,
+                watchable_master.borrow_fd(),
                 PollFlags::POLLIN | PollFlags::POLLHUP | PollFlags::POLLERR,
             )];
 
@@ -292,7 +292,7 @@ impl SessionInner {
                                     xpixel: conn.size.xpixel,
                                     ypixel: conn.size.ypixel,
                                 };
-                                oversize.set_fd(pty_master.raw_fd().ok_or(anyhow!("no master fd"))?)?;
+                                oversize.set_fd(pty_master.raw_fd())?;
 
                                 // Prepare a resize command for pty to execute later.
                                 resize_cmd = Some(ResizeCmd {
@@ -404,11 +404,7 @@ impl SessionInner {
                     if resize_cmd.when.saturating_duration_since(time::Instant::now())
                         == time::Duration::ZERO
                     {
-                        let status = pty_master
-                            .raw_fd()
-                            .ok_or(anyhow!("no master fd"))
-                            .and_then(|fd| resize_cmd.size.set_fd(fd));
-                        if let Err(e) = status {
+                        if let Err(e) = resize_cmd.size.set_fd(pty_master.raw_fd()) {
                             warn!("error resizing pty: {}", e);
                         }
                         executed_resize = true;
@@ -751,7 +747,7 @@ impl SessionInner {
                     span!(Level::INFO, "client->shell", s = self.name, cid = conn_id).entered();
                 let mut bindings = bindings.context("compiling keybindings engine")?;
 
-                let mut master_writer = *pty_master;
+                let mut master_writer = pty_master.clone();
 
                 let mut snip_sections = vec![]; // (<len>, <end offset>)
                 let mut keep_sections = vec![]; // (<start offset>, <end offset>)
