@@ -36,6 +36,7 @@ mod daemon;
 mod daemonize;
 mod detach;
 mod duration;
+mod events;
 mod hooks;
 mod kill;
 mod list;
