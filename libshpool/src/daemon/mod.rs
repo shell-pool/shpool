@@ -17,7 +17,7 @@ use std::{env, os::unix::net::UnixListener, path::PathBuf};
 use anyhow::Context;
 use tracing::{info, instrument};
 
-use crate::{config, consts, hooks};
+use crate::{config, consts, events, hooks};
 
 mod etc_environment;
 mod exit_notify;
@@ -83,6 +83,8 @@ pub fn run(
     };
     // spawn the signal handler thread in the background
     signals::Handler::new(cleanup_socket.clone()).spawn()?;
+
+    let _events_guard = server.start_events_listener(events::socket_path(&socket))?;
 
     server::Server::serve(server, listener)?;
 

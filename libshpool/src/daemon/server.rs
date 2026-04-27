@@ -49,7 +49,7 @@ use crate::{
         etc_environment, exit_notify::ExitNotifier, hooks, pager, pager::PagerError, prompt, shell,
         show_motd, ttl_reaper,
     },
-    protocol, test_hooks, tty, user,
+    events, protocol, test_hooks, tty, user,
 };
 
 const DEFAULT_INITIAL_SHELL_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
@@ -74,6 +74,7 @@ pub struct Server {
     runtime_dir: PathBuf,
     register_new_reapable_session: crossbeam_channel::Sender<(String, Instant)>,
     hooks: Box<dyn hooks::Hooks + Send + Sync>,
+    pub events_bus: Arc<events::EventBus>,
     daily_messenger: Arc<show_motd::DailyMessenger>,
     log_level_handle: tracing_subscriber::reload::Handle<
         tracing_subscriber::filter::LevelFilter,
@@ -110,9 +111,36 @@ impl Server {
             runtime_dir,
             register_new_reapable_session: new_sess_tx,
             hooks,
+            events_bus: events::EventBus::new(),
             daily_messenger,
             log_level_handle,
         }))
+    }
+
+    /// Bind the events socket and spawn the accept thread. Each accepted
+    /// connection is handed a snapshot built under the session-table lock
+    /// so subsequent deltas (published under the same lock) cannot race.
+    /// The returned guard unlinks the socket file on drop.
+    pub fn start_events_listener(
+        self: &Arc<Self>,
+        socket_path: PathBuf,
+    ) -> anyhow::Result<events::ListenerGuard> {
+        let server = Arc::clone(self);
+        events::start_listener(socket_path, move |stream| {
+            server.handle_events_subscriber(stream)
+        })
+    }
+
+    fn handle_events_subscriber(&self, stream: UnixStream) -> anyhow::Result<()> {
+        let receiver = {
+            let _s = span!(Level::INFO, "events_subscribe_lock(shells)").entered();
+            let shells = self.shells.lock().unwrap();
+            let sessions =
+                collect_sessions(&shells).context("collecting snapshot for events subscriber")?;
+            let snapshot = events::Event::Snapshot { sessions };
+            self.events_bus.register(&snapshot)
+        };
+        events::spawn_writer(stream, receiver)
     }
 
     #[instrument(skip_all)]
@@ -646,40 +674,8 @@ impl Server {
     fn handle_list(&self, mut stream: UnixStream) -> anyhow::Result<()> {
         let _s = span!(Level::INFO, "lock(shells)").entered();
         let shells = self.shells.lock().unwrap();
-
-        let sessions: anyhow::Result<Vec<Session>> = shells
-            .iter()
-            .map(|(k, v)| {
-                let status = match v.inner.try_lock() {
-                    Ok(_) => SessionStatus::Disconnected,
-                    Err(_) => SessionStatus::Attached,
-                };
-
-                let timestamps = v.lifecycle_timestamps.lock().unwrap();
-                let last_connected_at_unix_ms = timestamps
-                    .last_connected_at
-                    .map(|t| t.duration_since(time::UNIX_EPOCH).map(|d| d.as_millis() as i64))
-                    .transpose()?;
-
-                let last_disconnected_at_unix_ms = timestamps
-                    .last_disconnected_at
-                    .map(|t| t.duration_since(time::UNIX_EPOCH).map(|d| d.as_millis() as i64))
-                    .transpose()?;
-
-                Ok(Session {
-                    name: k.to_string(),
-                    started_at_unix_ms: v.started_at.duration_since(time::UNIX_EPOCH)?.as_millis()
-                        as i64,
-                    last_connected_at_unix_ms,
-                    last_disconnected_at_unix_ms,
-                    status,
-                })
-            })
-            .collect();
-        let sessions = sessions.context("collecting running session metadata")?;
-
+        let sessions = collect_sessions(&shells)?;
         write_reply(&mut stream, ListReply { sessions })?;
-
         Ok(())
     }
 
@@ -1141,6 +1137,43 @@ impl Server {
     fn session_dir<P: AsRef<Path>>(&self, session_name: P) -> PathBuf {
         self.runtime_dir.join("sessions").join(session_name)
     }
+}
+
+/// Collect a snapshot of the session table for `list` replies and event
+/// snapshots. The caller must hold the shells lock for the duration of
+/// the call so the resulting list is consistent with concurrent mutators.
+fn collect_sessions(
+    shells: &HashMap<String, Box<shell::Session>>,
+) -> anyhow::Result<Vec<Session>> {
+    shells
+        .iter()
+        .map(|(k, v)| {
+            let status = match v.inner.try_lock() {
+                Ok(_) => SessionStatus::Disconnected,
+                Err(_) => SessionStatus::Attached,
+            };
+
+            let timestamps = v.lifecycle_timestamps.lock().unwrap();
+            let last_connected_at_unix_ms = timestamps
+                .last_connected_at
+                .map(|t| t.duration_since(time::UNIX_EPOCH).map(|d| d.as_millis() as i64))
+                .transpose()?;
+            let last_disconnected_at_unix_ms = timestamps
+                .last_disconnected_at
+                .map(|t| t.duration_since(time::UNIX_EPOCH).map(|d| d.as_millis() as i64))
+                .transpose()?;
+
+            Ok(Session {
+                name: k.to_string(),
+                started_at_unix_ms: v.started_at.duration_since(time::UNIX_EPOCH)?.as_millis()
+                    as i64,
+                last_connected_at_unix_ms,
+                last_disconnected_at_unix_ms,
+                status,
+            })
+        })
+        .collect::<anyhow::Result<Vec<Session>>>()
+        .context("collecting running session metadata")
 }
 
 // HACK: this is not a good way to detect shells that don't support our
