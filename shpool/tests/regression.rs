@@ -23,10 +23,10 @@ use crate::support::{daemon::DaemonArgs, tmpdir};
 fn list_not_blocked_by_slow_shell_spawn() -> anyhow::Result<()> {
     let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test")?;
 
-    let config_tmpl = fs::read_to_string(support::testdata_file("hang_shell.toml.tmpl"))?;
+    let config_tmpl = fs::read_to_string(support::testdata_file("custom_shell.toml.tmpl"))?;
     let config_contents = config_tmpl
         .replace("SHELL", support::testdata_file("hang_shell.sh").to_string_lossy().as_ref());
-    let config_file = tmp_dir.path().join("motd_dump.toml");
+    let config_file = tmp_dir.path().join("custom_shell.toml");
     {
         let mut f = fs::File::create(&config_file)?;
         f.write_all(config_contents.as_bytes())?;
@@ -82,4 +82,40 @@ fn list_not_blocked_by_slow_shell_spawn() -> anyhow::Result<()> {
             );
         }
     }
+}
+
+/// Regression test for a bug where shpool would loop forever if the shell
+/// exited immediately during startup while we were waiting for the
+/// startup sentinel.
+#[test]
+#[timeout(10000)]
+fn no_loop_on_shell_exit_during_startup() -> anyhow::Result<()> {
+    let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test")?;
+
+    let config_tmpl = fs::read_to_string(support::testdata_file("custom_shell.toml.tmpl"))?;
+    // Use /bin/true as the shell so it exits immediately.
+    // We need to trigger wait_for_startup, which happens when prompt_prefix is set.
+    let config_contents = config_tmpl.replace("SHELL", "/bin/true");
+    let config_file = tmp_dir.path().join("exit_shell.toml");
+    {
+        let mut f = fs::File::create(&config_file)?;
+        f.write_all(config_contents.as_bytes())?;
+    }
+
+    let mut daemon_proc = support::daemon::Proc::new(&config_file, DaemonArgs::default())
+        .context("starting daemon proc")?;
+
+    // Try to attach. This should trigger wait_for_startup because prompt_prefix is
+    // set in hang_shell.toml.tmpl.
+    // The shell (/bin/true) will exit immediately, causing wait_for_startup to get
+    // EOF. On BUGGY code: this loops forever in the daemon.
+    // On FIXED code: this returns an error in the daemon, and the attach proc
+    // finishes.
+    let mut attach_proc =
+        daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+
+    // Wait for the attach process to exit.
+    let _status = attach_proc.proc.wait().context("waiting for attach proc")?;
+
+    Ok(())
 }
