@@ -44,6 +44,7 @@ mod session_restore;
 mod set_log_level;
 mod test_hooks;
 mod tty;
+mod tui;
 mod user;
 
 /// The command line arguments that shpool expects.
@@ -209,6 +210,10 @@ needs debugging, but would be clobbered by a restart.")]
         #[clap(help = "new log level")]
         level: shpool_protocol::LogLevel,
     },
+
+    #[clap(about = "TUI session manager")]
+    #[non_exhaustive]
+    Tui {},
 }
 
 impl Args {
@@ -381,6 +386,13 @@ pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> an
         Commands::Kill { sessions } => kill::run(sessions, socket),
         Commands::List { json } => list::run(socket, json),
         Commands::SetLogLevel { level } => set_log_level::run(level, socket),
+        Commands::Tui {} => {
+            // Forward the parent invocation's top-level flags so the
+            // `shpool attach` children spawned from the TUI see the
+            // same config / log destination / verbosity. See
+            // tui::run's docstring.
+            tui::run(socket, args.config_file.clone(), args.log_file.clone(), args.verbose)
+        }
     };
 
     if let Err(err) = res {

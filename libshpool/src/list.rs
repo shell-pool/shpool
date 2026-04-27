@@ -12,29 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{io, path::PathBuf, time};
+use std::{path::PathBuf, time};
 
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 use shpool_protocol::{ConnectHeader, ListReply};
 
-use crate::{protocol, protocol::ClientResult};
+use crate::protocol;
 
 pub fn run(socket: PathBuf, json_output: bool) -> anyhow::Result<()> {
-    let mut client = match protocol::Client::new(socket) {
-        Ok(ClientResult::JustClient(c)) => c,
-        Ok(ClientResult::VersionMismatch { warning, client }) => {
-            eprintln!("warning: {warning}, try restarting your daemon");
-            client
-        }
-        Err(err) => {
-            let io_err = err.downcast::<io::Error>()?;
-            if io_err.kind() == io::ErrorKind::NotFound {
-                eprintln!("could not connect to daemon");
-            }
-            return Err(io_err).context("connecting to daemon");
-        }
-    };
+    let mut client = protocol::connect_cli(socket)?;
 
     client.write_connect_header(ConnectHeader::List).context("sending list connect header")?;
     let reply: ListReply = client.read_reply().context("reading reply")?;

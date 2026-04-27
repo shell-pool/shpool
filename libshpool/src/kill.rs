@@ -12,31 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{io, path::Path};
+use std::path::Path;
 
 use anyhow::{anyhow, Context};
 use shpool_protocol::{ConnectHeader, KillReply, KillRequest};
 
-use crate::{common, protocol, protocol::ClientResult};
+use crate::{common, protocol};
 
 pub fn run<P>(mut sessions: Vec<String>, socket: P) -> anyhow::Result<()>
 where
     P: AsRef<Path>,
 {
-    let mut client = match protocol::Client::new(socket) {
-        Ok(ClientResult::JustClient(c)) => c,
-        Ok(ClientResult::VersionMismatch { warning, client }) => {
-            eprintln!("warning: {warning}, try restarting your daemon");
-            client
-        }
-        Err(err) => {
-            let io_err = err.downcast::<io::Error>()?;
-            if io_err.kind() == io::ErrorKind::NotFound {
-                eprintln!("could not connect to daemon");
-            }
-            return Err(io_err).context("connecting to daemon");
-        }
-    };
+    let mut client = protocol::connect_cli(socket)?;
 
     common::resolve_sessions(&mut sessions, "kill")?;
 

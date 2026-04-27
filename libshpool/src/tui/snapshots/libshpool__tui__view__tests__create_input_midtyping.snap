@@ -1,0 +1,10 @@
+---
+source: libshpool/src/tui/view.rs
+expression: "render_to_string(&m, 70, 5)"
+snapshot_kind: text
+---
+ shpool sessions (1)                                                  
+  name  created  active                                               
+ >main  30s      30s                                                  
+                                                                      
+new session name: foo_  [ret] create  [esc] cancel

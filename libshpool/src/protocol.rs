@@ -430,6 +430,35 @@ impl Client {
     }
 }
 
+/// Connect to the shpool daemon, returning the Client and any
+/// version-mismatch warning the caller should surface to the user.
+pub fn connect(socket: impl AsRef<Path>) -> anyhow::Result<(Client, Option<String>)> {
+    match Client::new(socket)? {
+        ClientResult::JustClient(c) => Ok((c, None)),
+        ClientResult::VersionMismatch { warning, client } => Ok((client, Some(warning))),
+    }
+}
+
+/// CLI-style connect: warnings go to stderr, NotFound produces the
+/// standard "could not connect to daemon" hint, and the wrapped error
+/// is returned with a "connecting to daemon" context.
+pub fn connect_cli(socket: impl AsRef<Path>) -> anyhow::Result<Client> {
+    match connect(socket) {
+        Ok((client, None)) => Ok(client),
+        Ok((client, Some(warning))) => {
+            eprintln!("warning: {warning}, try restarting your daemon");
+            Ok(client)
+        }
+        Err(err) => {
+            let io_err = err.downcast::<io::Error>()?;
+            if io_err.kind() == io::ErrorKind::NotFound {
+                eprintln!("could not connect to daemon");
+            }
+            Err(io_err).context("connecting to daemon")
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

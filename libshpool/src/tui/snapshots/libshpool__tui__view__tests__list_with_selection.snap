@@ -1,0 +1,11 @@
+---
+source: libshpool/src/tui/view.rs
+expression: "render_to_string(&m, 70, 6)"
+snapshot_kind: text
+---
+ shpool sessions (2)                                                  
+  name   created  active                                              
+* main   2m       2m                                                  
+ >build  3h       3h                                                  
+                                                                      
+ [j] down  [k] up  [spc] attach  [n] new  [d] kill  [q] quit
