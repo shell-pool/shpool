@@ -100,14 +100,14 @@ impl<'data> ChunkExt<'data> for Chunk<'data> {
     where
         R: std::io::Read,
     {
-        let kind = r.read_u8()?;
-        let kind = ChunkKind::try_from(kind)?;
+        let kind = r.read_u8().context("reading chunk kind")?;
+        let kind = ChunkKind::try_from(kind).context("parsing chunk kind")?;
         if let ChunkKind::ExitStatus = kind {
             if 4 > buf.len() {
                 return Err(anyhow!("chunk of size 4 exceeds size limit of {} bytes", buf.len()));
             }
 
-            r.read_exact(&mut buf[..4])?;
+            r.read_exact(&mut buf[..4]).context("reading exit status payload")?;
             Ok(Chunk { kind, buf: &buf[..4] })
         } else {
             let len = r.read_u32::<LittleEndian>()? as usize;
@@ -118,7 +118,7 @@ impl<'data> ChunkExt<'data> for Chunk<'data> {
                     buf.len()
                 ));
             }
-            r.read_exact(&mut buf[..len])?;
+            r.read_exact(&mut buf[..len]).context("reading chunk payload")?;
             Ok(Chunk { kind, buf: &buf[..len] })
         }
     }
