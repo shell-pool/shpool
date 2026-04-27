@@ -1,4 +1,19 @@
 
+shpool (0.9.6) unstable; urgency=low
+
+  Fixed
+
+  * bug in shell startup loop when handling EOF ([#354](https://github.com/shell-pool/shpool/pull/354))
+  * wait for shell deadlock ([#348](https://github.com/shell-pool/shpool/pull/348))
+  * reduce global lock contention when resizing ([#355](https://github.com/shell-pool/shpool/pull/355))
+  * improve error messages on chunk read failures ([#351](https://github.com/shell-pool/shpool/pull/351))
+
+  Other
+
+  * add Homebrew installation instructions for macOS ([#333](https://github.com/shell-pool/shpool/pull/333))
+
+ -- Shpool Authors <shpool-eng@google.com>  Mon, 27 Apr 2026 18:18:49 +0000
+
 shpool (0.9.5) unstable; urgency=low
 
   Added
