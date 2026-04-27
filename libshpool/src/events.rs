@@ -16,7 +16,7 @@
 //! sync by construction.
 
 use std::{
-    io::Write,
+    io::{BufRead, BufReader, Write},
     os::unix::net::{UnixListener, UnixStream},
     path::{Path, PathBuf},
     sync::{
@@ -129,6 +129,23 @@ fn serialize_line(event: &Event) -> Option<Arc<str>> {
             None
         }
     }
+}
+
+/// Connect to the events socket, copy each line to stdout, and flush per
+/// line so the stream is usable in pipes (`shpool events | jq`). Returns
+/// when the daemon closes the connection.
+pub fn subscribe_to_stdout(socket_path: &Path) -> anyhow::Result<()> {
+    let stream = UnixStream::connect(socket_path)
+        .with_context(|| format!("connecting to events socket {:?}", socket_path))?;
+    let reader = BufReader::new(stream);
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    for line in reader.lines() {
+        let line = line.context("reading event")?;
+        writeln!(out, "{line}").context("writing event")?;
+        out.flush().context("flushing stdout")?;
+    }
+    Ok(())
 }
 
 /// Sibling events socket path next to the main shpool socket.

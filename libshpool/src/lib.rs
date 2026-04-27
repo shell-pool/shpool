@@ -210,6 +210,15 @@ needs debugging, but would be clobbered by a restart.")]
         #[clap(help = "new log level")]
         level: shpool_protocol::LogLevel,
     },
+
+    #[clap(about = "Subscribe to the daemon's push-event stream
+
+Connects to the events socket and writes each event (one JSON object
+per line) to stdout, flushing after every line so the stream is
+pipeline-friendly (e.g. `shpool events | jq`). The first line is a
+snapshot of the current session table; subsequent lines are deltas.
+Reconnect to force a fresh snapshot.")]
+    Events,
 }
 
 impl Args {
@@ -382,6 +391,7 @@ pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> an
         Commands::Kill { sessions } => kill::run(sessions, socket),
         Commands::List { json } => list::run(socket, json),
         Commands::SetLogLevel { level } => set_log_level::run(level, socket),
+        Commands::Events => events::subscribe_to_stdout(&events::socket_path(&socket)),
     };
 
     if let Err(err) = res {
