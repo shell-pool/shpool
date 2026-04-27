@@ -174,7 +174,7 @@ fn wait_for_startup(pty_master: &mut shpool_pty::fork::Master) -> anyhow::Result
 
         let len = pty_master.read(&mut buf).context("reading chunk to scan for startup")?;
         if len == 0 {
-            continue;
+            return Err(anyhow!("EOF during shell startup"));
         }
         let buf = &buf[..len];
         debug!("buf='{}'", String::from_utf8_lossy(buf));
