@@ -176,10 +176,7 @@ impl Drop for ListenerGuard {
 /// connection, `on_accept` is invoked with the stream; it is expected to
 /// register the subscriber with the bus and spawn a writer thread (see
 /// [`spawn_writer`]). The returned guard unlinks the socket file on drop.
-pub fn start_listener<F>(
-    socket_path: PathBuf,
-    on_accept: F,
-) -> anyhow::Result<ListenerGuard>
+pub fn start_listener<F>(socket_path: PathBuf, on_accept: F) -> anyhow::Result<ListenerGuard>
 where
     F: Fn(UnixStream) -> anyhow::Result<()> + Send + 'static,
 {
@@ -265,13 +262,15 @@ mod tests {
     #[test]
     fn session_created_serializes_flat() {
         let event = Event::SessionCreated { name: "main".into(), started_at_unix_ms: 42 };
-        assert_eq!(json(&event), r#"{"type":"session.created","name":"main","started_at_unix_ms":42}"#);
+        assert_eq!(
+            json(&event),
+            r#"{"type":"session.created","name":"main","started_at_unix_ms":42}"#
+        );
     }
 
     #[test]
     fn session_attached_serializes_flat() {
-        let event =
-            Event::SessionAttached { name: "main".into(), last_connected_at_unix_ms: 42 };
+        let event = Event::SessionAttached { name: "main".into(), last_connected_at_unix_ms: 42 };
         assert_eq!(
             json(&event),
             r#"{"type":"session.attached","name":"main","last_connected_at_unix_ms":42}"#
@@ -395,17 +394,9 @@ mod tests {
 
     #[test]
     fn session_removed_serializes_with_reason() {
-        let exited =
-            Event::SessionRemoved { name: "main".into(), reason: RemovedReason::Exited };
-        assert_eq!(
-            json(&exited),
-            r#"{"type":"session.removed","name":"main","reason":"exited"}"#
-        );
-        let killed =
-            Event::SessionRemoved { name: "main".into(), reason: RemovedReason::Killed };
-        assert_eq!(
-            json(&killed),
-            r#"{"type":"session.removed","name":"main","reason":"killed"}"#
-        );
+        let exited = Event::SessionRemoved { name: "main".into(), reason: RemovedReason::Exited };
+        assert_eq!(json(&exited), r#"{"type":"session.removed","name":"main","reason":"exited"}"#);
+        let killed = Event::SessionRemoved { name: "main".into(), reason: RemovedReason::Killed };
+        assert_eq!(json(&killed), r#"{"type":"session.removed","name":"main","reason":"killed"}"#);
     }
 }
