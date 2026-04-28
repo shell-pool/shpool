@@ -117,13 +117,7 @@ pub fn run(
                         continue;
                     }
                     shells.remove(&reapable.session_name);
-                    // Reaping is a daemon-initiated termination; surfaced to
-                    // subscribers as `killed` until we have a use case for a
-                    // dedicated reason.
-                    events_bus.publish(&events::Event::SessionRemoved {
-                        name: reapable.session_name.clone(),
-                        reason: events::RemovedReason::Killed,
-                    });
+                    events_bus.publish(&events::Event::SessionRemoved);
                 }
             }
         }

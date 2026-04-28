@@ -119,10 +119,8 @@ impl Server {
         }))
     }
 
-    /// Bind the events socket and spawn the accept thread. Each accepted
-    /// connection is handed a snapshot built under the session-table lock
-    /// so subsequent deltas (published under the same lock) cannot race.
-    /// The returned guard unlinks the socket file on drop.
+    /// Bind the events socket and spawn the accept thread. The returned
+    /// guard unlinks the socket file on drop.
     pub fn start_events_listener(
         self: &Arc<Self>,
         socket_path: PathBuf,
@@ -132,14 +130,7 @@ impl Server {
     }
 
     fn handle_events_subscriber(&self, stream: UnixStream) -> anyhow::Result<()> {
-        let receiver = {
-            let _s = span!(Level::INFO, "events_subscribe_lock(shells)").entered();
-            let shells = self.shells.lock().unwrap();
-            let sessions =
-                collect_sessions(&shells).context("collecting snapshot for events subscriber")?;
-            let snapshot = events::Event::Snapshot { sessions };
-            self.events_bus.register(&snapshot)
-        };
+        let receiver = self.events_bus.register();
         events::spawn_writer(stream, receiver)
     }
 
@@ -341,10 +332,7 @@ impl Server {
                     // Gated: a concurrent kill or reaper may have already
                     // removed the entry and published its own removal.
                     if shells.remove(&header.name).is_some() {
-                        self.events_bus.publish(&events::Event::SessionRemoved {
-                            name: header.name.clone(),
-                            reason: events::RemovedReason::Exited,
-                        });
+                        self.events_bus.publish(&events::Event::SessionRemoved);
                     }
                 }
 
@@ -367,10 +355,7 @@ impl Server {
                         let now = time::SystemTime::now();
                         session.lifecycle_timestamps.lock().unwrap().last_disconnected_at =
                             Some(now);
-                        self.events_bus.publish(&events::Event::SessionDetached {
-                            name: header.name.clone(),
-                            last_disconnected_at_unix_ms: unix_ms(now),
-                        });
+                        self.events_bus.publish(&events::Event::SessionDetached);
                     }
                 }
                 if let Err(err) = self.hooks.on_client_disconnect(&header.name) {
@@ -449,10 +434,7 @@ impl Server {
                             } else {
                                 // Reattach confirmed; the create path won't run
                                 // and clobber the entry, so it's safe to publish.
-                                self.events_bus.publish(&events::Event::SessionAttached {
-                                    name: header.name.clone(),
-                                    last_connected_at_unix_ms: unix_ms(now),
-                                });
+                                self.events_bus.publish(&events::Event::SessionAttached);
                             }
                         }
                         Some(exit_status) => {
@@ -514,7 +496,6 @@ impl Server {
 
             let now = time::SystemTime::now();
             session.lifecycle_timestamps.lock().unwrap().last_connected_at = Some(now);
-            let started_at = session.started_at;
             {
                 // we unwrap to propagate the poison as an unwind
                 let _s = span!(Level::INFO, "select_shell_lock_2(shells)").entered();
@@ -525,19 +506,10 @@ impl Server {
                 let clobbered = shells.contains_key(&header.name);
                 shells.insert(header.name.clone(), Box::new(session));
                 if clobbered {
-                    self.events_bus.publish(&events::Event::SessionRemoved {
-                        name: header.name.clone(),
-                        reason: events::RemovedReason::Exited,
-                    });
+                    self.events_bus.publish(&events::Event::SessionRemoved);
                 }
-                self.events_bus.publish(&events::Event::SessionCreated {
-                    name: header.name.clone(),
-                    started_at_unix_ms: unix_ms(started_at),
-                });
-                self.events_bus.publish(&events::Event::SessionAttached {
-                    name: header.name.clone(),
-                    last_connected_at_unix_ms: unix_ms(now),
-                });
+                self.events_bus.publish(&events::Event::SessionCreated);
+                self.events_bus.publish(&events::Event::SessionAttached);
             }
             // fallthrough to bidi streaming
         } else if let Err(err) = self.hooks.on_reattach(&header.name) {
@@ -638,9 +610,9 @@ impl Server {
                         not_attached_sessions.push(session);
                     } else {
                         // The bidi-loop unwind in handle_attach owns the
-                        // SessionDetached publish (with its own timestamp);
-                        // we just update last_disconnected_at eagerly so a
-                        // concurrent list() reflects the detach immediately.
+                        // SessionDetached publish; we just update
+                        // last_disconnected_at eagerly so a concurrent list()
+                        // reflects the detach immediately.
                         s.lifecycle_timestamps.lock().unwrap().last_disconnected_at =
                             Some(time::SystemTime::now());
                     }
@@ -700,10 +672,7 @@ impl Server {
 
             for session in to_remove.iter() {
                 shells.remove(session);
-                self.events_bus.publish(&events::Event::SessionRemoved {
-                    name: session.clone(),
-                    reason: events::RemovedReason::Killed,
-                });
+                self.events_bus.publish(&events::Event::SessionRemoved);
             }
             if !to_remove.is_empty() {
                 test_hooks::emit("daemon-handle-kill-removed-shells");
@@ -719,7 +688,35 @@ impl Server {
     fn handle_list(&self, mut stream: UnixStream) -> anyhow::Result<()> {
         let _s = span!(Level::INFO, "lock(shells)").entered();
         let shells = self.shells.lock().unwrap();
-        let sessions = collect_sessions(&shells)?;
+        let sessions = shells
+            .iter()
+            .map(|(k, v)| {
+                let status = match v.inner.try_lock() {
+                    Ok(_) => SessionStatus::Disconnected,
+                    Err(_) => SessionStatus::Attached,
+                };
+
+                let timestamps = v.lifecycle_timestamps.lock().unwrap();
+                let last_connected_at_unix_ms = timestamps
+                    .last_connected_at
+                    .map(|t| t.duration_since(time::UNIX_EPOCH).map(|d| d.as_millis() as i64))
+                    .transpose()?;
+                let last_disconnected_at_unix_ms = timestamps
+                    .last_disconnected_at
+                    .map(|t| t.duration_since(time::UNIX_EPOCH).map(|d| d.as_millis() as i64))
+                    .transpose()?;
+
+                Ok(Session {
+                    name: k.to_string(),
+                    started_at_unix_ms: v.started_at.duration_since(time::UNIX_EPOCH)?.as_millis()
+                        as i64,
+                    last_connected_at_unix_ms,
+                    last_disconnected_at_unix_ms,
+                    status,
+                })
+            })
+            .collect::<anyhow::Result<Vec<Session>>>()
+            .context("collecting running session metadata")?;
         write_reply(&mut stream, ListReply { sessions })?;
         Ok(())
     }
@@ -1182,45 +1179,6 @@ impl Server {
     fn session_dir<P: AsRef<Path>>(&self, session_name: P) -> PathBuf {
         self.runtime_dir.join("sessions").join(session_name)
     }
-}
-
-fn unix_ms(t: time::SystemTime) -> i64 {
-    t.duration_since(time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
-}
-
-/// Collect a snapshot of the session table for `list` replies and event
-/// snapshots. The caller must hold the shells lock for the duration of
-/// the call so the resulting list is consistent with concurrent mutators.
-fn collect_sessions(shells: &HashMap<String, Box<shell::Session>>) -> anyhow::Result<Vec<Session>> {
-    shells
-        .iter()
-        .map(|(k, v)| {
-            let status = match v.inner.try_lock() {
-                Ok(_) => SessionStatus::Disconnected,
-                Err(_) => SessionStatus::Attached,
-            };
-
-            let timestamps = v.lifecycle_timestamps.lock().unwrap();
-            let last_connected_at_unix_ms = timestamps
-                .last_connected_at
-                .map(|t| t.duration_since(time::UNIX_EPOCH).map(|d| d.as_millis() as i64))
-                .transpose()?;
-            let last_disconnected_at_unix_ms = timestamps
-                .last_disconnected_at
-                .map(|t| t.duration_since(time::UNIX_EPOCH).map(|d| d.as_millis() as i64))
-                .transpose()?;
-
-            Ok(Session {
-                name: k.to_string(),
-                started_at_unix_ms: v.started_at.duration_since(time::UNIX_EPOCH)?.as_millis()
-                    as i64,
-                last_connected_at_unix_ms,
-                last_disconnected_at_unix_ms,
-                status,
-            })
-        })
-        .collect::<anyhow::Result<Vec<Session>>>()
-        .context("collecting running session metadata")
 }
 
 // HACK: this is not a good way to detect shells that don't support our

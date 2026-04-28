@@ -5,15 +5,10 @@
 //! line (newline-delimited; aka JSONL). Non-Rust clients only need a Unix
 //! socket and a JSON parser to consume the stream.
 //!
-//! On connect, a subscriber receives a `snapshot` event reflecting the
-//! current session table, atomically with respect to the table mutations
-//! that produce subsequent delta events. After the snapshot, the subscriber
-//! receives delta events as the session table changes. To force a re-sync,
-//! a subscriber may simply reconnect.
-//!
-//! The `sessions` field of a snapshot event uses the same schema as the
-//! `sessions` field of `shpool list --json`, so the two surfaces stay in
-//! sync by construction.
+//! Events carry no payload beyond their type — they signal that *something*
+//! changed in the session table. Subscribers learn the new state by calling
+//! `shpool list` (or the equivalent over the main socket). Subscribers that
+//! fall too far behind are dropped and may simply reconnect.
 
 use std::{
     io::{BufRead, BufReader, Write},
@@ -29,11 +24,10 @@ use std::{
 
 use anyhow::Context;
 use serde_derive::Serialize;
-use shpool_protocol::Session;
 use tracing::{error, info, warn};
 
 /// Per-subscriber outbound queue depth. Subscribers that fall this far
-/// behind are dropped; reconnection re-syncs them via a fresh snapshot.
+/// behind are dropped and must reconnect.
 const SUBSCRIBER_QUEUE_DEPTH: usize = 64;
 
 /// Write timeout for stuck subscribers (e.g. suspended via Ctrl-Z). After
@@ -44,45 +38,24 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 /// An event published on the events socket.
 #[derive(Serialize, Debug)]
 #[serde(tag = "type")]
+#[allow(clippy::enum_variant_names)]
 pub enum Event {
-    /// Sent as the first message after a subscriber connects, reflecting
-    /// the current session table.
-    #[serde(rename = "snapshot")]
-    Snapshot { sessions: Vec<Session> },
-
-    /// A new session was created.
     #[serde(rename = "session.created")]
-    SessionCreated { name: String, started_at_unix_ms: i64 },
-
-    /// A client attached to an existing session.
+    SessionCreated,
     #[serde(rename = "session.attached")]
-    SessionAttached { name: String, last_connected_at_unix_ms: i64 },
-
-    /// A client detached from a session that is still alive.
+    SessionAttached,
     #[serde(rename = "session.detached")]
-    SessionDetached { name: String, last_disconnected_at_unix_ms: i64 },
-
-    /// A session was removed from the session table.
+    SessionDetached,
     #[serde(rename = "session.removed")]
-    SessionRemoved { name: String, reason: RemovedReason },
-}
-
-#[derive(Serialize, Debug)]
-#[serde(rename_all = "lowercase")]
-pub enum RemovedReason {
-    /// The shell process exited on its own.
-    Exited,
-    /// The session was killed by an explicit `shpool kill` request.
-    Killed,
+    SessionRemoved,
 }
 
 /// Fans out events to all connected subscribers.
 ///
 /// Lock ordering: callers that publish under another lock (e.g. the session
 /// table) must take that lock before [`EventBus::publish`] takes its own
-/// internal lock. [`EventBus::register`] follows the same order, so a
-/// subscriber registered while the session-table lock is held cannot miss
-/// a delta from a mutation that committed under that lock.
+/// internal lock. Publishing under the table lock keeps wire-order =
+/// causal-order across mutators.
 pub struct EventBus {
     subscribers: Mutex<Vec<SyncSender<Arc<str>>>>,
 }
@@ -110,12 +83,10 @@ impl EventBus {
         });
     }
 
-    /// Register a new subscriber with `snapshot` as the first message in
-    /// its queue. Returns the receiver to be handed to a writer thread.
-    pub fn register(&self, snapshot: &Event) -> Receiver<Arc<str>> {
-        let line = serialize_line(snapshot).expect("snapshot serialization");
+    /// Register a new subscriber. Returns the receiver to be handed to a
+    /// writer thread.
+    pub fn register(&self) -> Receiver<Arc<str>> {
         let (tx, rx) = mpsc::sync_channel(SUBSCRIBER_QUEUE_DEPTH);
-        tx.try_send(line).expect("seeding empty channel cannot fail");
         self.subscribers.lock().unwrap().push(tx);
         rx
     }
@@ -236,126 +207,77 @@ fn run_writer(mut stream: UnixStream, receiver: Receiver<Arc<str>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shpool_protocol::SessionStatus;
 
     fn json(event: &Event) -> String {
         serde_json::to_string(event).unwrap()
     }
 
     #[test]
-    fn snapshot_serializes_with_sessions_array() {
-        let event = Event::Snapshot {
-            sessions: vec![Session {
-                name: "main".into(),
-                started_at_unix_ms: 100,
-                last_connected_at_unix_ms: Some(200),
-                last_disconnected_at_unix_ms: None,
-                status: SessionStatus::Attached,
-            }],
-        };
-        assert_eq!(
-            json(&event),
-            r#"{"type":"snapshot","sessions":[{"name":"main","started_at_unix_ms":100,"last_connected_at_unix_ms":200,"last_disconnected_at_unix_ms":null,"status":"Attached"}]}"#
-        );
+    fn session_created_serializes_with_only_type() {
+        assert_eq!(json(&Event::SessionCreated), r#"{"type":"session.created"}"#);
     }
 
     #[test]
-    fn session_created_serializes_flat() {
-        let event = Event::SessionCreated { name: "main".into(), started_at_unix_ms: 42 };
-        assert_eq!(
-            json(&event),
-            r#"{"type":"session.created","name":"main","started_at_unix_ms":42}"#
-        );
+    fn session_attached_serializes_with_only_type() {
+        assert_eq!(json(&Event::SessionAttached), r#"{"type":"session.attached"}"#);
     }
 
     #[test]
-    fn session_attached_serializes_flat() {
-        let event = Event::SessionAttached { name: "main".into(), last_connected_at_unix_ms: 42 };
-        assert_eq!(
-            json(&event),
-            r#"{"type":"session.attached","name":"main","last_connected_at_unix_ms":42}"#
-        );
+    fn session_detached_serializes_with_only_type() {
+        assert_eq!(json(&Event::SessionDetached), r#"{"type":"session.detached"}"#);
     }
 
     #[test]
-    fn session_detached_serializes_flat() {
-        let event =
-            Event::SessionDetached { name: "main".into(), last_disconnected_at_unix_ms: 42 };
-        assert_eq!(
-            json(&event),
-            r#"{"type":"session.detached","name":"main","last_disconnected_at_unix_ms":42}"#
-        );
+    fn session_removed_serializes_with_only_type() {
+        assert_eq!(json(&Event::SessionRemoved), r#"{"type":"session.removed"}"#);
     }
 
     #[test]
     fn bus_publish_with_no_subscribers_is_a_noop() {
         let bus = EventBus::new();
-        bus.publish(&Event::SessionCreated { name: "x".into(), started_at_unix_ms: 1 });
+        bus.publish(&Event::SessionCreated);
     }
 
     #[test]
-    fn bus_register_seeds_receiver_with_snapshot() {
+    fn bus_publish_reaches_subscriber() {
         let bus = EventBus::new();
-        let snapshot = Event::Snapshot { sessions: vec![] };
-        let rx = bus.register(&snapshot);
-        let line = rx.try_recv().unwrap();
-        assert_eq!(&*line, "{\"type\":\"snapshot\",\"sessions\":[]}\n");
-    }
-
-    #[test]
-    fn bus_publish_reaches_subscriber_after_snapshot() {
-        let bus = EventBus::new();
-        let rx = bus.register(&Event::Snapshot { sessions: vec![] });
-        bus.publish(&Event::SessionCreated { name: "main".into(), started_at_unix_ms: 7 });
-        let snapshot_line = rx.recv().unwrap();
-        let delta_line = rx.recv().unwrap();
-        assert_eq!(&*snapshot_line, "{\"type\":\"snapshot\",\"sessions\":[]}\n");
-        assert_eq!(
-            &*delta_line,
-            "{\"type\":\"session.created\",\"name\":\"main\",\"started_at_unix_ms\":7}\n"
-        );
+        let rx = bus.register();
+        bus.publish(&Event::SessionCreated);
+        let line = rx.recv().unwrap();
+        assert_eq!(&*line, "{\"type\":\"session.created\"}\n");
     }
 
     #[test]
     fn bus_drops_subscriber_whose_queue_is_full() {
         let bus = EventBus::new();
-        let rx = bus.register(&Event::Snapshot { sessions: vec![] });
-        // Fill the channel to capacity (the snapshot already used 1 slot).
-        for i in 0..(SUBSCRIBER_QUEUE_DEPTH - 1) {
-            bus.publish(&Event::SessionCreated {
-                name: format!("s{i}"),
-                started_at_unix_ms: i as i64,
-            });
+        let rx = bus.register();
+        for _ in 0..SUBSCRIBER_QUEUE_DEPTH {
+            bus.publish(&Event::SessionCreated);
         }
         assert_eq!(bus.subscribers.lock().unwrap().len(), 1);
-        // One more publish overflows and the subscriber is dropped.
-        bus.publish(&Event::SessionCreated { name: "overflow".into(), started_at_unix_ms: 0 });
+        bus.publish(&Event::SessionCreated);
         assert_eq!(bus.subscribers.lock().unwrap().len(), 0);
-        // The receiver still has the buffered events; the channel is not
-        // closed for it from the receiving side.
         drop(rx);
     }
 
     #[test]
     fn bus_drops_subscriber_whose_receiver_hung_up() {
         let bus = EventBus::new();
-        let rx = bus.register(&Event::Snapshot { sessions: vec![] });
+        let rx = bus.register();
         drop(rx);
-        bus.publish(&Event::SessionCreated { name: "x".into(), started_at_unix_ms: 0 });
+        bus.publish(&Event::SessionCreated);
         assert_eq!(bus.subscribers.lock().unwrap().len(), 0);
     }
 
     #[test]
     fn bus_publish_reaches_every_subscriber() {
         let bus = EventBus::new();
-        let rx_a = bus.register(&Event::Snapshot { sessions: vec![] });
-        let rx_b = bus.register(&Event::Snapshot { sessions: vec![] });
-        bus.publish(&Event::SessionCreated { name: "main".into(), started_at_unix_ms: 1 });
+        let rx_a = bus.register();
+        let rx_b = bus.register();
+        bus.publish(&Event::SessionCreated);
         for rx in [&rx_a, &rx_b] {
-            let _snapshot = rx.recv().unwrap();
-            let delta = rx.recv().unwrap();
-            assert!(delta.contains(r#""type":"session.created""#));
-            assert!(delta.contains(r#""name":"main""#));
+            let line = rx.recv().unwrap();
+            assert_eq!(&*line, "{\"type\":\"session.created\"}\n");
         }
     }
 
@@ -390,13 +312,5 @@ mod tests {
         assert!(path.exists(), "socket file should exist while guard is alive");
         drop(guard);
         assert!(!path.exists(), "socket file should be unlinked on guard drop");
-    }
-
-    #[test]
-    fn session_removed_serializes_with_reason() {
-        let exited = Event::SessionRemoved { name: "main".into(), reason: RemovedReason::Exited };
-        assert_eq!(json(&exited), r#"{"type":"session.removed","name":"main","reason":"exited"}"#);
-        let killed = Event::SessionRemoved { name: "main".into(), reason: RemovedReason::Killed };
-        assert_eq!(json(&killed), r#"{"type":"session.removed","name":"main","reason":"killed"}"#);
     }
 }
