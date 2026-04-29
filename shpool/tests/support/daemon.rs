@@ -456,6 +456,80 @@ impl Proc {
             .context("spawning set-log-level proc")
     }
 
+    pub fn var_list(&mut self, json: bool) -> anyhow::Result<process::Output> {
+        let log_file = self.tmp_dir.path().join(format!("var_list_{}.log", self.subproc_counter));
+        eprintln!("spawning var list proc with log {:?}", log_file);
+        self.subproc_counter += 1;
+
+        let mut cmd = Command::new(shpool_bin()?);
+        cmd.arg("-vv")
+            .arg("--log-file")
+            .arg(&log_file)
+            .arg("--socket")
+            .arg(&self.socket_path)
+            .arg("var")
+            .arg("list");
+        if json {
+            cmd.arg("--json");
+        }
+        cmd.output().context("spawning var list proc")
+    }
+
+    pub fn var_get(&mut self, var: &str) -> anyhow::Result<process::Output> {
+        let log_file = self.tmp_dir.path().join(format!("var_get_{}.log", self.subproc_counter));
+        eprintln!("spawning var get proc with log {:?}", log_file);
+        self.subproc_counter += 1;
+
+        Command::new(shpool_bin()?)
+            .arg("-vv")
+            .arg("--log-file")
+            .arg(&log_file)
+            .arg("--socket")
+            .arg(&self.socket_path)
+            .arg("var")
+            .arg("get")
+            .arg(var)
+            .output()
+            .context("spawning var get proc")
+    }
+
+    pub fn var_set(&mut self, var: &str, val: &str) -> anyhow::Result<process::Output> {
+        let log_file = self.tmp_dir.path().join(format!("var_set_{}.log", self.subproc_counter));
+        eprintln!("spawning var set proc with log {:?}", log_file);
+        self.subproc_counter += 1;
+
+        Command::new(shpool_bin()?)
+            .arg("-vv")
+            .arg("--log-file")
+            .arg(&log_file)
+            .arg("--socket")
+            .arg(&self.socket_path)
+            .arg("var")
+            .arg("set")
+            .arg(var)
+            .arg(val)
+            .output()
+            .context("spawning var set proc")
+    }
+
+    pub fn var_unset(&mut self, var: &str) -> anyhow::Result<process::Output> {
+        let log_file = self.tmp_dir.path().join(format!("var_unset_{}.log", self.subproc_counter));
+        eprintln!("spawning var unset proc with log {:?}", log_file);
+        self.subproc_counter += 1;
+
+        Command::new(shpool_bin()?)
+            .arg("-vv")
+            .arg("--log-file")
+            .arg(&log_file)
+            .arg("--socket")
+            .arg(&self.socket_path)
+            .arg("var")
+            .arg("unset")
+            .arg(var)
+            .output()
+            .context("spawning var unset proc")
+    }
+
     pub fn await_event(&mut self, event: &str) -> anyhow::Result<()> {
         if let Some(events) = &mut self.events {
             events.await_event(event)

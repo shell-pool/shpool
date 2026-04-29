@@ -106,7 +106,7 @@ fn systemd_activation() -> anyhow::Result<()> {
             };
 
             // unset the fd_cloexec flag on the file descriptor so
-            // we can actuall pass it down to the child
+            // we can actually pass it down to the child
             let fdflags = nix::fcntl::fcntl(&fdarg, nix::fcntl::FcntlArg::F_GETFD)
                 .expect("getfd flags to work");
             let mut newflags = nix::fcntl::FdFlag::from_bits(fdflags).unwrap();
