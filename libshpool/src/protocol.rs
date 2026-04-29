@@ -15,26 +15,28 @@
 use std::{
     cmp,
     io::{self, Read, Write},
-    os::unix::net::UnixStream,
+    os::{fd::AsFd, unix::net::UnixStream},
     path::Path,
-    sync::atomic::{AtomicI32, Ordering},
+    sync::Mutex,
     thread, time,
 };
 
 use anyhow::{anyhow, Context};
 use byteorder::{LittleEndian, ReadBytesExt as _, WriteBytesExt as _};
+use nix::poll;
 use serde::{Deserialize, Serialize};
 use shpool_protocol::{Chunk, ChunkKind, ConnectHeader, VersionHeader};
 use tracing::{debug, error, info, instrument, span, trace, warn, Level};
 
 use super::{common, consts, tty};
 
-const DETACH_DISCONNECT_FAST_WAIT_DUR: time::Duration = time::Duration::from_millis(10);
 const MAX_DETACH_WAIT_DUR: time::Duration = time::Duration::from_millis(300);
 const DETACH_BACKOFF_INITIAL_DUR: time::Duration = time::Duration::from_millis(1);
 // Cap backoff steps so slow-path stays responsive while still avoiding busy
 // waits.
 const DETACH_BACKOFF_MAX_STEP_DUR: time::Duration = time::Duration::from_millis(25);
+
+const STDIN_READ_POLL_MS: u16 = 50;
 
 /// The centralized encoding function that should be used for all protocol
 /// serialization.
@@ -241,16 +243,23 @@ impl Client {
     /// socket and back again. It is the main loop of
     /// `shpool attach`.
     ///
-    /// Return value: the exit status that `shpool attach` should
-    /// exit with.
+    /// The on_maybe_switch callback should return true if pipe_bytes
+    /// should exit with a PipeBytesResult::MaybeSwitch because the
+    /// attach process needs to reattach.
     #[instrument(skip_all)]
-    pub fn pipe_bytes(self) -> anyhow::Result<i32> {
+    pub fn pipe_bytes<OnMaybeSwitchF>(
+        self,
+        on_maybe_switch: OnMaybeSwitchF,
+    ) -> anyhow::Result<PipeBytesResult>
+    where
+        OnMaybeSwitchF: Fn(&shpool_protocol::MaybeSwitch) -> bool + Send + Sync + 'static,
+    {
         let tty_guard = tty::set_attach_flags()?;
 
         let mut read_client_stream = self.stream.try_clone().context("cloning read stream")?;
         let mut write_client_stream = self.stream.try_clone().context("cloning read stream")?;
 
-        let exit_status = AtomicI32::new(1);
+        let result_slot = Mutex::new(None);
         thread::scope(|s| {
             // stdin -> sock
             let stdin_to_sock_h = s.spawn(|| -> anyhow::Result<()> {
@@ -259,6 +268,24 @@ impl Client {
                 let mut buf = vec![0; consts::BUF_SIZE];
 
                 loop {
+                    {
+                        let res = result_slot.lock().unwrap();
+                        if res.is_some() {
+                            return Ok(());
+                        }
+                    }
+
+                    {
+                        let mut poll_fds =
+                            [poll::PollFd::new(stdin.as_fd(), poll::PollFlags::POLLIN)];
+                        let nready = poll::poll(&mut poll_fds, STDIN_READ_POLL_MS)
+                            .context("polling stdin")?;
+                        if nready == 0 {
+                            // timeout
+                            continue;
+                        }
+                    }
+
                     let nread = stdin.read(&mut buf).context("reading stdin from user")?;
                     if nread == 0 {
                         return Ok(());
@@ -281,6 +308,26 @@ impl Client {
                 let mut buf = vec![0; consts::BUF_SIZE];
 
                 loop {
+                    {
+                        let res = result_slot.lock().unwrap();
+                        if res.is_some() {
+                            return Ok(());
+                        }
+                    }
+
+                    {
+                        let mut poll_fds = [poll::PollFd::new(
+                            read_client_stream.as_fd(),
+                            poll::PollFlags::POLLIN,
+                        )];
+                        let nready = poll::poll(&mut poll_fds, STDIN_READ_POLL_MS)
+                            .context("polling stdin")?;
+                        if nready == 0 {
+                            // timeout
+                            continue;
+                        }
+                    }
+
                     let chunk = match Chunk::read_into(&mut read_client_stream, &mut buf) {
                         Ok(c) => c,
                         Err(err) => {
@@ -323,46 +370,48 @@ impl Client {
                                 .read_i32::<LittleEndian>()
                                 .context("reading exit status from exit status chunk")?;
                             info!("got exit status frame (status={})", stat);
-                            exit_status.store(stat, Ordering::Release);
+                            {
+                                let mut res = result_slot.lock().unwrap();
+                                *res = Some(PipeBytesResult::Exit(stat));
+                            }
+                        }
+                        ChunkKind::MaybeSwitch => {
+                            let maybe_switch_reader = io::Cursor::new(chunk.buf);
+                            let maybe_switch: shpool_protocol::MaybeSwitch =
+                                decode_from(maybe_switch_reader).context("decoding vars list")?;
+
+                            info!("got vars update (maybe_switch={:?})", maybe_switch);
+                            if on_maybe_switch(&maybe_switch) {
+                                let mut res = result_slot.lock().unwrap();
+                                *res = Some(PipeBytesResult::MaybeSwitch(maybe_switch));
+                            }
                         }
                     }
                 }
             });
 
             loop {
-                let mut nfinished_threads = 0;
-                if stdin_to_sock_h.is_finished() {
-                    nfinished_threads += 1;
-                }
-                if sock_to_stdout_h.is_finished() {
-                    nfinished_threads += 1;
-                }
+                let mut nfinished_threads = (stdin_to_sock_h.is_finished() as usize)
+                    + (sock_to_stdout_h.is_finished() as usize);
 
                 if nfinished_threads > 0 {
+                    // If one of the threads has exited, but not the other
+                    // make sure that the exit result slot has some contents
+                    // so the other thread will exit the next time it wakes
+                    // from its poll().
+                    {
+                        let mut res = result_slot.lock().unwrap();
+                        if res.is_none() {
+                            *res = Some(PipeBytesResult::Exit(1));
+                        }
+                    }
+
                     if nfinished_threads < 2 {
-                        // Fast-path: when sock->stdout already ended (detach/disconnect),
-                        // stdin->sock can stay blocked on stdin. In that case, do a very
-                        // short grace wait and then exit quickly. This is independent
-                        // of stdin being a TTY or a pipe.
-                        // Slow-path: for other shutdown orders, keep compatibility by
-                        // waiting up to 300ms with backoff.
-                        let mut stdin_done = stdin_to_sock_h.is_finished();
-                        let mut stdout_done = sock_to_stdout_h.is_finished();
-
-                        // Keep max_wait fixed for this detach sequence. Recomputing it inside
-                        // the loop could accidentally switch paths mid-cleanup.
-                        let max_wait = if stdout_done && !stdin_done {
-                            DETACH_DISCONNECT_FAST_WAIT_DUR
-                        } else {
-                            MAX_DETACH_WAIT_DUR
-                        };
-
                         let finished_waiting = common::sleep_unless(
-                            max_wait,
+                            MAX_DETACH_WAIT_DUR,
                             || {
-                                stdin_done = stdin_to_sock_h.is_finished();
-                                stdout_done = sock_to_stdout_h.is_finished();
-                                nfinished_threads = (stdin_done as usize) + (stdout_done as usize);
+                                nfinished_threads = (stdin_to_sock_h.is_finished() as usize)
+                                    + (sock_to_stdout_h.is_finished() as usize);
                                 nfinished_threads >= 2
                             },
                             common::PollStrategy::Backoff {
@@ -375,12 +424,17 @@ impl Client {
                         if !finished_waiting {
                             // Re-probe after timeout because thread state can change
                             // during the final sleep inside sleep_unless.
-                            stdin_done = stdin_to_sock_h.is_finished();
-                            stdout_done = sock_to_stdout_h.is_finished();
-                            nfinished_threads = (stdin_done as usize) + (stdout_done as usize);
+                            nfinished_threads = (stdin_to_sock_h.is_finished() as usize)
+                                + (sock_to_stdout_h.is_finished() as usize);
                         }
 
                         if nfinished_threads < 2 {
+                            // It should be impossible to get here because both
+                            // loops use poll() to wake up every so often to
+                            // check if they need to exit. Nevertheless, if
+                            // we somehow still have a stuck thread at this
+                            // point, we'll just exit.
+
                             // If one of the worker threads is done and the
                             // other is not exiting, we are likely blocked on
                             // some IO. Fortunately, since there isn't much else
@@ -389,15 +443,20 @@ impl Client {
                             // by just hard-exiting the whole process. This allows
                             // us to use simple blocking IO.
                             warn!(
-                                "exiting due to a stuck IO thread stdin_to_sock_finished={} sock_to_stdout_finished={}",
-                                stdin_done,
-                                stdout_done
+                                "internal error: exiting due to a stuck IO thread stdin_to_sock_finished={} sock_to_stdout_finished={}",
+                                stdin_to_sock_h.is_finished(),
+                                sock_to_stdout_h.is_finished(),
                             );
                             // make sure that we restore the tty flags on the input
                             // tty before exiting the process.
                             drop(tty_guard);
 
-                            std::process::exit(exit_status.load(Ordering::Acquire));
+                            let res = result_slot.lock().unwrap();
+                            if let Some(PipeBytesResult::Exit(stat)) = *res {
+                                std::process::exit(stat);
+                            } else {
+                                std::process::exit(1);
+                            }
                         }
                     }
                     break;
@@ -425,9 +484,27 @@ impl Client {
                 }
             }
 
-            Ok(exit_status.load(Ordering::Acquire))
+            let mut ret = PipeBytesResult::Exit(1);
+            {
+                let res = result_slot.lock().unwrap();
+                if let Some(r) = res.clone() {
+                    ret = r;
+                }
+            }
+            Ok(ret)
         })
     }
+}
+
+#[derive(Clone)]
+pub enum PipeBytesResult {
+    /// The attach proc should exit with the given exit status.
+    Exit(i32),
+    /// The on_maybe_switch callback has requested the client stop streaming
+    /// due to some change that requires a reconnect (almost certainly a
+    /// changed var in the session name template). The attach proc
+    /// should recompute any relevant templates and re-attach.
+    MaybeSwitch(shpool_protocol::MaybeSwitch),
 }
 
 #[cfg(test)]

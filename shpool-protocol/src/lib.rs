@@ -61,8 +61,12 @@ pub enum ConnectHeader {
     /// A message to request that a list of running
     /// sessions get killed.
     Kill(KillRequest),
-    // A request to set the log level to a new value.
+    /// A request to set the log level to a new value.
     SetLogLevel(SetLogLevelRequest),
+    /// A request to get the current vars. The reply is just a Vars struct.
+    GetVars,
+    /// A request to modify the variable environment.
+    ModifyVar(ModifyVarRequest),
 }
 
 /// KillRequest represents a request to kill
@@ -121,6 +125,17 @@ pub struct SetLogLevelRequest {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SetLogLevelReply {}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ModifyVarRequest {
+    pub var: String,
+    /// If none, this is a request to remove the var from the
+    /// environment entirely.
+    pub val: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ModifyVarReply {}
 
 /// SessionMessageRequest represents a request that
 /// ought to be routed to the session indicated by
@@ -313,6 +328,24 @@ pub struct TtySize {
     pub ypixel: u16,
 }
 
+// Some metadata that may or may not require a shpool attach process
+// to switch sessions.
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
+pub struct MaybeSwitch {
+    /// If non-empty, this indicates that the receiving attach process
+    /// should hang up, then reattach to the given session name.
+    ///
+    /// Session switching is incompatible with session name templates,
+    /// so the attach process should exit and display an error to the
+    /// user if it gets a MaybeSwitch telling to to switch to a specific
+    /// session name.
+    pub switch_to: Option<String>,
+    /// The shpool wide variable environment. The attach process should
+    /// hang up and reattach if it has a session name template which
+    /// produces a new result with this new environment.
+    pub vars: Vec<(String, String)>,
+}
+
 /// ChunkKind is a tag that indicates what type of frame is being transmitted
 /// through the socket.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -327,6 +360,9 @@ pub enum ChunkKind {
     /// have exactly 4 bytes of data, which will contain a little endian
     /// code indicating the child's exit status.
     ExitStatus = 2,
+    /// After the kind tag, the chunk contains a 4 byte little endian length
+    /// prefix, followed by a msgpack encoded MaybeSwitch struct.
+    MaybeSwitch = 3,
 }
 
 impl TryFrom<u8> for ChunkKind {
@@ -337,6 +373,7 @@ impl TryFrom<u8> for ChunkKind {
             0 => Ok(ChunkKind::Data),
             1 => Ok(ChunkKind::Heartbeat),
             2 => Ok(ChunkKind::ExitStatus),
+            3 => Ok(ChunkKind::MaybeSwitch),
             _ => Err(anyhow!("unknown ChunkKind {}", v)),
         }
     }

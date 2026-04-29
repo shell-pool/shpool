@@ -43,9 +43,11 @@ mod list;
 mod protocol;
 mod session_restore;
 mod set_log_level;
+mod template;
 mod test_hooks;
 mod tty;
 mod user;
+mod var;
 
 /// The command line arguments that shpool expects.
 /// These can be directly parsed with clap or manually
@@ -210,6 +212,54 @@ needs debugging, but would be clobbered by a restart.")]
         #[clap(help = "new log level")]
         level: shpool_protocol::LogLevel,
     },
+
+    #[clap(about = "Manipulate template variables
+
+shpool session names can include {variables} which are resolved via
+an environment stored globally in the shpool daemon. This command
+manipulates that environment.
+
+The main usecase for templated session names is the ability to switch
+multiple shpool sessions to new targets at the same time. For example,
+you might have a `shpool attach -f '{workspace}-edit'` session and
+a `shpool attach -f '{workspace}-term'` session. To switch both
+sessions from the fun-feature workspace to the key-bugfix workspace,
+you could just do `shpool var set workspace key-bugfix`.
+")]
+    #[non_exhaustive]
+    Var {
+        #[clap(subcommand)]
+        command: VarCommands,
+    },
+}
+
+/// The subcommds of the var command.
+#[derive(Subcommand, Debug)]
+#[non_exhaustive]
+pub enum VarCommands {
+    #[clap(about = "List the variables
+
+This command dumps out the whole variable list with
+both vars and values in a JSON object using vars as keys.")]
+    List {
+        #[clap(short, long, help = "Output as JSON")]
+        json: bool,
+    },
+    #[clap(about = "Get a variable
+
+This returns the raw value of the given variable.")]
+    #[non_exhaustive]
+    Get { var: String },
+    #[clap(about = "Set a variable
+
+This updates the value of the given variable.")]
+    #[non_exhaustive]
+    Set { var: String, val: String },
+    #[clap(about = "Unset a variable
+
+This removes the given variable from the environment.")]
+    #[non_exhaustive]
+    Unset { var: String },
 }
 
 impl Args {
@@ -382,6 +432,7 @@ pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> an
         Commands::Kill { sessions } => kill::run(sessions, socket),
         Commands::List { json } => list::run(socket, json),
         Commands::SetLogLevel { level } => set_log_level::run(level, socket),
+        Commands::Var { command } => var::run(socket, command),
     };
 
     if let Err(err) = res {
