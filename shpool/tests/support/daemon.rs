@@ -26,6 +26,7 @@ pub struct Proc {
     pub events: Option<Events>,
     pub socket_path: PathBuf,
     config_path: PathBuf,
+    bin_path: PathBuf,
     // Only present when created by new_instrumented()
     pub hook_records: Option<Arc<Mutex<HookRecords>>>,
 }
@@ -34,11 +35,12 @@ pub struct DaemonArgs {
     pub listen_events: bool,
     pub extra_env: Vec<(String, String)>,
     pub verbosity: i64,
+    pub bin_path: Option<PathBuf>,
 }
 
 impl std::default::Default for DaemonArgs {
     fn default() -> Self {
-        DaemonArgs { listen_events: true, extra_env: vec![], verbosity: 2 }
+        DaemonArgs { listen_events: true, extra_env: vec![], verbosity: 2, bin_path: None }
     }
 }
 
@@ -106,6 +108,7 @@ pub struct HookRecords {
 
 impl Proc {
     pub fn new<P: AsRef<Path>>(config: P, args: DaemonArgs) -> anyhow::Result<Proc> {
+        let bin = args.bin_path.clone().unwrap_or_else(|| shpool_bin().unwrap());
         let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test")?;
 
         let socket_path = tmp_dir.path().join("shpool.socket");
@@ -120,7 +123,7 @@ impl Proc {
             testdata_file(config)
         };
 
-        let mut cmd = Command::new(shpool_bin()?);
+        let mut cmd = Command::new(&bin);
         cmd.stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .arg("--log-file")
@@ -168,6 +171,7 @@ impl Proc {
             events,
             socket_path,
             config_path: resolved_config,
+            bin_path: bin,
             hook_records: None,
         })
     }
@@ -258,6 +262,7 @@ impl Proc {
             events: None,
             socket_path,
             config_path: resolved_config,
+            bin_path: shpool_bin()?,
             hook_records: Some(hook_records),
         })
     }
@@ -286,7 +291,7 @@ impl Proc {
         eprintln!("spawning attach proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
-        let mut cmd = Command::new(shpool_bin()?);
+        let mut cmd = Command::new(&self.bin_path);
         cmd.stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(if args.null_stdin { Stdio::null() } else { Stdio::piped() })
@@ -347,7 +352,7 @@ impl Proc {
         eprintln!("spawning detach proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
-        let mut cmd = Command::new(shpool_bin()?);
+        let mut cmd = Command::new(&self.bin_path);
         cmd.arg("-vv")
             .arg("--log-file")
             .arg(&log_file)
@@ -366,7 +371,7 @@ impl Proc {
         eprintln!("spawning kill proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
-        let mut cmd = Command::new(shpool_bin()?);
+        let mut cmd = Command::new(&self.bin_path);
         cmd.arg("-vv")
             .arg("--log-file")
             .arg(&log_file)
@@ -403,7 +408,7 @@ impl Proc {
         eprintln!("spawning list proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
-        Command::new(shpool_bin()?)
+        Command::new(&self.bin_path)
             .arg("-vv")
             .arg("--log-file")
             .arg(&log_file)
@@ -419,7 +424,7 @@ impl Proc {
         eprintln!("spawning list --json proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
-        Command::new(shpool_bin()?)
+        Command::new(&self.bin_path)
             .arg("-vv")
             .arg("--log-file")
             .arg(&log_file)
@@ -438,7 +443,7 @@ impl Proc {
         eprintln!("spawning set-log-level proc with log {:?}", &log_file);
         self.subproc_counter += 1;
 
-        Command::new(shpool_bin()?)
+        Command::new(&self.bin_path)
             .arg("-vv")
             .arg("--log-file")
             .arg(&log_file)

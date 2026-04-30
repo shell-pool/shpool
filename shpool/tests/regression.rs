@@ -119,3 +119,66 @@ fn no_loop_on_shell_exit_during_startup() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+/// Regression test for a bug where shpool would fail to spawn new shells
+/// if the binary was overwritten (as happens during package updates).
+/// When a binary is overwritten, `std::env::current_exe()` returns a path
+/// ending in " (deleted)". We need to strip this to correctly self-exec.
+#[test]
+#[timeout(30000)]
+fn replaced_binary_can_still_spawn_shells() -> anyhow::Result<()> {
+    let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test")?;
+    let bin_dir = tmp_dir.path().join("bin");
+    fs::create_dir_all(&bin_dir)?;
+    let shpool_bin_orig = support::shpool_bin()?;
+    let shpool_bin_path = bin_dir.join("shpool");
+
+    let copy_bin = |src_path: &std::path::Path, dst_path: &std::path::Path| -> anyhow::Result<()> {
+        let mut src = fs::File::open(src_path)?;
+        let mut dst = fs::File::create(dst_path)?;
+        std::io::copy(&mut src, &mut dst)?;
+        dst.sync_all()?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = dst.metadata()?.permissions();
+            perms.set_mode(0o755);
+            dst.set_permissions(perms)?;
+        }
+        Ok(())
+    };
+
+    copy_bin(&shpool_bin_orig, &shpool_bin_path)?;
+    std::thread::sleep(Duration::from_millis(200));
+
+    let config_file = support::testdata_file("prompt_prefix_bash.toml");
+
+    let daemon_args =
+        DaemonArgs { bin_path: Some(shpool_bin_path.clone()), ..DaemonArgs::default() };
+    let mut daemon_proc =
+        support::daemon::Proc::new(&config_file, daemon_args).context("starting daemon proc")?;
+
+    // First attach should work fine.
+    let _attach_proc1 =
+        daemon_proc.attach("sh1", Default::default()).context("starting first attach proc")?;
+    daemon_proc.await_event("wait-for-startup-enter")?;
+    // Give it a moment to finish startup
+    std::thread::sleep(Duration::from_millis(100));
+
+    // Remove the binary and restore it.
+    // This simulates a package update where the old binary is unlinked
+    // and a new one is put in its place.
+    fs::remove_file(&shpool_bin_path)?;
+    copy_bin(&shpool_bin_orig, &shpool_bin_path)?;
+    std::thread::sleep(Duration::from_millis(200));
+
+    // Second attach should also work.
+    // On BUGGY code: this fails because the daemon tries to exec ".../shpool
+    // (deleted) daemon" which does not exist.
+    let _attach_proc2 =
+        daemon_proc.attach("sh2", Default::default()).context("starting second attach proc")?;
+    daemon_proc.await_event("wait-for-startup-enter")?;
+    daemon_proc.await_event("daemon-bidi-stream-enter")?;
+
+    Ok(())
+}
