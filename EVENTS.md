@@ -11,7 +11,7 @@ is always consistent with shpool's state.
 The daemon binds a sibling Unix socket next to the main shpool socket:
 
 ```bash
-<runtime_dir>/shpool/shpool.socket   # main RPC socket
+<runtime_dir>/shpool/shpool.socket   # main socket
 <runtime_dir>/shpool/events.socket   # events socket (this protocol)
 ```
 
@@ -53,11 +53,6 @@ done
 
 shpool events | jq .
 ```
-
-## Ordering
-
-Events are published while the daemon holds its session-table lock, so the order
-events appear on the wire matches the order in which they happened.
 
 ## Slow subscribers
 
