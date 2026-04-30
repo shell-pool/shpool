@@ -27,7 +27,7 @@ use tracing::{debug, error, info, instrument, warn};
 use crate::{
     consts::{SENTINEL_FLAG_VAR, STARTUP_SENTINEL},
     daemon::trie::{Trie, TrieCursor},
-    test_hooks,
+    exe, test_hooks,
 };
 
 // We don't need an agressive poll cadence because the normal case is
@@ -123,7 +123,7 @@ pub fn maybe_inject_prefix(
     // shells have subtly different echo behavior which makes it
     // hard to make the scanner work right.
     let exe_path =
-        std::env::current_exe().context("getting current exe path")?.to_string_lossy().into_owned();
+        exe::current().context("getting current exe path")?.to_string_lossy().into_owned();
     let sentinel_cmd = format!("\n {}=prompt {} daemon\n", SENTINEL_FLAG_VAR, exe_path);
     script.push_str(sentinel_cmd.as_str());
 
@@ -138,7 +138,7 @@ fn wait_for_startup(pty_master: &mut shpool_pty::fork::Master) -> anyhow::Result
     test_hooks::emit("wait-for-startup-enter");
     let mut startup_sentinel_scanner = SentinelScanner::new(STARTUP_SENTINEL);
     let exe_path =
-        std::env::current_exe().context("getting current exe path")?.to_string_lossy().into_owned();
+        exe::current().context("getting current exe path")?.to_string_lossy().into_owned();
     let startup_sentinel_cmd = format!("\n {}=startup {} daemon\n", SENTINEL_FLAG_VAR, exe_path);
 
     pty_master
