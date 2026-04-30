@@ -17,7 +17,7 @@ use std::{env, os::unix::net::UnixListener, path::PathBuf};
 use anyhow::Context;
 use tracing::{info, instrument};
 
-use crate::{config, consts, hooks};
+use crate::{config, consts, events, hooks};
 
 mod etc_environment;
 mod exit_notify;
@@ -81,8 +81,16 @@ pub fn run(
             (Some(socket.clone()), UnixListener::bind(&socket).context("binding to socket")?)
         }
     };
-    // spawn the signal handler thread in the background
-    signals::Handler::new(cleanup_socket.clone()).spawn()?;
+    let events_socket = events::socket_path(&socket);
+
+    // spawn the signal handler thread in the background. Both sockets need
+    // explicit cleanup on signal exit because the process exits before any
+    // RAII guard can run.
+    let mut socks_to_clean: Vec<PathBuf> = cleanup_socket.iter().cloned().collect();
+    socks_to_clean.push(events_socket.clone());
+    signals::Handler::new(socks_to_clean).spawn()?;
+
+    let _events_guard = server.start_events_listener(events_socket)?;
 
     server::Server::serve(server, listener)?;
 
