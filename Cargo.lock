@@ -537,7 +537,7 @@ dependencies = [
 
 [[package]]
 name = "libshpool"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -992,7 +992,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "shpool"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "anyhow",
  "clap",
@@ -1009,7 +1009,7 @@ dependencies = [
 
 [[package]]
 name = "shpool-protocol"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "anyhow",
  "clap",
@@ -1035,9 +1035,9 @@ dependencies = [
 
 [[package]]
 name = "shpool_pty"
-version = "0.3.2"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78cc0114fa23588602dbb02375ef5eead7bfcbdc0f1bed9b54c5e0722e197df8"
+checksum = "2829e0f3a285c7ec45f47c7990f67ec808cb5117aad814e09d8fd7e0fe922f46"
 dependencies = [
  "errno 0.2.8",
  "libc",

@@ -176,7 +176,7 @@ impl Pager {
         // spawn a background thread to handle tty size change events,
         // setting it up to go away when _ctl_guard removes the ctl
         // handle.
-        let pty_master_fd = pty_master.raw_fd().ok_or(anyhow!("no fd for pty master"))?;
+        let pty_master_fd = pty_master.raw_fd();
         init_tty_size.set_fd(pty_master_fd).context("setting init tty size")?;
         let tty_size = Arc::new(Mutex::new(init_tty_size.clone()));
         let tty_size_ref = Arc::clone(&tty_size);
@@ -209,16 +209,13 @@ impl Pager {
 
         let mut last_heartbeat_at = Instant::now();
         let mut buf = vec![0; consts::BUF_SIZE];
-        let watchable_master = pty_master;
+        let watchable_master = pty_master.clone();
         let watchable_client_stream =
             client_stream.try_clone().context("could not clone client stream")?;
         loop {
             // wake up when there is data for us going in either direction
             let mut poll_fds = [
-                poll::PollFd::new(
-                    watchable_master.borrow_fd().ok_or(anyhow!("no master fd"))?,
-                    poll::PollFlags::POLLIN,
-                ),
+                poll::PollFd::new(watchable_master.borrow_fd(), poll::PollFlags::POLLIN),
                 poll::PollFd::new(watchable_client_stream.as_fd(), poll::PollFlags::POLLIN),
             ];
             let nready = poll::poll(&mut poll_fds, POLL_MS).context("polling both streams")?;

@@ -727,68 +727,91 @@ impl Server {
         mut stream: UnixStream,
         header: SessionMessageRequest,
     ) -> anyhow::Result<()> {
-        // create a slot to store our reply so we can do
-        // our IO without the lock held.
-        let reply = {
-            let _s = span!(Level::INFO, "lock(shells)").entered();
-            let shells = self.shells.lock().unwrap();
-            if let Some(session) = shells.get(&header.session_name) {
-                match header.payload {
-                    SessionMessageRequestPayload::Resize(resize_request) => {
-                        let _s = span!(Level::INFO, "lock(pager_ctl)").entered();
-                        let pager_ctl = session.pager_ctl.lock().unwrap();
-                        if let Some(pager_ctl) = pager_ctl.as_ref() {
-                            info!("resizing pager");
-                            pager_ctl
-                                .tty_size_change
-                                .send_timeout(resize_request.tty_size.clone(), SESSION_MSG_TIMEOUT)
-                                .context("sending tty size change to pager")?;
-                            pager_ctl
-                                .tty_size_change_ack
-                                .recv_timeout(SESSION_MSG_TIMEOUT)
-                                .context("recving tty size change ack from pager")?;
-                        } else {
-                            let _s =
-                                span!(Level::INFO, "resize_lock(shell_to_client_ctl)").entered();
-                            let shell_to_client_ctl = session.shell_to_client_ctl.lock().unwrap();
-                            shell_to_client_ctl
-                                .tty_size_change
-                                .send_timeout(resize_request.tty_size, SESSION_MSG_TIMEOUT)
-                                .context("sending tty size change to shell->client")?;
-                            shell_to_client_ctl
-                                .tty_size_change_ack
-                                .recv_timeout(SESSION_MSG_TIMEOUT)
-                                .context("recving tty size ack")?;
-                        }
-
-                        SessionMessageReply::Resize(ResizeReply::Ok)
-                    }
-                    SessionMessageRequestPayload::Detach => {
-                        let _s = span!(Level::INFO, "detach_lock(shell_to_client_ctl)").entered();
-                        let shell_to_client_ctl = session.shell_to_client_ctl.lock().unwrap();
-                        shell_to_client_ctl
-                            .client_connection
-                            .send_timeout(
-                                shell::ClientConnectionMsg::Disconnect,
-                                SESSION_MSG_TIMEOUT,
-                            )
-                            .context("sending client detach to shell->client")?;
-                        let status = shell_to_client_ctl
-                            .client_connection_ack
-                            .recv_timeout(SESSION_MSG_TIMEOUT)
-                            .context("getting client conn ack")?;
-                        info!("detached session({}), status = {:?}", header.session_name, status);
-                        SessionMessageReply::Detach(SessionMessageDetachReply::Ok)
-                    }
-                }
-            } else {
-                SessionMessageReply::NotFound
-            }
-        };
+        let reply = self.dispath_session_message(header)?;
 
         write_reply(&mut stream, reply).context("handle_session_message: writing reply")?;
 
         Ok(())
+    }
+
+    fn dispath_session_message(
+        &self,
+        header: SessionMessageRequest,
+    ) -> anyhow::Result<SessionMessageReply> {
+        match header.payload {
+            SessionMessageRequestPayload::Resize(resize_request) => {
+                let pager_ctl = {
+                    let _s = span!(Level::INFO, "resize_lock_1(shells)").entered();
+                    let shells = self.shells.lock().unwrap();
+                    if let Some(session) = shells.get(&header.session_name) {
+                        Arc::clone(&session.pager_ctl)
+                    } else {
+                        return Ok(SessionMessageReply::NotFound);
+                    }
+                };
+                let _s = span!(Level::INFO, "lock(pager_ctl)").entered();
+                let pager_ctl = pager_ctl.lock().unwrap();
+
+                if let Some(pager_ctl) = pager_ctl.as_ref() {
+                    info!("resizing pager");
+                    pager_ctl
+                        .tty_size_change
+                        .send_timeout(resize_request.tty_size.clone(), SESSION_MSG_TIMEOUT)
+                        .context("sending tty size change to pager")?;
+                    pager_ctl
+                        .tty_size_change_ack
+                        .recv_timeout(SESSION_MSG_TIMEOUT)
+                        .context("recving tty size change ack from pager")?;
+                } else {
+                    let shell_to_client_ctl = {
+                        let _s = span!(Level::INFO, "resize_lock_2(shells)").entered();
+                        let shells = self.shells.lock().unwrap();
+                        if let Some(session) = shells.get(&header.session_name) {
+                            Arc::clone(&session.shell_to_client_ctl)
+                        } else {
+                            return Ok(SessionMessageReply::NotFound);
+                        }
+                    };
+                    let _s = span!(Level::INFO, "lock(shell_to_client_ctl)").entered();
+                    let shell_to_client_ctl = shell_to_client_ctl.lock().unwrap();
+
+                    shell_to_client_ctl
+                        .tty_size_change
+                        .send_timeout(resize_request.tty_size, SESSION_MSG_TIMEOUT)
+                        .context("sending tty size change to shell->client")?;
+                    shell_to_client_ctl
+                        .tty_size_change_ack
+                        .recv_timeout(SESSION_MSG_TIMEOUT)
+                        .context("recving tty size ack")?;
+                }
+
+                Ok(SessionMessageReply::Resize(ResizeReply::Ok))
+            }
+            SessionMessageRequestPayload::Detach => {
+                let shell_to_client_ctl = {
+                    let _s = span!(Level::INFO, "detach_lock(shells)").entered();
+                    let shells = self.shells.lock().unwrap();
+                    if let Some(session) = shells.get(&header.session_name) {
+                        Arc::clone(&session.shell_to_client_ctl)
+                    } else {
+                        return Ok(SessionMessageReply::NotFound);
+                    }
+                };
+                let _s = span!(Level::INFO, "lock(shell_to_client_ctl)").entered();
+                let shell_to_client_ctl = shell_to_client_ctl.lock().unwrap();
+
+                shell_to_client_ctl
+                    .client_connection
+                    .send_timeout(shell::ClientConnectionMsg::Disconnect, SESSION_MSG_TIMEOUT)
+                    .context("sending client detach to shell->client")?;
+                let status = shell_to_client_ctl
+                    .client_connection_ack
+                    .recv_timeout(SESSION_MSG_TIMEOUT)
+                    .context("getting client conn ack")?;
+                info!("detached session({}), status = {:?}", header.session_name, status);
+                Ok(SessionMessageReply::Detach(SessionMessageDetachReply::Ok))
+            }
+        }
     }
 
     /// Spawn a subshell and return the sessession descriptor for it. The
@@ -903,9 +926,7 @@ impl Server {
         let mut fork = shpool_pty::fork::Fork::from_ptmx().context("forking pty")?;
         if let Ok(slave) = fork.is_child() {
             if noecho {
-                if let Some(fd) = slave.borrow_fd() {
-                    tty::disable_echo(fd).context("disabling echo on pty")?;
-                }
+                tty::disable_echo(slave.borrow_fd()).context("disabling echo on pty")?;
             }
             for fd in consts::STDERR_FD + 1..(nix::unistd::SysconfVar::OPEN_MAX as i32) {
                 let _ = nix::unistd::close(fd);
