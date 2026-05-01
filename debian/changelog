@@ -1,4 +1,12 @@
 
+shpool (0.9.8) unstable; urgency=low
+
+  Fixed
+
+  * EOF spin loop in client->shell & pager disp
+
+ -- Shpool Authors <shpool-eng@google.com>  Fri, 01 May 2026 23:00:32 +0000
+
 shpool (0.9.7) unstable; urgency=low
 
   Fixed
