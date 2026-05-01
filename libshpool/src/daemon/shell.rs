@@ -28,12 +28,13 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use nix::{poll, poll::PollFlags, sys::signal, unistd::Pid};
-use shpool_protocol::{Chunk, ChunkKind, TtySize};
+use shpool_protocol::{Chunk, ChunkKind, MaybeSwitch, TtySize};
 use tracing::{debug, error, info, instrument, span, trace, warn, Level};
 
 use crate::{
     common, consts,
     daemon::{config, exit_notify::ExitNotifier, keybindings, pager::PagerCtl, prompt, show_motd},
+    protocol,
     protocol::ChunkExt as _,
     session_restore, test_hooks,
     tty::TtySizeExt as _,
@@ -74,7 +75,7 @@ pub struct Session {
     pub lifecycle_timestamps: Mutex<SessionLifecycleTimestamps>,
     pub child_pid: libc::pid_t,
     pub child_exit_notifier: Arc<ExitNotifier>,
-    pub shell_to_client_ctl: Arc<Mutex<ReaderCtl>>,
+    pub shell_to_client_ctl: Arc<Mutex<ShellToClientCtl>>,
     pub pager_ctl: Arc<Mutex<Option<PagerCtl>>>,
     /// Mutable state with the lock held by the servicing handle_attach thread
     /// while a tty is attached to the session. Probing the mutex can be used
@@ -109,7 +110,7 @@ impl Session {
 #[derive(Debug)]
 pub struct SessionInner {
     pub name: String, // to improve logging
-    pub shell_to_client_ctl: Arc<Mutex<ReaderCtl>>,
+    pub shell_to_client_ctl: Arc<Mutex<ShellToClientCtl>>,
     pub pty_master: shpool_pty::fork::Fork,
     pub client_stream: Option<UnixStream>,
     pub config: config::Manager,
@@ -207,6 +208,7 @@ pub struct ShellToClientArgs {
     pub tty_size_change: crossbeam_channel::Receiver<TtySize>,
     pub tty_size_change_ack: crossbeam_channel::Sender<()>,
     pub heartbeat: crossbeam_channel::Receiver<()>,
+    pub maybe_switch: crossbeam_channel::Receiver<MaybeSwitch>,
     // true if the client is still live, false if it has hung up on us
     pub heartbeat_ack: crossbeam_channel::Sender<bool>,
     pub child_exit_notifier: Arc<ExitNotifier>,
@@ -392,6 +394,42 @@ impl SessionInner {
 
                         args.heartbeat_ack.send(client_present)
                             .context("sending heartbeat ack")?;
+                    }
+                    recv(args.maybe_switch) -> maybe_switch => {
+                        let maybe_switch = match maybe_switch {
+                            Ok(ms) => ms,
+                            Err(e) => {
+                                error!("error recving MaybeSwitch: {:?}", e);
+                                continue;
+                            },
+                        };
+
+                        let conn = if let ClientConnectionMsg::New(c) = &mut client_conn {
+                            c
+                        } else {
+                            info!("got MaybeSwitch, but no attached client, dropping");
+                            continue;
+                        };
+
+                        let mut encoded = Vec::new();
+                        if let Err(e) = protocol::encode_to(&maybe_switch, &mut encoded) {
+                            error!("error encoding MaybeSwitch: {:?}", e);
+                            continue;
+                        }
+
+                        let chunk = Chunk { kind: ChunkKind::MaybeSwitch, buf: &encoded[..] };
+                        match chunk.write_to(&mut conn.sink).and_then(|_| conn.sink.flush()) {
+                            Ok(_) => {
+                                trace!("wrote MaybeSwitch");
+                            }
+                            Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {
+                                trace!("writing MaybeSwitch: client hangup: {:?}", e);
+                            }
+                            Err(e) => {
+                                error!("unexpected IO error while writing heartbeat: {}", e);
+                                return Err(e).context("writing MaybeSwitch")?;
+                            }
+                        }
                     }
 
                     // make this select non-blocking so we spend most of our time parked
@@ -1003,7 +1041,7 @@ impl SessionInner {
 /// Shared between the session struct (for calls originating with the cli)
 /// and the session inner struct (for calls resulting from keybindings).
 #[derive(Debug)]
-pub struct ReaderCtl {
+pub struct ShellToClientCtl {
     /// A control channel for the shell->client thread. Whenever a new client
     /// dials in, the output stream for that client must be attached to the
     /// shell->client thread by sending it down this channel. A disconnect
@@ -1028,6 +1066,12 @@ pub struct ReaderCtl {
     // True if the client is still listening, false if it has hung up
     // on us.
     pub heartbeat_ack: crossbeam_channel::Receiver<bool>,
+
+    /// A control channel telling the shell->client thread to
+    /// broadcast the given MaybeSwitch. There is no ack channel
+    /// because we just blast this out and the caller doesn't need
+    /// to know about completion.
+    pub maybe_switch: crossbeam_channel::Sender<MaybeSwitch>,
 }
 
 /// Given a buffer, a length after which the data is not valid, a list of

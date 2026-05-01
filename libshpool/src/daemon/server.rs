@@ -35,9 +35,10 @@ use anyhow::{anyhow, Context};
 use nix::unistd;
 use shpool_protocol::{
     AttachHeader, AttachReplyHeader, AttachStatus, ConnectHeader, DetachReply, DetachRequest,
-    KillReply, KillRequest, ListReply, LogLevel, ResizeReply, Session, SessionMessageDetachReply,
-    SessionMessageReply, SessionMessageRequest, SessionMessageRequestPayload, SessionStatus,
-    SetLogLevelReply, SetLogLevelRequest, VersionHeader,
+    KillReply, KillRequest, ListReply, LogLevel, MaybeSwitch, ModifyVarReply, ModifyVarRequest,
+    ResizeReply, Session, SessionMessageDetachReply, SessionMessageReply, SessionMessageRequest,
+    SessionMessageRequestPayload, SessionStatus, SetLogLevelReply, SetLogLevelRequest,
+    VersionHeader,
 };
 use tracing::{debug, error, info, instrument, span, warn, Level};
 
@@ -79,6 +80,7 @@ pub struct Server {
         tracing_subscriber::filter::LevelFilter,
         tracing_subscriber::registry::Registry,
     >,
+    vars: Mutex<HashMap<String, String>>,
 }
 
 impl Server {
@@ -112,6 +114,7 @@ impl Server {
             hooks,
             daily_messenger,
             log_level_handle,
+            vars: HashMap::new().into(),
         }))
     }
 
@@ -209,6 +212,8 @@ impl Server {
             ConnectHeader::List => self.handle_list(stream),
             ConnectHeader::SessionMessage(header) => self.handle_session_message(stream, header),
             ConnectHeader::SetLogLevel(r) => self.handle_set_log_level(stream, r),
+            ConnectHeader::GetVars => self.handle_get_vars(stream),
+            ConnectHeader::ModifyVar(r) => self.handle_modify_var(stream, r),
         }
     }
 
@@ -610,6 +615,57 @@ impl Server {
     }
 
     #[instrument(skip_all)]
+    fn handle_get_vars(&self, mut stream: UnixStream) -> anyhow::Result<()> {
+        let maybe_switch = {
+            let var_map = self.vars.lock().unwrap();
+            let vars: Vec<(String, String)> =
+                var_map.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+            shpool_protocol::MaybeSwitch { switch_to: None, vars }
+        };
+
+        write_reply(&mut stream, maybe_switch).context("writing maybe_switch reply")?;
+        Ok(())
+    }
+
+    #[instrument(skip_all)]
+    fn handle_modify_var(
+        &self,
+        mut stream: UnixStream,
+        request: ModifyVarRequest,
+    ) -> anyhow::Result<()> {
+        let maybe_switch = {
+            let mut vars = self.vars.lock().unwrap();
+            if let Some(val) = request.val {
+                vars.insert(request.var, val);
+            } else {
+                vars.remove(&request.var);
+            }
+
+            MaybeSwitch {
+                switch_to: None,
+                vars: vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            }
+        };
+
+        let mut ctls = Vec::new();
+        {
+            let shells = self.shells.lock().unwrap();
+            for (_, session) in shells.iter() {
+                ctls.push(Arc::clone(&session.shell_to_client_ctl));
+            }
+        }
+        for ctl in ctls.into_iter() {
+            let ctl = ctl.lock().unwrap();
+            ctl.maybe_switch
+                .send_timeout(maybe_switch.clone(), SESSION_MSG_TIMEOUT)
+                .context("broadcasting maybe_switch")?;
+        }
+
+        write_reply(&mut stream, ModifyVarReply {}).context("writing modify var reply")?;
+        Ok(())
+    }
+
+    #[instrument(skip_all)]
     fn handle_kill(&self, mut stream: UnixStream, request: KillRequest) -> anyhow::Result<()> {
         let mut not_found_sessions = vec![];
         {
@@ -983,13 +1039,18 @@ impl Server {
         let (heartbeat_tx, heartbeat_rx) = crossbeam_channel::bounded(0);
         let (heartbeat_ack_tx, heartbeat_ack_rx) = crossbeam_channel::bounded(0);
 
-        let shell_to_client_ctl = Arc::new(Mutex::new(shell::ReaderCtl {
+        // We make this buffered to avoid blocking during a broadcast. There is
+        // no ack chan so we can afford to buffer a bit.
+        let (maybe_switch_tx, maybe_switch_rx) = crossbeam_channel::bounded(10);
+
+        let shell_to_client_ctl = Arc::new(Mutex::new(shell::ShellToClientCtl {
             client_connection: client_connection_tx,
             client_connection_ack: client_connection_ack_rx,
             tty_size_change: tty_size_change_tx,
             tty_size_change_ack: tty_size_change_ack_rx,
             heartbeat: heartbeat_tx,
             heartbeat_ack: heartbeat_ack_rx,
+            maybe_switch: maybe_switch_tx,
         }));
 
         let mut session_inner = shell::SessionInner {
@@ -1023,6 +1084,7 @@ impl Server {
                 tty_size_change_ack: tty_size_change_ack_tx,
                 heartbeat: heartbeat_rx,
                 heartbeat_ack: heartbeat_ack_tx,
+                maybe_switch: maybe_switch_rx,
                 child_exit_notifier: shell_to_client_child_exit_notifier,
             })?);
 

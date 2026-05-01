@@ -597,7 +597,7 @@ fn whitespace_session_not_allowed() -> anyhow::Result<()> {
     let mut tty1 =
         daemon_proc.attach("this\tbad", Default::default()).context("attaching from tty1")?;
     let mut line_matcher1 = tty1.stderr_line_matcher()?;
-    line_matcher1.scan_until_re("whitespace is not allowed in session names")?;
+    line_matcher1.scan_until_re("may not have whitespace")?;
 
     Ok(())
 }
@@ -641,6 +641,9 @@ fn default_keybinding_detach() -> anyhow::Result<()> {
     lm1.scan_until_re("someval$")?;
 
     a1.run_raw_cmd(vec![0, 17])?; // Ctrl-Space Ctrl-q
+
+    // wait() will close this, so we'll snatch it to prevent that.
+    let _a1_stdin = a1.proc.stdin.take();
     let exit_status = a1.proc.wait()?;
     dbg!(exit_status);
     assert!(exit_status.success());
@@ -1105,41 +1108,14 @@ fn ttl_no_hangup_yet() -> anyhow::Result<()> {
 #[test]
 #[timeout(30000)]
 fn prompt_prefix_bash() -> anyhow::Result<()> {
-    let daemon_proc = support::daemon::Proc::new("prompt_prefix_bash.toml", DaemonArgs::default())
-        .context("starting daemon proc")?;
+    let mut daemon_proc =
+        support::daemon::Proc::new("prompt_prefix_bash.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
 
-    // we have to manually spawn the child proc rather than using the support
-    // util because the line matcher gets bound only after the process gets
-    // spawned, so there will be a race between the prompt printing and
-    // binding the line matcher if we use the wrapper util.
-    let mut child = Command::new(support::shpool_bin()?)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .arg("--socket")
-        .arg(&daemon_proc.socket_path)
-        .arg("--config-file")
-        .arg(support::testdata_file("prompt_prefix_bash.toml"))
-        .arg("attach")
-        .arg("sh1")
-        .spawn()
-        .context("spawning attach process")?;
-
-    // The attach shell should be spawned and have read the
-    // initial prompt after half a second.
-    std::thread::sleep(time::Duration::from_millis(500));
-    child.kill().context("killing child")?;
-
-    let mut stderr = child.stderr.take().context("missing stderr")?;
-    let mut stderr_str = String::from("");
-    stderr.read_to_string(&mut stderr_str).context("slurping stderr")?;
-    assert!(stderr_str.is_empty());
-
-    let mut stdout = child.stdout.take().context("missing stdout")?;
-    let mut stdout_str = String::from("");
-    stdout.read_to_string(&mut stdout_str).context("slurping stdout")?;
-    eprintln!("stdout_str: {}", stdout_str);
-    let stdout_re = Regex::new(".*session_name=sh1 prompt>.*")?;
-    assert!(stdout_re.is_match(&stdout_str));
+    let mut attach_proc = daemon_proc.attach("sh1", AttachArgs::default())?;
+    let mut lm = attach_proc.line_matcher()?;
+    attach_proc.run_cmd("echo")?;
+    lm.scan_until_re(".*session_name=sh1 prompt>.*")?;
 
     Ok(())
 }
@@ -1148,37 +1124,14 @@ fn prompt_prefix_bash() -> anyhow::Result<()> {
 #[timeout(30000)]
 #[cfg_attr(target_os = "macos", ignore)] // hard-coded /usr/bin/zsh path
 fn prompt_prefix_zsh() -> anyhow::Result<()> {
-    let daemon_proc = support::daemon::Proc::new("prompt_prefix_zsh.toml", DaemonArgs::default())
-        .context("starting daemon proc")?;
+    let mut daemon_proc =
+        support::daemon::Proc::new("prompt_prefix_zsh.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
 
-    // see the bash case for why
-    let mut child = Command::new(support::shpool_bin()?)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .arg("--socket")
-        .arg(&daemon_proc.socket_path)
-        .arg("--config-file")
-        .arg(support::testdata_file("prompt_prefix_zsh.toml"))
-        .arg("attach")
-        .arg("sh1")
-        .spawn()
-        .context("spawning attach process")?;
-
-    // The attach shell should be spawned and have read the
-    // initial prompt after half a second.
-    std::thread::sleep(time::Duration::from_millis(500));
-    child.kill().context("killing child")?;
-
-    let mut stderr = child.stderr.take().context("missing stderr")?;
-    let mut stderr_str = String::from("");
-    stderr.read_to_string(&mut stderr_str).context("slurping stderr")?;
-    assert!(stderr_str.is_empty());
-
-    let mut stdout = child.stdout.take().context("missing stdout")?;
-    let mut stdout_str = String::from("");
-    stdout.read_to_string(&mut stdout_str).context("slurping stdout")?;
-    let stdout_re = Regex::new(".*session_name=sh1.*")?;
-    assert!(stdout_re.is_match(&stdout_str));
+    let mut attach_proc = daemon_proc.attach("sh1", AttachArgs::default())?;
+    let mut lm = attach_proc.line_matcher()?;
+    attach_proc.run_cmd("echo")?;
+    lm.scan_until_re(".*session_name=sh1.*")?;
 
     Ok(())
 }
@@ -1195,7 +1148,9 @@ fn prompt_prefix_fish() -> anyhow::Result<()> {
     let daemon_proc = support::daemon::Proc::new("prompt_prefix_fish.toml", DaemonArgs::default())
         .context("starting daemon proc")?;
 
-    // see the bash case for why
+    // This is an attempt at avoiding a race between when we start the
+    // attach proc and when we create the line matcher. We've since switched
+    // how this is tested for bash and zsh to avoid the timing issue.
     let mut child = Command::new(support::shpool_bin()?)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1272,6 +1227,7 @@ fn snapshot_attach_output<P: AsRef<OsStr>>(
     let mut child = Command::new(support::shpool_bin()?)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .stdin(Stdio::piped())
         .arg("--socket")
         .arg(&daemon.socket_path)
         .arg("--config-file")
@@ -1388,7 +1344,7 @@ fn motd_debounced_pager_debounces() -> anyhow::Result<()> {
     let stdout_file_re = Regex::new(".*\\(END\\).*")?;
     assert!(stdout_file_re.is_match(&stdout_str));
 
-    // We should see not the message again when we try again immediately.
+    // We should not see the message again when we try again immediately.
     let stdout_str = snapshot_attach_output(
         &daemon_proc,
         &config_file,
@@ -1789,6 +1745,91 @@ fn dynamic_session_restore_mode() -> anyhow::Result<()> {
         // It SHOULD see "bar" again on re-attach
         lm2.scan_until_re("bar$")?;
     }
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
+fn templated_session_name_switch() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+        .context("starting daemon proc")?;
+
+    // Set initial var
+    daemon_proc.var_set("env", "prod")?;
+
+    // Attach to templated name
+    let mut attach_proc =
+        daemon_proc.attach("@{env}-session", Default::default()).context("starting attach proc")?;
+    let mut line_matcher = attach_proc.line_matcher()?;
+
+    // Ensure we are in prod-session
+    attach_proc.run_cmd("echo $SHPOOL_SESSION_NAME")?;
+    line_matcher.scan_until_re("prod-session$")?;
+
+    // Change var to trigger switch
+    daemon_proc.var_set("env", "dev")?;
+
+    // The client should re-attach. We'll check for the new session name.
+    // We need to wait a bit for the switch to happen as it's async.
+    let mut switched = false;
+    for _ in 0..50 {
+        let list_out = daemon_proc.list_json()?;
+        let list_str = String::from_utf8_lossy(&list_out.stdout);
+        let list: serde_json::Value = serde_json::from_str(&list_str)?;
+        let sessions = list["sessions"].as_array().unwrap();
+
+        let has_prod =
+            sessions.iter().any(|s| s["name"] == "prod-session" && s["status"] == "Disconnected");
+        let has_dev =
+            sessions.iter().any(|s| s["name"] == "dev-session" && s["status"] == "Attached");
+
+        if has_prod && has_dev {
+            switched = true;
+            break;
+        }
+        thread::sleep(time::Duration::from_millis(200));
+    }
+    assert!(switched, "did not switch from prod-session to dev-session");
+
+    // Also verify we can still run commands in the new session
+    attach_proc.run_cmd("echo $SHPOOL_SESSION_NAME")?;
+    line_matcher.scan_until_re("dev-session$")?;
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
+fn templated_session_name_no_switch_on_unrelated_var() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+        .context("starting daemon proc")?;
+
+    daemon_proc.var_set("env", "prod")?;
+
+    let mut attach_proc =
+        daemon_proc.attach("@{env}-session", Default::default()).context("starting attach proc")?;
+    let mut line_matcher = attach_proc.line_matcher()?;
+
+    attach_proc.run_cmd("echo $SHPOOL_SESSION_NAME")?;
+    line_matcher.scan_until_re("prod-session$")?;
+
+    // Change an unrelated var
+    daemon_proc.var_set("unrelated", "something")?;
+
+    // Wait a bit to make sure NO switch happens. Re-attaching usually takes
+    // a few hundred ms if it's going to happen.
+    thread::sleep(time::Duration::from_secs(1));
+
+    let list_out = daemon_proc.list_json()?;
+    let list_str = String::from_utf8_lossy(&list_out.stdout);
+    let list: serde_json::Value = serde_json::from_str(&list_str)?;
+    let sessions = list["sessions"].as_array().unwrap();
+
+    // Only one session should ever have been created
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0]["name"], "prod-session");
+    assert_eq!(sessions[0]["status"], "Attached");
 
     Ok(())
 }
