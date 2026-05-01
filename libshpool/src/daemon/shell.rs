@@ -771,7 +771,8 @@ impl SessionInner {
                         .read(&mut buf)
                         .context("reading client chunk")?;
                     if len == 0 {
-                        continue;
+                        info!("EOF");
+                        return Ok(());
                     }
                     test_hooks::emit("daemon-read-c2s-chunk");
                     trace!("read client len={}: '{}'", len, String::from_utf8_lossy(&buf[..len]),);

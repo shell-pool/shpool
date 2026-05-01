@@ -97,7 +97,7 @@ fn systemd_activation() -> anyhow::Result<()> {
             // place the unix socket file descriptor in the right place
             // Safety: We are sure that FD 3 is not open, and the returned OwnedFd will be
             // its only owner.
-            let fdarg = match unsafe { nix::unistd::dup2_raw(activation_sock, 3) } {
+            let fdarg = match unsafe { nix::unistd::dup2_raw(&activation_sock, 3) } {
                 Ok(newfd) => newfd,
                 Err(e) => {
                     eprintln!("dup err: {e}");

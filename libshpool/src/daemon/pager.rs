@@ -259,6 +259,9 @@ impl Pager {
                 if pty_master_poll_fd.any().unwrap_or(false) {
                     // the pager process has some data for us
                     let len = pty_master.read(&mut buf).context("reading chunk from pty master")?;
+                    if len == 0 {
+                        return Err(anyhow!("EOF from pty while displaying pager"));
+                    }
                     let chunk = Chunk { kind: ChunkKind::Data, buf: &buf[..len] };
                     match chunk.write_to(client_stream).and_then(|_| client_stream.flush()) {
                         Ok(_) => {}
@@ -275,7 +278,8 @@ impl Pager {
                 if client_stream_poll_fd.any().unwrap_or(false) {
                     let len = client_stream.read(&mut buf).context("reading client chunk")?;
                     if len == 0 {
-                        continue;
+                        info!("EOF");
+                        return Err(anyhow!("EOF from client while displaying pager"));
                     }
 
                     trace!("user input: {}", String::from_utf8_lossy(&buf[..len]));
