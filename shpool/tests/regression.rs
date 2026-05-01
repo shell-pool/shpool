@@ -182,3 +182,73 @@ fn replaced_binary_can_still_spawn_shells() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+/// Regression test for an EOF spin loop in the `client_to_shell` thread.
+/// If the client abruptly disconnects, the daemon should quickly detect EOF and
+/// exit the thread, rather than looping forever and starving other threads
+/// (which can cause timeouts).
+#[test]
+#[timeout(10000)]
+fn client_eof_does_not_spin() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+        .context("starting daemon proc")?;
+
+    let mut attach_proc =
+        daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+
+    // wait for attach to finish startup so we know client_to_shell thread is
+    // running
+    daemon_proc.await_event("daemon-bidi-stream-enter")?;
+    std::thread::sleep(Duration::from_millis(100)); // give it a little more time to enter the loop
+
+    // kill the attach proc abruptly. This closes the socket, sending EOF to
+    // client_to_shell.
+    attach_proc.proc.kill()?;
+
+    // wait for the session to become disconnected
+    // On BUGGY code: client_to_shell spins, causing bidi_stream to wait for
+    // heartbeat_h which takes >= 500ms (often longer due to CPU starvation).
+    // On FIXED code: client_to_shell exits immediately on EOF, bidi_stream detects
+    // it within JOIN_POLL_DURATION (50ms).
+    daemon_proc.wait_until_list_matches(|out| out.contains("disconnected"))?;
+
+    Ok(())
+}
+
+/// Regression test for an EOF spin loop in the pager display thread.
+/// If the client abruptly disconnects while viewing the MOTD pager, the daemon
+/// should quickly detect EOF and abort the pager display.
+#[test]
+#[timeout(10000)]
+fn pager_eof_does_not_spin() -> anyhow::Result<()> {
+    let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test")?;
+    let motd_file = tmp_dir.path().join("motd.txt");
+    fs::write(&motd_file, "this is a long motd that you must read in a pager\n")?;
+
+    let config_tmpl = fs::read_to_string(support::testdata_file("motd_pager.toml.tmpl"))?;
+    let config_contents = config_tmpl.replace("TMP_MOTD_MSG_FILE", motd_file.to_str().unwrap());
+    let config_file = tmp_dir.path().join("motd_pager.toml");
+    fs::write(&config_file, config_contents)?;
+
+    let mut daemon_proc = support::daemon::Proc::new(&config_file, DaemonArgs::default())
+        .context("starting daemon proc")?;
+
+    let mut attach_proc =
+        daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+
+    // wait for the attach process to launch the pager
+    std::thread::sleep(Duration::from_millis(500));
+
+    // kill the attach proc abruptly. This closes the socket, sending EOF to the
+    // pager thread.
+    attach_proc.proc.kill()?;
+
+    // Wait for the session to become disconnected.
+    // On BUGGY code: the pager thread spins 100% CPU on EOF, and never returns from
+    // display(). The session remains "Attached" forever (or until the 10s test
+    // timeout). On FIXED code: the pager detects EOF, exits, and the session
+    // quickly becomes "Disconnected".
+    daemon_proc.wait_until_list_matches(|out| out.contains("disconnected"))?;
+
+    Ok(())
+}
