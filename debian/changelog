@@ -1,4 +1,16 @@
 
+shpool (0.9.7) unstable; urgency=low
+
+  Fixed
+
+  * exe path resolution bug
+
+  Other
+
+  * bump shpool_pty to 0.4.0
+
+ -- Shpool Authors <shpool-eng@google.com>  Fri, 01 May 2026 01:03:46 +0000
+
 shpool (0.9.6) unstable; urgency=low
 
   Fixed
