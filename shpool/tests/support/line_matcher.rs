@@ -124,7 +124,7 @@ where
                     .iter()
                     .map(|maybe_match| maybe_match.map(|m| String::from(m.as_str())))
                     .collect()),
-                None => Err(anyhow!("expected /{}/ to match '{}'", re, &line)),
+                None => Err(anyhow!("expected /{}/ to match '{}'", re, line)),
             };
         }
     }

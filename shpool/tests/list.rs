@@ -24,7 +24,7 @@ fn empty() -> anyhow::Result<()> {
 
     let stdout = String::from_utf8_lossy(&out.stdout[..]);
     assert!(stdout.contains("NAME"));
-    assert!(stdout.contains("STARTED_AT"));
+    assert!(stdout.contains("STATUS"));
 
     Ok(())
 }
@@ -134,7 +134,7 @@ fn two_sessions() -> anyhow::Result<()> {
     bidi_enter_w.wait_event("daemon-bidi-stream-enter")?;
 
     {
-        let _sess2 = daemon_proc.attach("sh2", Default::default())?;
+        let _sess2 = daemon_proc.attach("sh2_longer_name", Default::default())?;
 
         bidi_enter_w.wait_event("daemon-bidi-stream-enter")?;
 
@@ -155,8 +155,8 @@ fn two_sessions() -> anyhow::Result<()> {
     let out = daemon_proc.list()?;
     assert!(out.status.success(), "list proc did not exit successfully");
 
-    let sh1_re = Regex::new("sh1.*attached")?;
-    let sh2_re = Regex::new("sh2.*disconnected")?;
+    let sh1_re = Regex::new("sh1            .*attached")?;
+    let sh2_re = Regex::new("sh2_longer_name.*disconnected")?;
     let stdout = String::from_utf8_lossy(&out.stdout[..]);
     dbg!(&stdout);
     assert!(sh1_re.is_match(&stdout));

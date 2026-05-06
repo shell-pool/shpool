@@ -19,7 +19,7 @@ allow = [
     "ISC", # notice
     "Apache-2.0",
     "MIT",
-    "Unicode-DFS-2016",
+    "Unicode-3.0", # notice
     "BSD-3-Clause", # notice
 ]
 confidence-threshold = 1.0

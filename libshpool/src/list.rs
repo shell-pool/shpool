@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{io, path::PathBuf, time};
+use std::{io, path::PathBuf};
 
 use anyhow::Context;
-use chrono::{DateTime, Utc};
 use shpool_protocol::{ConnectHeader, ListReply};
 
 use crate::{protocol, protocol::ClientResult};
@@ -42,12 +41,16 @@ pub fn run(socket: PathBuf, json_output: bool) -> anyhow::Result<()> {
     if json_output {
         println!("{}", serde_json::to_string_pretty(&reply)?);
     } else {
-        println!("NAME\tSTARTED_AT\tSTATUS");
+        let longest_session_name_len =
+            reply.sessions.iter().map(|s| s.name.len()).max().unwrap_or(0);
+
+        println!("NAME\tSTATUS");
         for session in reply.sessions.iter() {
-            let started_at =
-                time::UNIX_EPOCH + time::Duration::from_millis(session.started_at_unix_ms as u64);
-            let started_at = DateTime::<Utc>::from(started_at);
-            println!("{}\t{}\t{}", session.name, started_at.to_rfc3339(), session.status);
+            let mut name = session.name.clone();
+            while name.len() < longest_session_name_len {
+                name.push(' ');
+            }
+            println!("{}\t{}", name, session.status);
         }
     }
 

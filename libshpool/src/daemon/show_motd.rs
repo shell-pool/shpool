@@ -183,14 +183,12 @@ impl Debouncer {
     fn should_fire(&self) -> anyhow::Result<bool> {
         let mut last_fired = self.last_fired.lock();
         if last_fired.elapsed()? >= self.dur {
-            let old_ts: chrono::DateTime<chrono::Utc> = (*last_fired).into();
+            let old: time::SystemTime = *last_fired;
             *last_fired = time::SystemTime::now();
-            let new_ts: chrono::DateTime<chrono::Utc> = (*last_fired).into();
-            info!("last_fired: old = {}, new = {}", old_ts, new_ts);
+            info!("last_fired: old = {:?}, new = {:?}", old, *last_fired);
             Ok(true)
         } else {
-            let ts: chrono::DateTime<chrono::Utc> = (*last_fired).into();
-            info!("not firing yet (last_fired = {})", ts);
+            info!("not firing yet (last_fired = {:?})", *last_fired);
             Ok(false)
         }
     }
