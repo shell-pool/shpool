@@ -252,3 +252,51 @@ fn pager_eof_does_not_spin() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+/// Regression test for a race condition where concurrent attach attempts to
+/// a disconnected session can clobber each other's stream, leading to
+/// "no client stream" error in the daemon.
+#[test]
+#[timeout(30000)]
+fn concurrent_attach_to_existing_session_race() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+        .context("starting daemon proc")?;
+
+    let mut attach_first =
+        daemon_proc.attach("main", Default::default()).context("starting first attach proc")?;
+    daemon_proc.await_event("daemon-bidi-stream-enter")?;
+
+    attach_first.proc.kill()?;
+    daemon_proc.wait_until_list_matches(|out| out.contains("disconnected"))?;
+
+    // Pause the daemon before it locks the session to trigger the race.
+    daemon_proc.send_event_command("pause-at handle-attach-before-inner-session-lock")?;
+
+    let _attach_a = daemon_proc.attach("main", Default::default()).context("starting attach A")?;
+    daemon_proc.await_event("paused-at handle-attach-before-inner-session-lock")?;
+
+    let _attach_b = daemon_proc.attach("main", Default::default()).context("starting attach B")?;
+    daemon_proc.await_event("handle-attach-before-select-shell")?;
+
+    // In fixed code, attach b can't finish select shell because of a lock, so
+    // we need to use a sleep here to allow it to enter in broken code.
+    std::thread::sleep(Duration::from_millis(500));
+
+    daemon_proc.send_event_command("release handle-attach-before-inner-session-lock")?;
+
+    // Disconnect B to trigger the error for A which is using B's stream.
+    drop(_attach_b);
+
+    std::thread::sleep(Duration::from_millis(500));
+
+    let log_content = fs::read_to_string(&daemon_proc.log_file)?;
+
+    // On buggy code, the clobbered stream causes a "no client stream" error
+    // when the second attach tries to take over after the first exits.
+    assert!(
+        !log_content.contains("no client stream, should be impossible"),
+        "REGRESSION: Daemon logged 'no client stream' error!"
+    );
+
+    Ok(())
+}

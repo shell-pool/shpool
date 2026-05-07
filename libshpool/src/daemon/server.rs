@@ -33,7 +33,7 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use nix::unistd;
-use parking_lot::Mutex;
+use parking_lot::{ArcMutexGuard, Mutex, RawMutex};
 use shpool_protocol::{
     AttachHeader, AttachReplyHeader, AttachStatus, ConnectHeader, DetachReply, DetachRequest,
     KillReply, KillRequest, ListReply, LogLevel, ResizeReply, Session, SessionMessageDetachReply,
@@ -223,6 +223,7 @@ impl Server {
         let user_info = user::info().context("resolving user info")?;
         let shell_env = self.build_shell_env(&user_info, &header).context("building shell env")?;
 
+        test_hooks::emit("handle-attach-before-select-shell");
         let (shell_results, status) =
             match self.select_shell_desc(stream, conn_id, &header, &user_info, &shell_env) {
                 Ok(t) => t,
@@ -240,9 +241,10 @@ impl Server {
         self.link_ssh_auth_sock(&header).context("linking SSH_AUTH_SOCK")?;
         self.populate_session_env_file(&header).context("populating session env file")?;
 
-        if let Some((child_exit_notifier, inner, pager_ctl_slot)) = shell_results {
+        test_hooks::emit("handle-attach-before-inner-session-lock");
+
+        if let Some((child_exit_notifier, mut inner, pager_ctl_slot)) = shell_results {
             let mut child_done = false;
-            let mut inner = inner.lock();
             let client_stream = match inner.client_stream.as_mut() {
                 Some(s) => s,
                 None => {
@@ -356,13 +358,12 @@ impl Server {
     ) -> anyhow::Result<(
         Option<(
             Arc<ExitNotifier>,
-            Arc<Mutex<shell::SessionInner>>,
+            ArcMutexGuard<RawMutex, shell::SessionInner>,
             Arc<Mutex<Option<pager::PagerCtl>>>,
         )>,
         AttachStatus,
     )> {
         let warnings = vec![];
-        let mut status = AttachStatus::Attached { warnings: warnings.clone() };
 
         // Critical section for the global shells lock. We only hold it
         // while grubbing about for an existing session, then release it
@@ -375,7 +376,7 @@ impl Server {
 
             if let Some(session) = shells.get(&header.name) {
                 info!("found entry for '{}'", header.name);
-                if let Some(mut inner) = session.inner.try_lock() {
+                if let Some(mut inner) = session.inner.try_lock_arc() {
                     let _s = span!(Level::INFO, "aquired_lock(session.inner)", s = header.name)
                         .entered();
                     // We have an existing session in our table, but the subshell
@@ -405,7 +406,22 @@ impl Server {
                                 warn!(
                                     "child_exited chan unclosed, but shell->client thread has exited, clobbering with new subshell"
                                 );
-                                status = AttachStatus::Created { warnings };
+                            } else {
+                                if let Err(err) = self.hooks.on_reattach(&header.name) {
+                                    warn!("reattach hook: {:?}", err);
+                                }
+                                // Immediately return so that we never give
+                                // up the inner lock for a session we are
+                                // reattaching to. We only want to give it
+                                // up when creating a new session.
+                                return Ok((
+                                    Some((
+                                        Arc::clone(&session.child_exit_notifier),
+                                        inner,
+                                        Arc::clone(&session.pager_ctl),
+                                    )),
+                                    AttachStatus::Attached { warnings },
+                                ));
                             }
 
                             // status is already attached
@@ -416,7 +432,6 @@ impl Server {
                                 "stale inner, (child exited with status {}) clobbering with new subshell",
                                 exit_status
                             );
-                            status = AttachStatus::Created { warnings };
                         }
                     }
 
@@ -432,7 +447,6 @@ impl Server {
                                 .map_err(|e| anyhow!("joining shell->client on reattach: {:?}", e))?
                                 .context("within shell->client thread on reattach")?;
                         }
-                        assert!(matches!(status, AttachStatus::Created { .. }));
                     }
 
                     // fallthrough to bidi streaming
@@ -448,35 +462,29 @@ impl Server {
                 }
             } else {
                 info!("no existing '{}' session, creating new one", &header.name);
-                status = AttachStatus::Created { warnings };
             }
         };
 
-        if matches!(status, AttachStatus::Created { .. }) {
-            info!("creating new subshell");
-            if let Err(err) = self.hooks.on_new_session(&header.name) {
-                warn!("new_session hook: {:?}", err);
-            }
-            let motd = self.config.get().motd.clone().unwrap_or_default();
-            let session = self.spawn_subshell(
-                conn_id,
-                stream,
-                header,
-                user_info,
-                shell_env,
-                matches!(motd, MotdDisplayMode::Dump),
-            )?;
+        info!("creating new subshell");
+        if let Err(err) = self.hooks.on_new_session(&header.name) {
+            warn!("new_session hook: {:?}", err);
+        }
+        let motd = self.config.get().motd.clone().unwrap_or_default();
+        let session = self.spawn_subshell(
+            conn_id,
+            stream,
+            header,
+            user_info,
+            shell_env,
+            matches!(motd, MotdDisplayMode::Dump),
+        )?;
 
-            session.lifecycle_timestamps.lock().last_connected_at = Some(time::SystemTime::now());
-            {
-                // we unwrap to propagate the poison as an unwind
-                let _s = span!(Level::INFO, "select_shell_lock_2(shells)").entered();
-                let mut shells = self.shells.lock();
-                shells.insert(header.name.clone(), Box::new(session));
-            }
-            // fallthrough to bidi streaming
-        } else if let Err(err) = self.hooks.on_reattach(&header.name) {
-            warn!("reattach hook: {:?}", err);
+        session.lifecycle_timestamps.lock().last_connected_at = Some(time::SystemTime::now());
+        {
+            // we unwrap to propagate the poison as an unwind
+            let _s = span!(Level::INFO, "select_shell_lock_2(shells)").entered();
+            let mut shells = self.shells.lock();
+            shells.insert(header.name.clone(), Box::new(session));
         }
 
         // we unwrap to propagate the poison as an unwind
@@ -490,13 +498,13 @@ impl Server {
             Ok((
                 Some((
                     Arc::clone(&session.child_exit_notifier),
-                    Arc::clone(&session.inner),
+                    session.inner.lock_arc(),
                     Arc::clone(&session.pager_ctl),
                 )),
-                status,
+                AttachStatus::Created { warnings },
             ))
         } else {
-            Ok((None, status))
+            Ok((None, AttachStatus::UnexpectedError(String::from("selecting session"))))
         }
     }
 

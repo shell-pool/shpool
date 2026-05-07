@@ -116,7 +116,7 @@ impl Proc {
         let test_hook_socket_path = tmp_dir.path().join("hook.sock");
 
         let log_file = tmp_dir.path().join("daemon.log");
-        eprintln!("spawning daemon proc with log {:?}", &log_file);
+        eprintln!("spawning daemon proc with log {:?}", log_file);
 
         let resolved_config = if config.as_ref().exists() {
             PathBuf::from(config.as_ref())
@@ -196,7 +196,7 @@ impl Proc {
             testdata_file(config)
         };
 
-        eprintln!("spawning instrumented daemon thread with log {:?}", &log_file);
+        eprintln!("spawning instrumented daemon thread with log {:?}", log_file);
 
         let args = libshpool::Args {
             log_file: Some(
@@ -289,7 +289,7 @@ impl Proc {
             self.tmp_dir.path().join(format!("attach_{}_{}.log", name, self.subproc_counter));
         let test_hook_socket_path =
             self.tmp_dir.path().join(format!("ah{}_{}.sock", name, self.subproc_counter));
-        eprintln!("spawning attach proc with log {:?}", &log_file);
+        eprintln!("spawning attach proc with log {:?}", log_file);
         self.subproc_counter += 1;
 
         let mut cmd = Command::new(&self.bin_path);
@@ -350,7 +350,7 @@ impl Proc {
 
     pub fn detach(&mut self, sessions: Vec<String>) -> anyhow::Result<process::Output> {
         let log_file = self.tmp_dir.path().join(format!("detach_{}.log", self.subproc_counter));
-        eprintln!("spawning detach proc with log {:?}", &log_file);
+        eprintln!("spawning detach proc with log {:?}", log_file);
         self.subproc_counter += 1;
 
         let mut cmd = Command::new(&self.bin_path);
@@ -369,7 +369,7 @@ impl Proc {
 
     pub fn kill(&mut self, sessions: Vec<String>) -> anyhow::Result<process::Output> {
         let log_file = self.tmp_dir.path().join(format!("kill_{}.log", self.subproc_counter));
-        eprintln!("spawning kill proc with log {:?}", &log_file);
+        eprintln!("spawning kill proc with log {:?}", log_file);
         self.subproc_counter += 1;
 
         let mut cmd = Command::new(&self.bin_path);
@@ -406,7 +406,7 @@ impl Proc {
     /// output and returns it as a string
     pub fn list(&mut self) -> anyhow::Result<process::Output> {
         let log_file = self.tmp_dir.path().join(format!("list_{}.log", self.subproc_counter));
-        eprintln!("spawning list proc with log {:?}", &log_file);
+        eprintln!("spawning list proc with log {:?}", log_file);
         self.subproc_counter += 1;
 
         Command::new(&self.bin_path)
@@ -422,7 +422,7 @@ impl Proc {
 
     pub fn list_json(&mut self) -> anyhow::Result<process::Output> {
         let log_file = self.tmp_dir.path().join(format!("list_{}.log", self.subproc_counter));
-        eprintln!("spawning list --json proc with log {:?}", &log_file);
+        eprintln!("spawning list --json proc with log {:?}", log_file);
         self.subproc_counter += 1;
 
         Command::new(&self.bin_path)
@@ -441,7 +441,7 @@ impl Proc {
     pub fn set_log_level(&mut self, level: &str) -> anyhow::Result<process::Output> {
         let log_file =
             self.tmp_dir.path().join(format!("set_log_level_{}.log", self.subproc_counter));
-        eprintln!("spawning set-log-level proc with log {:?}", &log_file);
+        eprintln!("spawning set-log-level proc with log {:?}", log_file);
         self.subproc_counter += 1;
 
         Command::new(&self.bin_path)
@@ -459,6 +459,14 @@ impl Proc {
     pub fn await_event(&mut self, event: &str) -> anyhow::Result<()> {
         if let Some(events) = &mut self.events {
             events.await_event(event)
+        } else {
+            Err(anyhow!("no events stream"))
+        }
+    }
+
+    pub fn send_event_command(&mut self, cmd: &str) -> anyhow::Result<()> {
+        if let Some(events) = &mut self.events {
+            events.send_command(cmd)
         } else {
             Err(anyhow!("no events stream"))
         }

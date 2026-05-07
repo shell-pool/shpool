@@ -21,20 +21,22 @@
 // we publish a unix socket and then clients can listen for specific
 // named events in order to block until they have occurred.
 use std::{
-    io::Write,
+    collections::HashSet,
+    io::{BufRead, Write},
     os::unix::net::{UnixListener, UnixStream},
-    time,
+    thread, time,
 };
 
 use anyhow::{anyhow, Context};
-use parking_lot::Mutex;
+use parking_lot::{Condvar, Mutex};
 use tracing::{error, info};
 
 #[cfg(feature = "test_hooks")]
 pub fn emit(event: &str) {
-    let sock_path = TEST_HOOK_SERVER.sock_path.lock();
-    if sock_path.is_some() {
+    let has_sock = TEST_HOOK_SERVER.sock_path.lock().is_some();
+    if has_sock {
         TEST_HOOK_SERVER.emit_event(event);
+        TEST_HOOK_SERVER.maybe_pause(event);
     }
 }
 
@@ -75,11 +77,18 @@ lazy_static::lazy_static! {
 pub struct TestHookServer {
     sock_path: Mutex<Option<String>>,
     clients: Mutex<Vec<UnixStream>>,
+    pending_pauses: Mutex<HashSet<String>>,
+    pause_cv: Condvar,
 }
 
 impl TestHookServer {
     fn new() -> Self {
-        TestHookServer { sock_path: Mutex::new(None), clients: Mutex::new(vec![]) }
+        TestHookServer {
+            sock_path: Mutex::new(None),
+            clients: Mutex::new(vec![]),
+            pending_pauses: Mutex::new(HashSet::new()),
+            pause_cv: Condvar::new(),
+        }
     }
 
     pub fn set_socket_path(&self, path: String) {
@@ -141,8 +150,19 @@ impl TestHookServer {
                     continue;
                 }
             };
-            let mut clients = self.clients.lock();
-            clients.push(stream);
+            match stream.try_clone() {
+                Ok(stream_clone) => {
+                    let mut clients = self.clients.lock();
+                    clients.push(stream);
+
+                    thread::spawn(move || {
+                        TEST_HOOK_SERVER.handle_client(stream_clone);
+                    });
+                }
+                Err(e) => {
+                    error!("error cloning test hook stream: {:?}", e);
+                }
+            }
         }
     }
 
@@ -154,6 +174,52 @@ impl TestHookServer {
             if let Err(e) = client.write_all(event_line.as_bytes()) {
                 error!("error emitting '{}' event: {:?}", event, e);
             }
+        }
+    }
+
+    fn handle_client(&self, stream: UnixStream) {
+        let mut reader = std::io::BufReader::new(stream);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => break, // EOF
+                Ok(_) => {
+                    let parts: Vec<&str> = line.trim().splitn(2, ' ').collect();
+                    if parts.len() == 2 {
+                        let cmd = parts[0];
+                        let event = parts[1];
+                        match cmd {
+                            "pause-at" => {
+                                info!("test requested pause at '{}'", event);
+                                self.pending_pauses.lock().insert(event.to_string());
+                            }
+                            "release" => {
+                                info!("test requested release of '{}'", event);
+                                self.pending_pauses.lock().remove(event);
+                                self.pause_cv.notify_all();
+                            }
+                            _ => error!("unknown test hook command: {}", cmd),
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("error reading from test hook client: {:?}", e);
+                    break;
+                }
+            }
+        }
+    }
+
+    fn maybe_pause(&self, event: &str) {
+        let mut pending = self.pending_pauses.lock();
+        if pending.contains(event) {
+            info!("pausing at '{}'", event);
+            self.emit_event(&format!("paused-at {event}"));
+            while pending.contains(event) {
+                self.pause_cv.wait(&mut pending);
+            }
+            info!("resuming from '{}'", event);
         }
     }
 }
