@@ -285,10 +285,17 @@ impl Proc {
     }
 
     pub fn attach(&mut self, name: &str, args: AttachArgs) -> anyhow::Result<attach::Proc> {
-        let log_file =
-            self.tmp_dir.path().join(format!("attach_{}_{}.log", name, self.subproc_counter));
+        let stripped_name: String = name
+            .replace(".", "dot")
+            .chars()
+            .filter(|c| !(c.is_whitespace() || "./".contains(*c)))
+            .collect();
+        let log_file = self
+            .tmp_dir
+            .path()
+            .join(format!("attach_{}_{}.log", stripped_name, self.subproc_counter));
         let test_hook_socket_path =
-            self.tmp_dir.path().join(format!("ah{}_{}.sock", name, self.subproc_counter));
+            self.tmp_dir.path().join(format!("ah{}_{}.sock", stripped_name, self.subproc_counter));
         eprintln!("spawning attach proc with log {:?}", log_file);
         self.subproc_counter += 1;
 

@@ -221,10 +221,27 @@ impl Server {
     #[instrument(skip_all)]
     fn handle_attach(
         &self,
-        stream: UnixStream,
+        mut stream: UnixStream,
         conn_id: usize,
         header: AttachHeader,
     ) -> anyhow::Result<()> {
+        if header.name.chars().any(|c| '/' == c || c.is_whitespace())
+            || header.name == "."
+            || header.name == ".."
+            || header.name.is_empty()
+        {
+            write_reply(
+                &mut stream,
+                AttachReplyHeader {
+                    status: AttachStatus::UnexpectedError(format!(
+                        "invalid session name '{}'",
+                        header.name
+                    )),
+                },
+            )?;
+            return Ok(());
+        }
+
         let user_info = user::info().context("resolving user info")?;
         let shell_env = self.build_shell_env(&user_info, &header).context("building shell env")?;
 

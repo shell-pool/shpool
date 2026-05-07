@@ -103,6 +103,7 @@ impl Attach {
 
         info!("looping on attach_with_name");
         loop {
+            info!("attaching to '{}'", resolved_name);
             match self.attach_with_name(resolved_name) {
                 Ok(AttachResult::Done) => return Ok(()),
                 Ok(AttachResult::Switch(s)) => maybe_switch = s,
@@ -128,6 +129,14 @@ impl Attach {
         }
         if resolved_name.contains(char::is_whitespace) {
             eprintln!("session name '{}' may not have whitespace", resolved_name);
+            return Ok(AttachResult::Done);
+        }
+        if resolved_name.chars().any(|c| '/' == c) {
+            eprintln!("session names may not contain slashes");
+            return Ok(AttachResult::Done);
+        }
+        if resolved_name == "." || resolved_name == ".." {
+            eprintln!("session names may not be special directory names");
             return Ok(AttachResult::Done);
         }
 

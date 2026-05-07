@@ -604,6 +604,43 @@ fn whitespace_session_not_allowed() -> anyhow::Result<()> {
 
 #[test]
 #[timeout(30000)]
+fn slash_session_not_allowed() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new(
+        "norc.toml",
+        DaemonArgs { listen_events: false, ..DaemonArgs::default() },
+    )
+    .context("starting daemon proc")?;
+
+    let mut tty1 =
+        daemon_proc.attach("this/bad", Default::default()).context("attaching from tty1")?;
+    let mut line_matcher1 = tty1.stderr_line_matcher()?;
+    line_matcher1.scan_until_re("may not contain slashes")?;
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
+fn dot_session_not_allowed() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new(
+        "norc.toml",
+        DaemonArgs { listen_events: false, ..DaemonArgs::default() },
+    )
+    .context("starting daemon proc")?;
+
+    let mut tty1 = daemon_proc.attach(".", Default::default()).context("attaching from tty1")?;
+    let mut line_matcher1 = tty1.stderr_line_matcher()?;
+    line_matcher1.scan_until_re("may not be special directory names")?;
+
+    let mut tty2 = daemon_proc.attach("..", Default::default()).context("attaching from tty2")?;
+    let mut line_matcher2 = tty2.stderr_line_matcher()?;
+    line_matcher2.scan_until_re("may not be special directory names")?;
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
 fn daemon_hangup() -> anyhow::Result<()> {
     let mut daemon_proc = support::daemon::Proc::new(
         "norc.toml",
