@@ -26,13 +26,14 @@ use std::{
     },
     path::{Path, PathBuf},
     process,
-    sync::{Arc, Mutex},
+    sync::Arc,
     thread, time,
     time::{Duration, Instant},
 };
 
 use anyhow::{anyhow, Context};
 use nix::unistd;
+use parking_lot::Mutex;
 use shpool_protocol::{
     AttachHeader, AttachReplyHeader, AttachStatus, ConnectHeader, DetachReply, DetachRequest,
     KillReply, KillRequest, ListReply, LogLevel, ResizeReply, Session, SessionMessageDetachReply,
@@ -222,7 +223,7 @@ impl Server {
         let user_info = user::info().context("resolving user info")?;
         let shell_env = self.build_shell_env(&user_info, &header).context("building shell env")?;
 
-        let (child_exit_notifier, inner_to_stream, pager_ctl_slot, status) =
+        let (shell_results, status) =
             match self.select_shell_desc(stream, conn_id, &header, &user_info, &shell_env) {
                 Ok(t) => t,
                 Err(err)
@@ -239,11 +240,9 @@ impl Server {
         self.link_ssh_auth_sock(&header).context("linking SSH_AUTH_SOCK")?;
         self.populate_session_env_file(&header).context("populating session env file")?;
 
-        if let (Some(child_exit_notifier), Some(inner), Some(pager_ctl_slot)) =
-            (child_exit_notifier, inner_to_stream, pager_ctl_slot)
-        {
+        if let Some((child_exit_notifier, inner, pager_ctl_slot)) = shell_results {
             let mut child_done = false;
-            let mut inner = inner.lock().unwrap();
+            let mut inner = inner.lock();
             let client_stream = match inner.client_stream.as_mut() {
                 Some(s) => s,
                 None => {
@@ -309,7 +308,7 @@ impl Server {
 
                 {
                     let _s = span!(Level::INFO, "2_lock(shells)").entered();
-                    let mut shells = self.shells.lock().unwrap();
+                    let mut shells = self.shells.lock();
                     shells.remove(&header.name);
                 }
 
@@ -327,9 +326,9 @@ impl Server {
                 // Client disconnected but shell is still running - set last_disconnected_at
                 {
                     let _s = span!(Level::INFO, "disconnect_lock(shells)").entered();
-                    let shells = self.shells.lock().unwrap();
+                    let shells = self.shells.lock();
                     if let Some(session) = shells.get(&header.name) {
-                        session.lifecycle_timestamps.lock().unwrap().last_disconnected_at =
+                        session.lifecycle_timestamps.lock().last_disconnected_at =
                             Some(time::SystemTime::now());
                     }
                 }
@@ -355,9 +354,11 @@ impl Server {
         user_info: &user::Info,
         shell_env: &[(OsString, OsString)],
     ) -> anyhow::Result<(
-        Option<Arc<ExitNotifier>>,
-        Option<Arc<Mutex<shell::SessionInner>>>,
-        Option<Arc<Mutex<Option<pager::PagerCtl>>>>,
+        Option<(
+            Arc<ExitNotifier>,
+            Arc<Mutex<shell::SessionInner>>,
+            Arc<Mutex<Option<pager::PagerCtl>>>,
+        )>,
         AttachStatus,
     )> {
         let warnings = vec![];
@@ -370,11 +371,11 @@ impl Server {
         {
             // we unwrap to propagate the poison as an unwind
             let _s = span!(Level::INFO, "select_shell_lock_1(shells)").entered();
-            let shells = self.shells.lock().unwrap();
+            let shells = self.shells.lock();
 
             if let Some(session) = shells.get(&header.name) {
                 info!("found entry for '{}'", header.name);
-                if let Ok(mut inner) = session.inner.try_lock() {
+                if let Some(mut inner) = session.inner.try_lock() {
                     let _s = span!(Level::INFO, "aquired_lock(session.inner)", s = header.name)
                         .entered();
                     // We have an existing session in our table, but the subshell
@@ -392,7 +393,7 @@ impl Server {
                             // the channel is still open so the subshell is still running
                             info!("taking over existing session inner");
                             inner.client_stream = Some(stream.try_clone()?);
-                            session.lifecycle_timestamps.lock().unwrap().last_connected_at =
+                            session.lifecycle_timestamps.lock().last_connected_at =
                                 Some(time::SystemTime::now());
 
                             if inner
@@ -466,12 +467,11 @@ impl Server {
                 matches!(motd, MotdDisplayMode::Dump),
             )?;
 
-            session.lifecycle_timestamps.lock().unwrap().last_connected_at =
-                Some(time::SystemTime::now());
+            session.lifecycle_timestamps.lock().last_connected_at = Some(time::SystemTime::now());
             {
                 // we unwrap to propagate the poison as an unwind
                 let _s = span!(Level::INFO, "select_shell_lock_2(shells)").entered();
-                let mut shells = self.shells.lock().unwrap();
+                let mut shells = self.shells.lock();
                 shells.insert(header.name.clone(), Box::new(session));
             }
             // fallthrough to bidi streaming
@@ -481,20 +481,22 @@ impl Server {
 
         // we unwrap to propagate the poison as an unwind
         let _s = span!(Level::INFO, "select_shell_lock_3(shells)").entered();
-        let shells = self.shells.lock().unwrap();
+        let shells = self.shells.lock();
 
         // return a reference to the inner session so that
         // we can work with it without the global session
         // table lock held
         if let Some(session) = shells.get(&header.name) {
             Ok((
-                Some(Arc::clone(&session.child_exit_notifier)),
-                Some(Arc::clone(&session.inner)),
-                Some(Arc::clone(&session.pager_ctl)),
+                Some((
+                    Arc::clone(&session.child_exit_notifier),
+                    Arc::clone(&session.inner),
+                    Arc::clone(&session.pager_ctl),
+                )),
                 status,
             ))
         } else {
-            Ok((None, None, None, status))
+            Ok((None, status))
         }
     }
 
@@ -555,11 +557,11 @@ impl Server {
         let mut not_attached_sessions = vec![];
         {
             let _s = span!(Level::INFO, "lock(shells)").entered();
-            let shells = self.shells.lock().unwrap();
+            let shells = self.shells.lock();
             for session in request.sessions.into_iter() {
                 if let Some(s) = shells.get(&session) {
                     let _s = span!(Level::INFO, "lock(shell_to_client_ctl)", s = session).entered();
-                    let shell_to_client_ctl = s.shell_to_client_ctl.lock().unwrap();
+                    let shell_to_client_ctl = s.shell_to_client_ctl.lock();
                     shell_to_client_ctl
                         .client_connection
                         .send(shell::ClientConnectionMsg::Disconnect)
@@ -572,7 +574,7 @@ impl Server {
                     if let shell::ClientConnectionStatus::DetachNone = status {
                         not_attached_sessions.push(session);
                     } else {
-                        s.lifecycle_timestamps.lock().unwrap().last_disconnected_at =
+                        s.lifecycle_timestamps.lock().last_disconnected_at =
                             Some(time::SystemTime::now());
                     }
                 } else {
@@ -614,7 +616,7 @@ impl Server {
         let mut not_found_sessions = vec![];
         {
             let _s = span!(Level::INFO, "lock(shells)").entered();
-            let mut shells = self.shells.lock().unwrap();
+            let mut shells = self.shells.lock();
 
             let mut to_remove = Vec::with_capacity(request.sessions.len());
             for session in request.sessions.into_iter() {
@@ -645,17 +647,17 @@ impl Server {
     #[instrument(skip_all)]
     fn handle_list(&self, mut stream: UnixStream) -> anyhow::Result<()> {
         let _s = span!(Level::INFO, "lock(shells)").entered();
-        let shells = self.shells.lock().unwrap();
+        let shells = self.shells.lock();
 
         let sessions: anyhow::Result<Vec<Session>> = shells
             .iter()
             .map(|(k, v)| {
                 let status = match v.inner.try_lock() {
-                    Ok(_) => SessionStatus::Disconnected,
-                    Err(_) => SessionStatus::Attached,
+                    Some(_) => SessionStatus::Disconnected,
+                    None => SessionStatus::Attached,
                 };
 
-                let timestamps = v.lifecycle_timestamps.lock().unwrap();
+                let timestamps = v.lifecycle_timestamps.lock();
                 let last_connected_at_unix_ms = timestamps
                     .last_connected_at
                     .map(|t| t.duration_since(time::UNIX_EPOCH).map(|d| d.as_millis() as i64))
@@ -704,7 +706,7 @@ impl Server {
             SessionMessageRequestPayload::Resize(resize_request) => {
                 let pager_ctl = {
                     let _s = span!(Level::INFO, "resize_lock_1(shells)").entered();
-                    let shells = self.shells.lock().unwrap();
+                    let shells = self.shells.lock();
                     if let Some(session) = shells.get(&header.session_name) {
                         Arc::clone(&session.pager_ctl)
                     } else {
@@ -712,7 +714,7 @@ impl Server {
                     }
                 };
                 let _s = span!(Level::INFO, "lock(pager_ctl)").entered();
-                let pager_ctl = pager_ctl.lock().unwrap();
+                let pager_ctl = pager_ctl.lock();
 
                 if let Some(pager_ctl) = pager_ctl.as_ref() {
                     info!("resizing pager");
@@ -727,7 +729,7 @@ impl Server {
                 } else {
                     let shell_to_client_ctl = {
                         let _s = span!(Level::INFO, "resize_lock_2(shells)").entered();
-                        let shells = self.shells.lock().unwrap();
+                        let shells = self.shells.lock();
                         if let Some(session) = shells.get(&header.session_name) {
                             Arc::clone(&session.shell_to_client_ctl)
                         } else {
@@ -735,7 +737,7 @@ impl Server {
                         }
                     };
                     let _s = span!(Level::INFO, "lock(shell_to_client_ctl)").entered();
-                    let shell_to_client_ctl = shell_to_client_ctl.lock().unwrap();
+                    let shell_to_client_ctl = shell_to_client_ctl.lock();
 
                     shell_to_client_ctl
                         .tty_size_change
@@ -752,7 +754,7 @@ impl Server {
             SessionMessageRequestPayload::Detach => {
                 let shell_to_client_ctl = {
                     let _s = span!(Level::INFO, "detach_lock(shells)").entered();
-                    let shells = self.shells.lock().unwrap();
+                    let shells = self.shells.lock();
                     if let Some(session) = shells.get(&header.session_name) {
                         Arc::clone(&session.shell_to_client_ctl)
                     } else {
@@ -760,7 +762,7 @@ impl Server {
                     }
                 };
                 let _s = span!(Level::INFO, "lock(shell_to_client_ctl)").entered();
-                let shell_to_client_ctl = shell_to_client_ctl.lock().unwrap();
+                let shell_to_client_ctl = shell_to_client_ctl.lock();
 
                 shell_to_client_ctl
                     .client_connection

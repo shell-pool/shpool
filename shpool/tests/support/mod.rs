@@ -8,7 +8,6 @@ use std::{
     io::BufRead,
     path::{Path, PathBuf},
     process::Command,
-    sync::Mutex,
     time,
 };
 
@@ -28,8 +27,10 @@ pub fn testdata_file<P: AsRef<Path>>(file: P) -> PathBuf {
 }
 
 lazy_static::lazy_static! {
-    // cache the result and make sure we only ever compile once
-    static ref SHPOOL_BIN_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
+    // cache the result and make sure we only ever compile once.
+    // We can't use a parking lot mutex here because of the Sized
+    // constraint for static vars.
+    static ref SHPOOL_BIN_PATH: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
 }
 
 pub fn wait_until<P>(mut pred: P) -> anyhow::Result<()>

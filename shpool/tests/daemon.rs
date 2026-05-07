@@ -225,11 +225,11 @@ fn hooks() -> anyhow::Result<()> {
     sh1_proc.run_cmd("exit")?; // 1 shell disconnect
 
     support::wait_until(|| {
-        let hook_records = daemon_proc.hook_records.as_ref().unwrap().lock().unwrap();
+        let hook_records = daemon_proc.hook_records.as_ref().unwrap().lock();
         Ok(!hook_records.shell_disconnects.is_empty())
     })?;
 
-    let hook_records = daemon_proc.hook_records.as_ref().unwrap().lock().unwrap();
+    let hook_records = daemon_proc.hook_records.as_ref().unwrap().lock();
     eprintln!("hook_records: {hook_records:?}");
     assert_eq!(hook_records.new_sessions[0], "sh1");
     assert_eq!(hook_records.reattaches[0], "sh1");

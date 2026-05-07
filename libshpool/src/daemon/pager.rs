@@ -40,13 +40,14 @@ use std::{
     },
     process,
     sync::atomic::{AtomicBool, Ordering},
-    sync::{Arc, Mutex},
+    sync::Arc,
     thread,
     time::{Duration, Instant},
 };
 
 use anyhow::{anyhow, Context};
 use nix::{poll, sys::signal, unistd};
+use parking_lot::Mutex;
 use shpool_protocol::{Chunk, ChunkKind, TtySize};
 use tracing::{error, info, instrument, span, trace, warn, Level};
 
@@ -111,7 +112,7 @@ impl Pager {
         let (tty_size_change_tx, tty_size_change_rx) = crossbeam_channel::bounded(0);
         let (tty_size_change_ack_tx, tty_size_change_ack_rx) = crossbeam_channel::bounded(0);
         {
-            let mut ctl_handle = ctl_slot.lock().unwrap();
+            let mut ctl_handle = ctl_slot.lock();
             if ctl_handle.is_some() {
                 return Err(anyhow!("only one pager per session at a time allowed"));
             }
@@ -195,7 +196,7 @@ impl Pager {
 
                 {
                     // register the new size so it will get returned
-                    let mut tty_size = tty_size_ref.lock().unwrap();
+                    let mut tty_size = tty_size_ref.lock();
                     *tty_size = size;
                 }
 
@@ -220,7 +221,7 @@ impl Pager {
             ];
             let nready = poll::poll(&mut poll_fds, POLL_MS).context("polling both streams")?;
             if pager_exited.load(Ordering::Relaxed) {
-                let tty_size = tty_size.lock().unwrap();
+                let tty_size = tty_size.lock();
                 return Ok(tty_size.clone());
             }
             if nready == 0 {
@@ -289,13 +290,13 @@ impl Pager {
                         // assume the pager proc just quit normally and the
                         // timing was such that we didn't pick it up with our
                         // exit watcher thread.
-                        let tty_size = tty_size.lock().unwrap();
+                        let tty_size = tty_size.lock();
                         return Ok(tty_size.clone());
                     }
                     if let Err(e) = pty_master.flush() {
                         info!("Error flushing pager pty, nbd though: {:?}", e);
                         // same logic as above
-                        let tty_size = tty_size.lock().unwrap();
+                        let tty_size = tty_size.lock();
                         return Ok(tty_size.clone());
                     }
                 }
@@ -312,7 +313,7 @@ struct PagerCltGuard {
 
 impl std::ops::Drop for PagerCltGuard {
     fn drop(&mut self) {
-        let mut pager_ctl = self.ctl_slot.lock().unwrap();
+        let mut pager_ctl = self.ctl_slot.lock();
         // N.B. clobbering the handles here will cause the listening
         // thread to exit because it drops the senders. This ensures
         // that no callers can grab the lock on the ctl handles and

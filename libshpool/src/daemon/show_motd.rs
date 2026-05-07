@@ -12,15 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{
-    ffi::OsString,
-    io,
-    os::unix::net::UnixStream,
-    sync::{Arc, Mutex},
-    time,
-};
+use std::{ffi::OsString, io, os::unix::net::UnixStream, sync::Arc, time};
 
 use anyhow::{anyhow, Context};
+use parking_lot::Mutex;
 use shpool_protocol::{Chunk, ChunkKind, TtySize};
 use tracing::{info, instrument};
 
@@ -186,7 +181,7 @@ impl Debouncer {
 
     #[instrument(skip_all)]
     fn should_fire(&self) -> anyhow::Result<bool> {
-        let mut last_fired = self.last_fired.lock().unwrap();
+        let mut last_fired = self.last_fired.lock();
         if last_fired.elapsed()? >= self.dur {
             let old_ts: chrono::DateTime<chrono::Utc> = (*last_fired).into();
             *last_fired = time::SystemTime::now();

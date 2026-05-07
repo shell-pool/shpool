@@ -18,12 +18,12 @@ use std::{
     hash::{Hash, Hasher},
     io,
     path::PathBuf,
-    sync::{Mutex, MutexGuard},
 };
 
 use anyhow::{anyhow, Context};
 use clap::{Parser, Subcommand};
 pub use hooks::Hooks;
+use parking_lot::{Mutex, MutexGuard};
 use tracing::error;
 use tracing_subscriber::{fmt::format::FmtSpan, prelude::*};
 
@@ -266,7 +266,7 @@ impl<'writer> tracing_subscriber::fmt::MakeWriter<'writer> for LogWriterBuilder 
 
     fn make_writer(&'writer self) -> Self::Writer {
         if let Some(log_file) = &self.log_file {
-            Box::new(MutexGuardWriter(log_file.lock().expect("poisoned")))
+            Box::new(MutexGuardWriter(log_file.lock()))
         } else if self.is_daemon {
             Box::new(io::stderr())
         } else {

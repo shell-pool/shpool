@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{
-    sync::{Condvar, Mutex},
-    time::Duration,
-};
+use std::time::Duration;
+
+use parking_lot::{Condvar, Mutex};
 
 #[derive(Debug)]
 pub struct ExitNotifier {
@@ -30,7 +29,7 @@ impl ExitNotifier {
 
     /// Notify all waiters that the process has exited.
     pub fn notify_exit(&self, status: i32) {
-        let mut slot = self.slot.lock().unwrap();
+        let mut slot = self.slot.lock();
         *slot = Some(status);
         self.cond.notify_all();
     }
@@ -38,7 +37,7 @@ impl ExitNotifier {
     /// Wait for the process to exit, with an optional timeout
     /// to allow the caller to wake up periodically.
     pub fn wait(&self, timeout: Option<Duration>) -> Option<i32> {
-        let slot = self.slot.lock().unwrap();
+        let mut slot = self.slot.lock();
 
         // If a thread waits on the exit status when the child has already
         // exited, we just want to immediately return.
@@ -48,19 +47,16 @@ impl ExitNotifier {
 
         match timeout {
             Some(t) => {
-                // returns a lock result, so we want to unwrap
-                // to propagate the lock poisoning
-                let (exit_status, wait_res) = self
-                    .cond
-                    .wait_timeout_while(slot, t, |exit_status| exit_status.is_none())
-                    .unwrap();
-                if wait_res.timed_out() {
+                if self.cond.wait_for(&mut slot, t).timed_out() {
                     None
                 } else {
-                    *exit_status
+                    *slot
                 }
             }
-            None => *self.cond.wait_while(slot, |exit_status| exit_status.is_none()).unwrap(),
+            None => {
+                self.cond.wait(&mut slot);
+                *slot
+            }
         }
     }
 }

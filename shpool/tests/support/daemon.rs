@@ -8,11 +8,12 @@ use std::{
     path::{Path, PathBuf},
     process,
     process::{Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::Arc,
     thread, time,
 };
 
 use anyhow::{anyhow, Context};
+use parking_lot::Mutex;
 
 use super::{attach, events::Events, shpool_bin, testdata_file, tmpdir, wait_until};
 
@@ -63,35 +64,35 @@ pub struct HooksRecorder {
 impl libshpool::Hooks for HooksRecorder {
     fn on_new_session(&self, session_name: &str) -> anyhow::Result<()> {
         eprintln!("on_new_session: {session_name}");
-        let mut recs = self.records.lock().unwrap();
+        let mut recs = self.records.lock();
         recs.new_sessions.push(String::from(session_name));
         Ok(())
     }
 
     fn on_reattach(&self, session_name: &str) -> anyhow::Result<()> {
         eprintln!("on_reattach: {session_name}");
-        let mut recs = self.records.lock().unwrap();
+        let mut recs = self.records.lock();
         recs.reattaches.push(String::from(session_name));
         Ok(())
     }
 
     fn on_busy(&self, session_name: &str) -> anyhow::Result<()> {
         eprintln!("on_busy: {session_name}");
-        let mut recs = self.records.lock().unwrap();
+        let mut recs = self.records.lock();
         recs.busys.push(String::from(session_name));
         Ok(())
     }
 
     fn on_client_disconnect(&self, session_name: &str) -> anyhow::Result<()> {
         eprintln!("on_client_disconnect: {session_name}");
-        let mut recs = self.records.lock().unwrap();
+        let mut recs = self.records.lock();
         recs.client_disconnects.push(String::from(session_name));
         Ok(())
     }
 
     fn on_shell_disconnect(&self, session_name: &str) -> anyhow::Result<()> {
         eprintln!("on_shell_disconnect: {session_name}");
-        let mut recs = self.records.lock().unwrap();
+        let mut recs = self.records.lock();
         recs.shell_disconnects.push(String::from(session_name));
         Ok(())
     }

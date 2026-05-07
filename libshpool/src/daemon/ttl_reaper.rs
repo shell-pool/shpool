@@ -23,10 +23,11 @@
 use std::{
     cmp,
     collections::{BinaryHeap, HashMap},
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::Instant,
 };
 
+use parking_lot::Mutex;
 use tracing::{info, span, warn, Level};
 
 use super::shell;
@@ -103,7 +104,7 @@ pub fn run(
                     }
 
                     let _s = span!(Level::INFO, "lock(shells)").entered();
-                    let mut shells = shells.lock().unwrap();
+                    let mut shells = shells.lock();
                     if let Some(sess) = shells.get(&reapable.session_name) {
                         if let Err(e) = sess.kill() {
                             warn!("error trying to kill '{}': {:?}",

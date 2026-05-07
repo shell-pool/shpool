@@ -20,7 +20,7 @@ use std::{
     os::unix::net::UnixStream,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc,
     },
     thread, time,
     time::Duration,
@@ -28,6 +28,7 @@ use std::{
 
 use anyhow::{anyhow, Context};
 use nix::{poll, poll::PollFlags, sys::signal, unistd::Pid};
+use parking_lot::Mutex;
 use shpool_protocol::{Chunk, ChunkKind, TtySize};
 use tracing::{debug, error, info, instrument, span, trace, warn, Level};
 
@@ -593,7 +594,7 @@ impl SessionInner {
 
         {
             let _s = span!(Level::INFO, "initial_attach_lock(shell_to_client_ctl)").entered();
-            let shell_to_client_ctl = self.shell_to_client_ctl.lock().unwrap();
+            let shell_to_client_ctl = self.shell_to_client_ctl.lock();
             shell_to_client_ctl
                 .client_connection
                 .send_timeout(
@@ -659,7 +660,7 @@ impl SessionInner {
             let c_done = child_done.load(Ordering::Acquire);
             {
                 let _s = span!(Level::INFO, "disconnect_lock(shell_to_client_ctl)").entered();
-                let shell_to_client_ctl = self.shell_to_client_ctl.lock().unwrap();
+                let shell_to_client_ctl = self.shell_to_client_ctl.lock();
                 let send_res = shell_to_client_ctl.client_connection.send_timeout(if c_done {
                     let exit_status = child_exit_notifier
                         .wait(Some(Duration::from_secs(0)))
@@ -891,7 +892,7 @@ impl SessionInner {
                         return Ok(());
                     }
                     {
-                        let shell_to_client_ctl = self.shell_to_client_ctl.lock().unwrap();
+                        let shell_to_client_ctl = self.shell_to_client_ctl.lock();
                         match shell_to_client_ctl
                             .heartbeat
                             .send_timeout((), SHELL_TO_CLIENT_CTL_TIMEOUT)
@@ -984,7 +985,7 @@ impl SessionInner {
 
     #[instrument(skip_all)]
     fn action_detach(&self) -> anyhow::Result<()> {
-        let shell_to_client_ctl = self.shell_to_client_ctl.lock().unwrap();
+        let shell_to_client_ctl = self.shell_to_client_ctl.lock();
         shell_to_client_ctl
             .client_connection
             .send_timeout(ClientConnectionMsg::Disconnect, SHELL_TO_CLIENT_CTL_TIMEOUT)

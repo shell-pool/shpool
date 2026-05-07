@@ -23,16 +23,16 @@
 use std::{
     io::Write,
     os::unix::net::{UnixListener, UnixStream},
-    sync::Mutex,
     time,
 };
 
 use anyhow::{anyhow, Context};
+use parking_lot::Mutex;
 use tracing::{error, info};
 
 #[cfg(feature = "test_hooks")]
 pub fn emit(event: &str) {
-    let sock_path = TEST_HOOK_SERVER.sock_path.lock().unwrap();
+    let sock_path = TEST_HOOK_SERVER.sock_path.lock();
     if sock_path.is_some() {
         TEST_HOOK_SERVER.emit_event(event);
     }
@@ -83,7 +83,7 @@ impl TestHookServer {
     }
 
     pub fn set_socket_path(&self, path: String) {
-        let mut sock_path = self.sock_path.lock().unwrap();
+        let mut sock_path = self.sock_path.lock();
         *sock_path = Some(path);
     }
 
@@ -91,7 +91,7 @@ impl TestHookServer {
         let mut sleep_dur = time::Duration::from_millis(5);
         for _ in 0..12 {
             {
-                let clients = self.clients.lock().unwrap();
+                let clients = self.clients.lock();
                 if !clients.is_empty() {
                     return Ok(());
                 }
@@ -112,7 +112,7 @@ impl TestHookServer {
     pub fn start(&self) {
         let sock_path: String;
         {
-            let sock_path_m = self.sock_path.lock().unwrap();
+            let sock_path_m = self.sock_path.lock();
             match &*sock_path_m {
                 Some(s) => {
                     sock_path = String::from(s);
@@ -141,7 +141,7 @@ impl TestHookServer {
                     continue;
                 }
             };
-            let mut clients = self.clients.lock().unwrap();
+            let mut clients = self.clients.lock();
             clients.push(stream);
         }
     }
@@ -149,7 +149,7 @@ impl TestHookServer {
     fn emit_event(&self, event: &str) {
         info!("emitting event '{}'", event);
         let event_line = format!("{event}\n");
-        let clients = self.clients.lock().unwrap();
+        let clients = self.clients.lock();
         for mut client in clients.iter() {
             if let Err(e) = client.write_all(event_line.as_bytes()) {
                 error!("error emitting '{}' event: {:?}", event, e);
