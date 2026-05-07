@@ -1,4 +1,22 @@
 
+shpool (0.10.0) unstable; urgency=low
+
+  Added
+
+  * [**breaking**] list: align and drop STARTED_AT
+  * [**breaking**] add session name template support
+
+  Fixed
+
+  * [**breaking**] prevent bad chars in session names
+  * race race in attaching to existing sessions
+
+  Other
+
+  * std::sync::Mutex -> parking_lot::Mutex
+
+ -- Shpool Authors <shpool-eng@google.com>  Thu, 07 May 2026 21:29:45 +0000
+
 shpool (0.9.8) unstable; urgency=low
 
   Fixed

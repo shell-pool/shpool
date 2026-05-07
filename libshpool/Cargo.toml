@@ -1,6 +1,6 @@
 [package]
 name = "libshpool"
-version = "0.9.8"
+version = "0.10.0"
 edition = "2024"
 repository = "https://github.com/shell-pool/shpool"
 authors = ["Ethan Pailes <pailes@google.com>"]
@@ -45,7 +45,7 @@ notify = { version = "7", features = ["crossbeam-channel"] }  # watch config fil
 libproc = "0.14.8" # sniffing shells by examining the subprocess
 daemonize = "0.5" # autodaemonization
 parking_lot = { version = "0.12", features = ["arc_lock"] } # faster more featureful sync primitives
-shpool-protocol = { version = "0.3.5", path = "../shpool-protocol" } # client-server protocol
+shpool-protocol = { version = "0.4.0", path = "../shpool-protocol" } # client-server protocol
 
 # rusty wrapper for unix apis
 [dependencies.nix]
