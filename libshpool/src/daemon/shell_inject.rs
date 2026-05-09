@@ -47,15 +47,17 @@ enum KnownShell {
     Fish,
 }
 
-/// Inject the given prefix into the given shell subprocess, using
-/// the shell path in `shell` to decide the right way to go about
+/// Inject the given prefix and startup cmdn into the given shell subprocess,
+/// using the shell path in `shell` to decide the right way to go about
 /// injecting the prefix.
 ///
-/// If the prefix is blank, this is a noop.
+/// If either the prefix or startup cmd are blank, we do nothing for that
+/// option.
 #[instrument(skip_all)]
-pub fn maybe_inject_prefix(
+pub fn maybe_setup(
     pty_master: &mut shpool_pty::fork::Fork,
     prompt_prefix: &str,
+    start_cmd: &str,
     session_name: &str,
 ) -> anyhow::Result<()> {
     let shell_pid = pty_master.child_pid().ok_or(anyhow!("no child pid"))?;
@@ -117,6 +119,12 @@ pub fn maybe_inject_prefix(
         }
     };
 
+    if !start_cmd.is_empty() {
+        script.push('\n');
+        script.push_str(start_cmd);
+        script.push('\n');
+    }
+
     // With this magic env var set, `shpool daemon` will just
     // print the prompt sentinel and immediately exit. We do
     // this rather than `echo $PROMPT_SENTINEL` because different
@@ -127,7 +135,7 @@ pub fn maybe_inject_prefix(
     let sentinel_cmd = format!("\n {}=prompt {} daemon\n", SENTINEL_FLAG_VAR, exe_path);
     script.push_str(sentinel_cmd.as_str());
 
-    debug!("injecting prefix script '{}'", script);
+    debug!("injecting shell startup script '{}'", script);
     pty_master.write_all(script.as_bytes()).context("running prefix script")?;
 
     Ok(())

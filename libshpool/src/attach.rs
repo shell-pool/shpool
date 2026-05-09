@@ -41,6 +41,7 @@ const MAX_FORCE_RETRIES: usize = 20;
 
 #[allow(clippy::too_many_arguments)]
 pub fn run(
+    socket: PathBuf,
     config_manager: config::Manager,
     name: String,
     force: bool,
@@ -48,15 +49,32 @@ pub fn run(
     ttl: Option<String>,
     cmd: Option<String>,
     dir: Option<String>,
-    socket: PathBuf,
+    start_cmd: Option<String>,
 ) -> anyhow::Result<()> {
     info!("\n\n======================== STARTING ATTACH ============================\n\n");
     test_hooks::emit("attach-startup");
 
-    let session_name_tmpl = template::Template::new(&name).context("parsing session name tmpl")?;
+    let tmpls = Templates {
+        session_name: template::Template::new(&name).context("parsing session name tmpl")?,
+        dir: if let Some(d) = dir {
+            Some(template::Template::new(&d).context("parsing dir tmpl")?)
+        } else {
+            None
+        },
+        cmd: if let Some(c) = cmd {
+            Some(template::Template::new(&c).context("parsing cmd tmpl")?)
+        } else {
+            None
+        },
+        start_cmd: if let Some(c) = start_cmd {
+            Some(template::Template::new(&c).context("parsing start cmd tmpl")?)
+        } else {
+            None
+        },
+    };
 
     let ttl = match &ttl {
-        Some(src) => match duration::parse(src.as_str()) {
+        Some(src) => match duration::parse(src) {
             Ok(d) => Some(d),
             Err(e) => {
                 bail!("could not parse ttl: {:?}", e);
@@ -65,20 +83,17 @@ pub fn run(
         None => None,
     };
 
-    let attach =
-        Attach { config_manager, session_name_tmpl, force, background, ttl, cmd, dir, socket };
+    let attach = Attach { config_manager, force, background, ttl, tmpls, socket };
 
     attach.run()
 }
 
 struct Attach {
     config_manager: config::Manager,
-    session_name_tmpl: template::Template,
     force: bool,
     background: bool,
     ttl: Option<time::Duration>,
-    cmd: Option<String>,
-    dir: Option<String>,
+    tmpls: Templates,
     socket: PathBuf,
 }
 
@@ -93,49 +108,49 @@ impl Attach {
         let mut maybe_switch: MaybeSwitch = client.read_reply().context("reading reply")?;
 
         let var_map = maybe_switch.vars.iter().cloned().collect();
-        let mut resolved_name = self.session_name_tmpl.apply(&var_map);
+        let mut resolved = self.tmpls.apply(&var_map);
 
         let sig_handler_session_name_slot = if !self.background {
-            Some(SignalHandler::new(resolved_name.clone(), self.socket.clone()).spawn()?)
+            Some(SignalHandler::new(resolved.session_name.clone(), self.socket.clone()).spawn()?)
         } else {
             None
         };
 
         info!("looping on attach_with_name");
         loop {
-            info!("attaching to '{}'", resolved_name);
-            match self.attach_with_name(resolved_name) {
+            info!("attaching to '{}'", resolved.session_name);
+            match self.attach_resolved(resolved) {
                 Ok(AttachResult::Done) => return Ok(()),
                 Ok(AttachResult::Switch(s)) => maybe_switch = s,
                 Err(e) => return Err(e),
             }
 
             let var_map = maybe_switch.vars.iter().cloned().collect();
-            resolved_name = self.session_name_tmpl.apply(&var_map);
+            resolved = self.tmpls.apply(&var_map);
 
             if let Some(ref slot) = sig_handler_session_name_slot {
                 let mut slot = slot.lock().unwrap();
-                *slot = resolved_name.clone();
+                *slot = resolved.session_name.clone();
             }
         }
     }
 
     /// Attach with the given resolved name. This will run until exit or until
     /// we need to reconnect due to
-    pub fn attach_with_name(&self, resolved_name: String) -> anyhow::Result<AttachResult> {
-        if resolved_name.is_empty() {
+    pub fn attach_resolved(&self, resolved: ResolvedTemplates) -> anyhow::Result<AttachResult> {
+        if resolved.session_name.is_empty() {
             eprintln!("blank session names are not allowed");
             return Ok(AttachResult::Done);
         }
-        if resolved_name.contains(char::is_whitespace) {
-            eprintln!("session name '{}' may not have whitespace", resolved_name);
+        if resolved.session_name.contains(char::is_whitespace) {
+            eprintln!("session name '{}' may not have whitespace", resolved.session_name);
             return Ok(AttachResult::Done);
         }
-        if resolved_name.chars().any(|c| '/' == c) {
+        if resolved.session_name.chars().any(|c| '/' == c) {
             eprintln!("session names may not contain slashes");
             return Ok(AttachResult::Done);
         }
-        if resolved_name == "." || resolved_name == ".." {
+        if resolved.session_name == "." || resolved.session_name == ".." {
             eprintln!("session names may not be special directory names");
             return Ok(AttachResult::Done);
         }
@@ -143,11 +158,14 @@ impl Attach {
         let mut detached = false;
         let mut tries = 0;
         let attach_client = loop {
-            match self.dial_attach(resolved_name.as_str()) {
+            match self.dial_attach(&resolved) {
                 Ok(client) => break client,
                 Err(err) => match err.downcast() {
                     Ok(BusyError) if !self.force => {
-                        eprintln!("session '{resolved_name}' already has a terminal attached");
+                        eprintln!(
+                            "session '{}' already has a terminal attached",
+                            resolved.session_name
+                        );
                         return Ok(AttachResult::Done);
                     }
                     Ok(BusyError) => {
@@ -155,13 +173,16 @@ impl Attach {
                             let mut client = self.dial_client(true)?;
                             client
                                 .write_connect_header(ConnectHeader::Detach(DetachRequest {
-                                    sessions: vec![resolved_name.clone()],
+                                    sessions: vec![resolved.session_name.clone()],
                                 }))
                                 .context("writing detach request header")?;
                             let detach_reply: DetachReply =
                                 client.read_reply().context("reading reply")?;
                             if !detach_reply.not_found_sessions.is_empty() {
-                                warn!("could not find session '{}' to detach it", resolved_name);
+                                warn!(
+                                    "could not find session '{}' to detach it",
+                                    resolved.session_name
+                                );
                             }
 
                             detached = true;
@@ -169,7 +190,8 @@ impl Attach {
                         thread::sleep(time::Duration::from_millis(100));
 
                         if tries > MAX_FORCE_RETRIES {
-                            eprintln!("session '{resolved_name}' already has a terminal which remains attached even after attempting to detach it");
+                            eprintln!("session '{}' already has a terminal which remains attached even after attempting to detach it",
+                                resolved.session_name);
                             return Err(anyhow!("could not detach session, forced attach failed"));
                         }
                         tries += 1;
@@ -188,27 +210,27 @@ impl Attach {
             let mut client = self.dial_client(true)?;
             client
                 .write_connect_header(ConnectHeader::Detach(DetachRequest {
-                    sessions: vec![resolved_name.clone()],
+                    sessions: vec![resolved.session_name.clone()],
                 }))
                 .context("writing detach request header")?;
             let detach_reply: DetachReply = client.read_reply().context("reading reply")?;
             if !detach_reply.not_found_sessions.is_empty() {
-                warn!("could not find session '{}' to detach it", resolved_name);
+                warn!("could not find session '{}' to detach it", resolved.session_name);
             }
             if !detach_reply.not_attached_sessions.is_empty() {
                 debug!(
                     "session '{}' was already detached while processing background detach request (expected)",
-                    resolved_name
+                    resolved.session_name
                 );
             }
             return Ok(AttachResult::Done);
         }
 
         info!("entering bidi streaming mode");
-        let session_name_tmpl = self.session_name_tmpl.clone();
+        let session_name_tmpl = self.tmpls.session_name.clone();
         match attach_client.pipe_bytes(move |maybe_switch: &MaybeSwitch| {
             let var_map: HashMap<String, String> = maybe_switch.vars.iter().cloned().collect();
-            session_name_tmpl.apply(&var_map) != resolved_name
+            session_name_tmpl.apply(&var_map) != resolved.session_name
         }) {
             Ok(PipeBytesResult::Exit(exit_status)) => std::process::exit(exit_status),
             Ok(PipeBytesResult::MaybeSwitch(s)) => Ok(AttachResult::Switch(s)),
@@ -218,7 +240,7 @@ impl Attach {
 
     /// Attach to a session and return the connected client without piping
     /// stdio.
-    fn dial_attach(&self, name: &str) -> anyhow::Result<protocol::Client> {
+    fn dial_attach(&self, resolved: &ResolvedTemplates) -> anyhow::Result<protocol::Client> {
         let mut client = self.dial_client(true)?;
 
         let tty_size = match TtySize::from_fd(0) {
@@ -241,7 +263,7 @@ impl Attach {
         let cwd = String::from(env::current_dir().context("getting cwd")?.to_string_lossy());
         let default_dir =
             self.config_manager.get().default_dir.clone().unwrap_or(String::from("$HOME"));
-        let start_dir = match (default_dir.as_str(), self.dir.as_deref()) {
+        let start_dir = match (default_dir.as_str(), resolved.dir.as_deref()) {
             (".", None) => Some(cwd),
             ("$HOME", None) => None,
             (d, None) => Some(String::from(d)),
@@ -251,7 +273,7 @@ impl Attach {
 
         client
             .write_connect_header(ConnectHeader::Attach(AttachHeader {
-                name: String::from(name),
+                name: resolved.session_name.clone(),
                 local_tty_size: tty_size,
                 local_env: local_env_keys
                     .into_iter()
@@ -261,8 +283,9 @@ impl Attach {
                     })
                     .collect::<Vec<_>>(),
                 ttl_secs: self.ttl.map(|d| d.as_secs()),
-                cmd: self.cmd.clone(),
+                cmd: resolved.cmd.clone(),
                 dir: start_dir,
+                start_cmd: resolved.start_cmd.clone(),
             }))
             .context("writing attach header")?;
 
@@ -283,16 +306,20 @@ impl Attach {
                     for warning in warnings.into_iter() {
                         eprintln!("shpool: warn: {warning}");
                     }
-                    info!("attached to an existing session: '{}'", name);
+                    info!("attached to an existing session: '{}'", resolved.session_name);
                 }
                 Created { warnings } => {
                     for warning in warnings.into_iter() {
                         eprintln!("shpool: warn: {warning}");
                     }
-                    info!("created a new session: '{}'", name);
+                    info!("created a new session: '{}'", resolved.session_name);
                 }
                 UnexpectedError(err) => {
-                    return Err(anyhow!("BUG: unexpected error attaching to '{}': {}", name, err));
+                    return Err(anyhow!(
+                        "BUG: unexpected error attaching to '{}': {}",
+                        resolved.session_name,
+                        err
+                    ));
                 }
             }
         }
@@ -343,6 +370,31 @@ impl Attach {
                 }
                 Err(io_err).context("connecting to daemon")
             }
+        }
+    }
+}
+
+struct Templates {
+    session_name: template::Template,
+    cmd: Option<template::Template>,
+    dir: Option<template::Template>,
+    start_cmd: Option<template::Template>,
+}
+
+struct ResolvedTemplates {
+    session_name: String,
+    cmd: Option<String>,
+    dir: Option<String>,
+    start_cmd: Option<String>,
+}
+
+impl Templates {
+    fn apply(&self, var_map: &HashMap<String, String>) -> ResolvedTemplates {
+        ResolvedTemplates {
+            session_name: self.session_name.apply(var_map),
+            cmd: self.cmd.as_ref().map(|t| t.apply(var_map)),
+            dir: self.dir.as_ref().map(|t| t.apply(var_map)),
+            start_cmd: self.start_cmd.as_ref().map(|t| t.apply(var_map)),
         }
     }
 }
