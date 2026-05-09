@@ -34,7 +34,9 @@ use tracing::{debug, error, info, instrument, span, trace, warn, Level};
 
 use crate::{
     common, consts,
-    daemon::{config, exit_notify::ExitNotifier, keybindings, pager::PagerCtl, prompt, show_motd},
+    daemon::{
+        config, exit_notify::ExitNotifier, keybindings, pager::PagerCtl, shell_inject, show_motd,
+    },
     protocol,
     protocol::ChunkExt as _,
     session_restore, test_hooks,
@@ -225,7 +227,8 @@ impl SessionInner {
         args: ShellToClientArgs,
     ) -> anyhow::Result<thread::JoinHandle<anyhow::Result<()>>> {
         let term_db = Arc::clone(&self.term_db);
-        let mut prompt_sentinel_scanner = prompt::SentinelScanner::new(consts::PROMPT_SENTINEL);
+        let mut prompt_sentinel_scanner =
+            shell_inject::SentinelScanner::new(consts::PROMPT_SENTINEL);
 
         // We only scan for the prompt sentinel if the user has not set up a
         // custom command or blanked out the prompt_prefix config option.
