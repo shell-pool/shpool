@@ -111,6 +111,17 @@ impl Server {
             }
         });
 
+        let vars = Mutex::new(
+            config
+                .get()
+                .var_default
+                .clone()
+                .unwrap_or(vec![])
+                .into_iter()
+                .map(|v| (v.var, v.value))
+                .collect(),
+        );
+
         let daily_messenger = Arc::new(show_motd::DailyMessenger::new(config.clone())?);
         Ok(Arc::new(Server {
             config,
@@ -121,7 +132,7 @@ impl Server {
             events_bus,
             daily_messenger,
             log_level_handle,
-            vars: HashMap::new().into(),
+            vars,
         }))
     }
 

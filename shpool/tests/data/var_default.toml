@@ -1,0 +1,13 @@
+norc = true
+noecho = true
+shell = "/bin/bash"
+session_restore_mode = "simple"
+prompt_prefix = ""
+
+[env]
+PS1 = "prompt> "
+TERM = ""
+
+[[var_default]]
+var = "default_foo"
+value = "default_bar"
