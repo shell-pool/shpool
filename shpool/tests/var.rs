@@ -135,3 +135,21 @@ fn no_daemon() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[test]
+#[timeout(30000)]
+fn default_vars() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new(
+        "var_default.toml",
+        DaemonArgs { listen_events: false, ..DaemonArgs::default() },
+    )
+    .context("starting daemon proc")?;
+
+    let out = daemon_proc.var_get("default_foo")?;
+    assert!(out.status.success(), "var get proc did not exit successfully");
+
+    let stdout = String::from_utf8_lossy(&out.stdout[..]);
+    assert_eq!(stdout.trim(), "default_bar");
+
+    Ok(())
+}
