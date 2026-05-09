@@ -1870,3 +1870,105 @@ fn templated_session_name_no_switch_on_unrelated_var() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[test]
+#[timeout(30000)]
+fn start_cmd() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+        .context("starting daemon proc")?;
+    let mut attach_proc = daemon_proc
+        .attach(
+            "sh1",
+            AttachArgs {
+                start_cmd: Some(String::from("export STARTUP_CMD_RAN=true")),
+                ..Default::default()
+            },
+        )
+        .context("starting attach proc")?;
+
+    let mut line_matcher = attach_proc.line_matcher()?;
+
+    attach_proc.run_cmd("echo $STARTUP_CMD_RAN")?;
+    line_matcher.scan_until_re("true$")?;
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
+fn start_cmd_template() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+        .context("starting daemon proc")?;
+
+    daemon_proc.var_set("myvar", "myval")?;
+
+    let mut attach_proc = daemon_proc
+        .attach(
+            "sh1",
+            AttachArgs {
+                start_cmd: Some(String::from("export STARTUP_CMD_VAR={myvar}")),
+                ..Default::default()
+            },
+        )
+        .context("starting attach proc")?;
+
+    let mut line_matcher = attach_proc.line_matcher()?;
+
+    attach_proc.run_cmd("echo $STARTUP_CMD_VAR")?;
+    line_matcher.scan_until_re("myval$")?;
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
+fn custom_cmd_template() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+        .context("starting daemon proc")?;
+
+    daemon_proc.var_set("myarg", "templated_arg")?;
+
+    let script = support::testdata_file("echo_stop.sh");
+    let mut attach_proc = daemon_proc
+        .attach(
+            "sh1",
+            AttachArgs {
+                cmd: Some(format!("{} {{myarg}}", script.into_os_string().into_string().unwrap())),
+                ..Default::default()
+            },
+        )
+        .context("starting attach proc")?;
+
+    let mut line_matcher = attach_proc.line_matcher()?;
+
+    // the script first echos the arg we gave it
+    line_matcher.scan_until_re("templated_arg$")?;
+
+    attach_proc.run_cmd("stop")?;
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
+fn dir_template() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+        .context("starting daemon proc")?;
+
+    let target_dir = daemon_proc.tmp_dir.path().join("templated_dir");
+    fs::create_dir(&target_dir)?;
+
+    daemon_proc.var_set("mydir", target_dir.to_str().unwrap())?;
+
+    let mut attach_proc = daemon_proc
+        .attach("sh1", AttachArgs { dir: Some(String::from("{mydir}")), ..Default::default() })
+        .context("starting attach proc")?;
+
+    let mut line_matcher = attach_proc.line_matcher()?;
+
+    attach_proc.run_cmd("pwd")?;
+    let expected_path = target_dir.to_str().unwrap();
+    line_matcher.scan_until_re(&format!("{}$", regex::escape(expected_path)))?;
+
+    Ok(())
+}

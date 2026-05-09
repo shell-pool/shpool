@@ -100,6 +100,38 @@ You can customize some of `shpool`s behavior by editing your
 `~/.config/shpool/config.toml` file. For an in depth discussion
 of configuration options see [CONFIG.md](./CONFIG.md).
 
+### Templates
+
+`shpool` supports a template syntax for generating values based on a
+central list of variables. This operates much like the shell environment.
+In shpool templates, variable substitution used `{var}` syntax.
+
+Currently templates are supported in the following places:
+
+* session names
+* the `attach --dir` flag
+* the `attach --cmd` flag
+* the `attach --start-cmd` flag
+
+The main purpose of templates is to support switching multiple sessions at
+once. Whenever a variable is changed with `shpool var set <var-name>
+<new-value>`, the shpool daemon will broadcast the complete variable set
+to all `shpool attach` processes so they can recompute all their templates.
+If the session name has changed as a result of this re-evaluation process,
+the `shpool attach` process will automatically hang up and reconnect to the
+new session. This allows you to have multiple terminals open that all switch
+the shpool session they are attached to at once. For example, if you start
+with the variable setting `{workspace=shpool}` and then run `shpool attach
+'{workspace}-edit'` in one terminal and `shpool attach '{workspace}-main'`,
+you would initially connect to the `shpool-edit` and `shpool-main` sessions.
+You use these sessions to work on a patch for shpool for a while, but then
+halfway through you have to quickly fix a bug in your company's codebase
+so you run `shpool var set workspace yourco`. `shpool` will automatically
+disconnect from `shpool-edit` and `shpool-main` and connect to `yourco-edit`
+and `yourco-main`. After you finish your quick fix, you run `shpool var set
+workspace shpool` and you're right back where you were when you were working
+on the shpool patch.
+
 ### Keybindings
 
 `shpool` supports keybindings (well really for the moment it
@@ -129,6 +161,10 @@ to your `~/.bashrc`.
 
 ### Subcommands
 
+#### shpool version
+
+Show the current shpool version.
+
 #### shpool daemon
 
 The `daemon` subcommand causes `shpool` to run in daemon mode. When running in
@@ -147,7 +183,8 @@ session will last.
 
 #### shpool list
 
-Lists all the current shell sessions.
+Lists all the current shell sessions. Supports a --json flag for a more machine
+friendly output format.
 
 #### shpool detach
 
@@ -158,6 +195,18 @@ session with no session name arguments.
 #### shpool kill
 
 Kills a named shell session.
+
+#### shpool var
+
+Manipulate shpool variables. Variables can be used in shpool session names using
+`{var}` syntax. See the templates section above for more on how to use shpool
+variables.
+
+#### shpool set-log-level
+
+Dynamically change the logging level of the shpool daemon. This is a diagnostic
+tool to aid in debugging when the daemon gets in a bad state without having to
+run at a verbose logging level all the time.
 
 ### (Optional) Automatically Connect to shpool
 
