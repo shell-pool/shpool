@@ -43,7 +43,6 @@ tempfile = "3" # RAII tmp files
 strip-ansi-escapes = "0.2.0" # cleaning up strings for pager display
 notify = { version = "7", features = ["crossbeam-channel"] }  # watch config file for updates
 libproc = "0.14.8" # sniffing shells by examining the subprocess
-daemonize = "0.5" # autodaemonization
 parking_lot = { version = "0.12", features = ["arc_lock"] } # faster more featureful sync primitives
 shpool-protocol = { version = "0.4.1", path = "../shpool-protocol" } # client-server protocol
 

@@ -23,11 +23,11 @@ use signal_hook::{consts::TERM_SIGNALS, flag, iterator::Signals};
 use tracing::{error, info};
 
 pub struct Handler {
-    socks: Vec<PathBuf>,
+    socks_to_clean: Vec<PathBuf>,
 }
 impl Handler {
-    pub fn new(socks: Vec<PathBuf>) -> Self {
-        Handler { socks }
+    pub fn new(socks_to_clean: Vec<PathBuf>) -> Self {
+        Handler { socks_to_clean }
     }
 
     pub fn spawn(self) -> anyhow::Result<()> {
@@ -58,7 +58,8 @@ impl Handler {
                 assert!(TERM_SIGNALS.contains(&signal));
 
                 info!("term sig handler: cleaning up sockets");
-                for sock in &self.socks {
+                for sock in &self.socks_to_clean {
+                    info!("term sig handler: cleaning up socket: {:?}", sock);
                     match std::fs::remove_file(sock) {
                         Ok(()) => {}
                         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}

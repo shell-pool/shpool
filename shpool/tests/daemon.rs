@@ -5,7 +5,7 @@ use std::{
         net::{UnixListener, UnixStream},
         process::CommandExt as _,
     },
-    path,
+    path::{self, PathBuf},
     process::{Command, Stdio},
     time,
 };
@@ -341,6 +341,131 @@ fn allows_dynamic_log_adjustments() -> anyhow::Result<()> {
 
         std::thread::sleep(time::Duration::from_millis(300));
     }
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
+fn autodaemonize() -> anyhow::Result<()> {
+    let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test")?;
+    eprintln!("testing autodaemonization in {:?}", tmp_dir.path());
+
+    let mut socket_path = PathBuf::from(tmp_dir.path());
+    socket_path.push("control.sock");
+
+    let mut log_file = PathBuf::from(tmp_dir.path());
+    log_file.push("attach.log");
+
+    // we have to manually spawn the child because the whole point is that there
+    // isn't a daemon yet so we can't use the attach method.
+    let mut child = Command::new(support::shpool_bin()?)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .arg("--daemonize")
+        .arg("--socket")
+        .arg(socket_path)
+        .arg("--log-file")
+        .arg(log_file)
+        .arg("--config-file")
+        .arg(support::testdata_file("norc.toml"))
+        .arg("attach")
+        .arg("sh1")
+        .spawn()
+        .context("spawning attach process")?;
+
+    // After half a second, the daemon should have spanwed
+    std::thread::sleep(time::Duration::from_millis(500));
+    child.kill().context("killing child")?;
+
+    let mut stdout = child.stdout.take().context("missing stdout")?;
+    let mut stdout_str = String::from("");
+    stdout.read_to_string(&mut stdout_str).context("slurping stdout")?;
+    let stdout_re = Regex::new(".*prompt>.*")?;
+    assert!(stdout_re.is_match(&stdout_str));
+
+    // best effort attempt to clean up after ourselves
+    Command::new("pkill")
+        .arg("-f")
+        .arg("shpool-test-autodaemonize")
+        .output()
+        .context("running cleanup process")?;
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
+fn daemonize_cwd_cleanup() -> anyhow::Result<()> {
+    let launch_dir = tmpdir::Dir::new("/tmp/shpool-test-launch")?;
+    let daemon_dir = tmpdir::Dir::new("/tmp/shpool-test-daemon")?;
+
+    let socket_path = daemon_dir.path().join("shpool.socket");
+    let log_file = daemon_dir.path().join("shpool.log");
+
+    // Launch from launch_dir
+    let out = Command::new(support::shpool_bin()?)
+        .current_dir(launch_dir.path())
+        .arg("--daemonize")
+        .arg("--socket")
+        .arg(&socket_path)
+        .arg("--log-file")
+        .arg(&log_file)
+        .arg("--config-file")
+        .arg(support::testdata_file("norc.toml"))
+        .arg("list")
+        .output()
+        .context("running shpool list --daemonize")?;
+
+    assert!(out.status.success(), "shpool list should succeed");
+
+    // Give it a moment just in case
+    std::thread::sleep(time::Duration::from_millis(100));
+
+    // Explicitly try to remove the launch directory.
+    // If the daemon didn't cd /, this might fail because the directory is busy.
+    let rm_res = std::fs::remove_dir_all(launch_dir.path());
+
+    // Best-effort cleanup of the background daemon spawned by --daemonize.
+    Command::new("pkill").arg("-f").arg(socket_path.to_string_lossy().as_ref()).output().ok();
+
+    rm_res.context("removing launch directory")?;
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
+fn daemonize_pid_file_exists() -> anyhow::Result<()> {
+    let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test-pid")?;
+    let socket_path = tmp_dir.path().join("shpool.socket");
+    let log_file = tmp_dir.path().join("shpool.log");
+    let pid_file = tmp_dir.path().join("daemonized-shpool.pid");
+
+    // Launch daemon via autodaemonize
+    let out = Command::new(support::shpool_bin()?)
+        .arg("--daemonize")
+        .arg("--socket")
+        .arg(&socket_path)
+        .arg("--log-file")
+        .arg(&log_file)
+        .arg("--config-file")
+        .arg(support::testdata_file("norc.toml"))
+        .arg("list")
+        .output()
+        .context("running shpool list --daemonize")?;
+
+    assert!(out.status.success(), "shpool list should succeed");
+
+    // Give it a moment to spawn
+    std::thread::sleep(time::Duration::from_millis(500));
+
+    let pid_exists = pid_file.exists();
+
+    // Cleanup
+    Command::new("pkill").arg("-f").arg(socket_path.to_string_lossy().as_ref()).output().ok();
+
+    assert!(pid_exists, "pid file should exist while daemon is running");
 
     Ok(())
 }
