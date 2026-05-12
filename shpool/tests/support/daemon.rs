@@ -239,7 +239,9 @@ impl Proc {
 
         // spawn the daemon in a thread
         thread::spawn(move || {
-            if let Err(err) = libshpool::run(args, Some(hooks_recorder)) {
+            // Safety: we do not have consts::AUTODAEMONIZE_VAR set in the
+            // environment, so libshpool::run will not fork.
+            if let Err(err) = unsafe { libshpool::run(args, Some(hooks_recorder)) } {
                 eprintln!("shpool proc exited with err: {err:?}");
             }
         });

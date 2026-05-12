@@ -17,7 +17,7 @@ use std::{env, os::unix::net::UnixListener, path::PathBuf};
 use anyhow::Context;
 use tracing::{info, instrument};
 
-use crate::{config, consts, hooks};
+use crate::{config, consts, daemonize, hooks};
 
 mod etc_environment;
 mod exit_notify;
@@ -43,7 +43,7 @@ pub fn run(
     >,
     socket: PathBuf,
 ) -> anyhow::Result<()> {
-    if let Ok(daemonize) = env::var(consts::AUTODAEMONIZE_VAR) {
+    let pid_guard = if let Ok(daemonize) = env::var(consts::AUTODAEMONIZE_VAR) {
         if daemonize == "true" {
             // Safety: this is executing before we have forked any threads,
             // so we are still in single-threaded mode, therefore it is safe
@@ -55,9 +55,15 @@ pub fn run(
             let pid_file = socket.with_file_name("daemonized-shpool.pid");
 
             info!("daemonizing with pid_file={:?}", pid_file);
-            daemonize::Daemonize::new().pid_file(pid_file).start().context("daemonizing")?;
+            // Safety: we are calling this before having forked any threads,
+            // which is sufficient to meet the safety requirements for fork().
+            Some(unsafe { daemonize::daemonize(pid_file) }.context("daemonizing")?)
+        } else {
+            None
         }
-    }
+    } else {
+        None
+    };
 
     info!("\n\n======================== STARTING DAEMON ============================\n\n");
 
@@ -82,7 +88,13 @@ pub fn run(
         }
     };
     // spawn the signal handler thread in the background
-    signals::Handler::new(cleanup_socket.clone()).spawn()?;
+    signals::Handler::new(
+        vec![cleanup_socket.clone(), pid_guard.as_ref().map(|g| g.path().clone())]
+            .into_iter()
+            .flatten()
+            .collect(),
+    )
+    .spawn()?;
 
     server::Server::serve(server, listener)?;
 
