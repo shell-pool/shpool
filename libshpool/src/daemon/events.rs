@@ -399,8 +399,8 @@ enum DriveOutcome {
 }
 
 impl SubscriberWriter {
-    fn new(stream: UnixStream) -> io::Result<Self> {
-        stream.set_nonblocking(true)?;
+    fn new(stream: UnixStream) -> anyhow::Result<Self> {
+        stream.set_nonblocking(true).context("setting events subscriber stream non-blocking")?;
         Ok(Self { stream, pending: VecDeque::new(), front_offset: 0, dropped: false })
     }
 
