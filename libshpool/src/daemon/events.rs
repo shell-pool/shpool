@@ -152,6 +152,16 @@ impl EventBus {
 /// and joins the thread, so the sink can never outlive this handle. Not
 /// `Clone`: there is exactly one owner of the sink's lifetime, which is
 /// what makes "close the bus" a single, deterministic action.
+///
+/// This is deliberately split from [`EventBus`] rather than joining the sink in
+/// `EventBus`'s own `Drop`. `EventBus` is `Arc`-shared across many publishers
+/// (the server and the ttl-reaper thread both hold clones), so a `Drop`-based
+/// join would fire whenever the *last* clone is released -- a blocking `join()`
+/// running from whatever thread happens to drop that clone (plausibly the
+/// reaper thread), at a refcount-determined moment in an order not pinned to
+/// the rest of daemon teardown. A single non-`Clone` owner instead makes
+/// shutdown happen at one known point, thread, and order, and lets the types
+/// state what is true: many publishers, one lifetime owner.
 pub struct EventBusHandle {
     shutdown_tx: OwnedFd,
     sink: Option<thread::JoinHandle<()>>,
