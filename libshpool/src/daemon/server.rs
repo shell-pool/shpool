@@ -493,7 +493,7 @@ impl Server {
                     if let Err(err) = self.hooks.on_busy(&header.name) {
                         warn!("busy hook: {:?}", err);
                     }
-                    return Err(ShellSelectionError::BusyShellSession)?;
+                    Err(ShellSelectionError::BusyShellSession)?;
                 }
             } else {
                 info!("no existing '{}' session, creating new one", &header.name);
