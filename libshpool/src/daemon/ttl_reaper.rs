@@ -30,6 +30,7 @@ use std::{
 use parking_lot::Mutex;
 use tracing::{info, span, warn, Level};
 
+use super::events;
 use super::shell;
 
 /// Run the reaper thread loop. Should be invoked in a dedicated
@@ -37,6 +38,7 @@ use super::shell;
 pub fn run(
     new_sess: crossbeam_channel::Receiver<(String, Instant)>,
     shells: Arc<Mutex<HashMap<String, Box<shell::Session>>>>,
+    events_bus: Arc<events::EventBus>,
 ) -> anyhow::Result<()> {
     let _s = span!(Level::INFO, "ttl_reaper").entered();
 
@@ -116,6 +118,7 @@ pub fn run(
                         continue;
                     }
                     shells.remove(&reapable.session_name);
+                    events_bus.publish(&events::Event::SessionRemoved);
                 }
             }
         }

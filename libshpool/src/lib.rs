@@ -36,6 +36,7 @@ mod daemon;
 mod daemonize;
 mod detach;
 mod duration;
+mod events;
 mod exe;
 mod hooks;
 mod kill;
@@ -231,6 +232,14 @@ you could just do `shpool var set workspace key-bugfix`.
         #[clap(subcommand)]
         command: VarCommands,
     },
+
+    #[clap(about = "Subscribe to the daemon's push-event stream
+
+Connects to the events socket and writes each event (one JSON object
+per line) to stdout, flushing after every line so the stream is
+pipeline-friendly (e.g. `shpool events | jq`). See EVENTS.md for
+details.")]
+    Events,
 }
 
 /// The subcommds of the var command.
@@ -433,6 +442,7 @@ pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> an
         Commands::List { json } => list::run(socket, json),
         Commands::SetLogLevel { level } => set_log_level::run(level, socket),
         Commands::Var { command } => var::run(socket, command),
+        Commands::Events => events::run(&crate::daemon::events::socket_path(&socket)),
     };
 
     if let Err(err) = res {
