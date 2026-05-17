@@ -37,7 +37,6 @@ use std::{
 use anyhow::Context;
 use nix::{
     errno::Errno,
-    fcntl::OFlag,
     poll::{self, PollFd, PollFlags, PollTimeout},
     unistd,
 };
@@ -485,15 +484,23 @@ fn serialize_line(event: &Event) -> Arc<str> {
 }
 
 fn make_self_pipe() -> io::Result<(OwnedFd, OwnedFd)> {
-    // pipe2(2) atomically creates an anonymous pipe with both flags set
-    // on each end:
-    // - O_NONBLOCK: the publisher's wake-byte write must never stall, and the sink
-    //   detects "drained" via EAGAIN on read instead of blocking.
-    // - O_CLOEXEC: forked children (shells) shouldn't inherit these fds and hold
-    //   the wake pipe open past the daemon exiting.
-    // map_err transcodes nix's Errno into std::io::Error to match the
-    // module's io::Result idiom.
-    unistd::pipe2(OFlag::O_NONBLOCK | OFlag::O_CLOEXEC).map_err(io::Error::from)
+    // A socketpair, not pipe2(2): pipe2 is Linux/BSD-only and absent on
+    // macOS. UnixStream::pair() is portable and std sets CLOEXEC on the
+    // fds for us so forked children (shells) can't leak them and hold the
+    // pipe open past the daemon exiting -- atomically via SOCK_CLOEXEC on
+    // Linux, and via an fcntl() fallback on macOS, which has no atomic
+    // CLOEXEC primitive for socketpair or pipe. That fallback's fork race
+    // is inherent to macOS and identical for any pipe-based design there;
+    // we don't make it worse, and keeping the fallback in std beats
+    // hand-rolling pipe()+fcntl ourselves. Both ends are then marked
+    // non-blocking so the publisher's wake-byte write never stalls and the
+    // sink detects "drained" via EAGAIN on read instead of blocking. Only
+    // one direction is used (publisher writes, sink reads); the extra
+    // socket buffer is immaterial for single-byte wake nudges.
+    let (rx, tx) = UnixStream::pair()?;
+    rx.set_nonblocking(true)?;
+    tx.set_nonblocking(true)?;
+    Ok((OwnedFd::from(rx), OwnedFd::from(tx)))
 }
 
 #[cfg(test)]
