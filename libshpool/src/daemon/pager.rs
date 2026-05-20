@@ -244,7 +244,7 @@ impl Pager {
                         }
                         Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {
                             trace!("client hangup writing heartbeat: {:?}", e);
-                            return Err(PagerError::ClientHangup)?;
+                            Err(PagerError::ClientHangup)?;
                         }
                         Err(e) => {
                             return Err(e).context("writing heartbeat")?;
@@ -268,7 +268,7 @@ impl Pager {
                         Ok(_) => {}
                         Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {
                             trace!("client hangup writing data chunk: {:?}", e);
-                            return Err(PagerError::ClientHangup)?;
+                            Err(PagerError::ClientHangup)?;
                         }
                         Err(e) => {
                             return Err(e).context("writing data chunk")?;
