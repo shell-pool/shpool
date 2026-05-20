@@ -48,8 +48,8 @@ use crate::{
     config::MotdDisplayMode,
     consts,
     daemon::{
-        etc_environment, events, exit_notify::ExitNotifier, hooks, pager, pager::PagerError,
-        prompt, shell, show_motd, ttl_reaper,
+        etc_environment, events, exit_notify::ExitNotifier, hooks, pager, pager::PagerError, shell,
+        shell_inject, show_motd, ttl_reaper,
     },
     protocol, test_hooks, tty, user,
 };
@@ -1069,8 +1069,10 @@ impl Server {
 
         let prompt_prefix_is_blank =
             self.config.get().prompt_prefix.as_ref().map(|p| p.is_empty()).unwrap_or(false);
-        let supports_sentinels =
-            header.cmd.is_none() && !prompt_prefix_is_blank && !does_not_support_sentinels(&shell);
+        let supports_sentinels = header.cmd.is_none()
+            && (header.start_cmd.as_ref().map(|c| !c.is_empty()).unwrap_or(false)
+                || !prompt_prefix_is_blank)
+            && !does_not_support_sentinels(&shell);
         info!("supports_sentianls={}", supports_sentinels);
 
         // Inject the prompt prefix, if any. For custom commands, avoid doing this
@@ -1084,7 +1086,12 @@ impl Server {
                 .prompt_prefix
                 .clone()
                 .unwrap_or(String::from(DEFAULT_PROMPT_PREFIX));
-            if let Err(err) = prompt::maybe_inject_prefix(&mut fork, &prompt_prefix, &header.name) {
+            if let Err(err) = shell_inject::maybe_setup(
+                &mut fork,
+                &prompt_prefix,
+                header.start_cmd.as_ref().map(|c| c.as_ref()).unwrap_or(""),
+                &header.name,
+            ) {
                 warn!("issue injecting prefix: {:?}", err);
             }
         }

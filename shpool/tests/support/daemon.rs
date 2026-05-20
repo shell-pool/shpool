@@ -55,6 +55,7 @@ pub struct AttachArgs {
     pub ttl: Option<time::Duration>,
     pub cmd: Option<String>,
     pub dir: Option<String>,
+    pub start_cmd: Option<String>,
     pub null_stdin: bool,
 }
 
@@ -371,6 +372,10 @@ impl Proc {
         if let Some(dir) = &args.dir {
             cmd.arg("--dir");
             cmd.arg(dir);
+        }
+        if let Some(start_cmd) = &args.start_cmd {
+            cmd.arg("--start-cmd");
+            cmd.arg(start_cmd);
         }
         let proc = cmd.arg(name).spawn().context(format!("spawning attach proc for {name}"))?;
 

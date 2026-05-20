@@ -232,6 +232,16 @@ pub struct AttachHeader {
     /// should be used.
     #[serde(default)]
     pub dir: Option<String>,
+    /// If specified, shpool will inject the given command into the shell
+    /// when it first starts up. This option is ignored for reattaches.
+    /// Note that this differs from the cmd option in that it is run
+    /// directly in the shell rather than replacing the shell. Think of
+    /// it as running `source cmd` rather than `exec cmd`. The main
+    /// usecase is to be able to automatically enter some useful context
+    /// such as a particular directory with a python virtual environment
+    /// already set up for example.
+    #[serde(default)]
+    pub start_cmd: Option<String>,
 }
 
 impl AttachHeader {

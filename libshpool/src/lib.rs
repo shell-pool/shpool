@@ -169,7 +169,30 @@ pass to the binary using the shell-words crate."
 $HOME by default. Use '.' for pwd."
         )]
         dir: Option<String>,
-        #[clap(help = "The name of the shell session to create or attach to")]
+        #[clap(
+            short,
+            long,
+            long_help = "A command to run in the shell immediately on startup
+
+This differs from the --cmd flag in that it is run
+directly in the shell rather than replacing the shell. Think of
+it as running `source cmd` rather than `exec cmd`. The main
+usecase is to be able to automatically enter some useful context
+such as a particular directory with a python virtual environment
+already set up for example.
+
+--start-cmd supports templates in the same way that session names do,
+so you can parameterize your command with shpool variables. For example,
+you could do --start-cmd 'cd /workspace/path/prefix/{workspace}' to have
+your session start in your workspace root depending on a 'workspace' var.
+See 'shpool help var' for more details."
+        )]
+        start_cmd: Option<String>,
+        #[clap(long_help = "The name of the shell session to create or attach to
+
+Session names support templates, and if a session name changes based on a
+variable change, 'shpool attach' will automatically hang up and re-dial the
+new session name. See 'shpool help var' for more details.")]
         name: String,
     },
 
@@ -434,8 +457,8 @@ pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> an
             log_level_handle,
             socket,
         ),
-        Commands::Attach { force, background, ttl, cmd, dir, name } => {
-            attach::run(config_manager, name, force, background, ttl, cmd, dir, socket)
+        Commands::Attach { force, background, ttl, cmd, dir, start_cmd, name } => {
+            attach::run(socket, config_manager, name, force, background, ttl, cmd, dir, start_cmd)
         }
         Commands::Detach { sessions } => detach::run(sessions, socket),
         Commands::Kill { sessions } => kill::run(sessions, socket),
