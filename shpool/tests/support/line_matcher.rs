@@ -40,10 +40,7 @@ where
                 Err(e) => {
                     if e.kind() == io::ErrorKind::WouldBlock {
                         if start.elapsed() > CMD_READ_TIMEOUT {
-                            return Err(io::Error::new(
-                                io::ErrorKind::TimedOut,
-                                "timed out reading line",
-                            ))?;
+                            Err(io::Error::new(io::ErrorKind::TimedOut, "timed out reading line"))?;
                         }
 
                         std::thread::sleep(CMD_READ_SLEEP_DUR);
@@ -92,10 +89,7 @@ where
                 Err(e) => {
                     if e.kind() == io::ErrorKind::WouldBlock {
                         if start.elapsed() > CMD_READ_TIMEOUT {
-                            return Err(io::Error::new(
-                                io::ErrorKind::TimedOut,
-                                "timed out reading line",
-                            ))?;
+                            Err(io::Error::new(io::ErrorKind::TimedOut, "timed out reading line"))?;
                         }
 
                         std::thread::sleep(CMD_READ_SLEEP_DUR);
@@ -142,10 +136,7 @@ where
                 Err(e) => {
                     if e.kind() == io::ErrorKind::WouldBlock {
                         if start.elapsed() > CMD_READ_TIMEOUT {
-                            return Err(io::Error::new(
-                                io::ErrorKind::TimedOut,
-                                "timed out reading line",
-                            ))?;
+                            Err(io::Error::new(io::ErrorKind::TimedOut, "timed out reading line"))?;
                         }
 
                         std::thread::sleep(CMD_READ_SLEEP_DUR);
