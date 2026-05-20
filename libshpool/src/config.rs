@@ -293,6 +293,12 @@ pub struct Config {
     /// See https://man7.org/linux/man-pages/man8/pam_motd.8.html
     /// for more info.
     pub motd_args: Option<Vec<String>>,
+
+    /// A list of default values for variables. Setting values
+    /// in this list is equivilant to running `shpool var set` for
+    /// each (var, value) tuple every time the shpool daemon starts
+    /// up.
+    pub var_default: Option<Vec<VarSetting>>,
 }
 
 impl Config {
@@ -327,6 +333,7 @@ impl Config {
             prompt_prefix: self.prompt_prefix.or(another.prompt_prefix),
             motd: self.motd.or(another.motd),
             motd_args: self.motd_args.or(another.motd_args),
+            var_default: self.var_default.or(another.var_default),
         }
     }
 }
@@ -407,6 +414,14 @@ pub enum MotdDisplayMode {
     Dump,
 }
 
+#[derive(Deserialize, Debug, Clone)]
+pub struct VarSetting {
+    /// The variable name.
+    pub var: String,
+    /// The variable value.
+    pub value: String,
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -435,6 +450,11 @@ mod test {
             "#,
             r#"
             session_restore_engine = "vterm"
+            "#,
+            r#"
+            [[var_default]]
+            var = "foo"
+            value = "bar"
             "#,
         ];
 

@@ -31,8 +31,8 @@ where
     pub fn scan_until_re(&mut self, re: &str) -> anyhow::Result<()> {
         let compiled_re = Regex::new(re)?;
         let start = time::Instant::now();
+        let mut line = String::new();
         loop {
-            let mut line = String::new();
             match self.out.read_line(&mut line) {
                 Ok(0) => {
                     return Err(anyhow!("LineMatcher: EOF"));
@@ -67,6 +67,7 @@ where
                 return Ok(());
             } else {
                 eprintln!(" no match");
+                line.clear();
             }
         }
     }
@@ -80,8 +81,8 @@ where
 
     pub fn capture_re(&mut self, re: &str) -> anyhow::Result<Vec<Option<String>>> {
         let start = time::Instant::now();
+        let mut line = String::new();
         loop {
-            let mut line = String::new();
             match self.out.read_line(&mut line) {
                 Ok(0) => {
                     return Err(anyhow!("LineMatcher: EOF"));
@@ -127,8 +128,8 @@ where
     /// assertions fail (the never match regex).
     pub fn drain(&mut self) -> anyhow::Result<()> {
         let start = time::Instant::now();
+        let mut line = String::new();
         loop {
-            let mut line = String::new();
             match self.out.read_line(&mut line) {
                 Ok(0) => {
                     return Ok(());
@@ -156,6 +157,7 @@ where
             }
 
             self.check_persistant_assertions(&line)?;
+            line.clear();
         }
     }
 
