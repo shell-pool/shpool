@@ -1,4 +1,14 @@
 
+shpool (0.10.1) unstable; urgency=low
+
+  Added
+
+  * add --startup-cmd flag ([#371](https://github.com/shell-pool/shpool/pull/371))
+  * add var_default config option ([#370](https://github.com/shell-pool/shpool/pull/370))
+  * add events socket
+
+ -- Shpool Authors <shpool-eng@google.com>  Wed, 20 May 2026 21:10:24 +0000
+
 shpool (0.10.0) unstable; urgency=low
 
   Added

@@ -1,4 +1,12 @@
 
+shpool-protocol (0.4.1) unstable; urgency=low
+
+  Added
+
+  * add --startup-cmd flag ([#371](https://github.com/shell-pool/shpool/pull/371))
+
+ -- Shpool Authors <shpool-eng@google.com>  Wed, 20 May 2026 21:10:24 +0000
+
 shpool-protocol (0.4.0) unstable; urgency=low
 
   Added
