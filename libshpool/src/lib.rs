@@ -207,6 +207,14 @@ environment.")]
         sessions: Vec<String>,
     },
 
+    #[clap(about = "Subscribe to the daemon's push-event stream
+
+Connects to the events socket and writes each event (one JSON object
+per line) to stdout, flushing after every line so the stream is
+pipeline-friendly (e.g. `shpool events | jq`). See EVENTS.md for
+details.")]
+    Events,
+
     #[clap(about = "Kill the given sessions
 
 This detaches the session if it is attached and kills the underlying
@@ -255,14 +263,6 @@ you could just do `shpool var set workspace key-bugfix`.
         #[clap(subcommand)]
         command: VarCommands,
     },
-
-    #[clap(about = "Subscribe to the daemon's push-event stream
-
-Connects to the events socket and writes each event (one JSON object
-per line) to stdout, flushing after every line so the stream is
-pipeline-friendly (e.g. `shpool events | jq`). See EVENTS.md for
-details.")]
-    Events,
 }
 
 /// The subcommds of the var command.
