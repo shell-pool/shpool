@@ -1,4 +1,12 @@
 
+shpool (0.10.2) unstable; urgency=low
+
+  Other
+
+  * put `events` subcommand help in alphabetical order ([#375](https://github.com/shell-pool/shpool/pull/375))
+
+ -- Shpool Authors <shpool-eng@google.com>  Thu, 21 May 2026 22:01:08 +0000
+
 shpool (0.10.1) unstable; urgency=low
 
   Added
