@@ -29,7 +29,7 @@ use std::{
 use anyhow::{anyhow, Context};
 use nix::{poll, poll::PollFlags, sys::signal, unistd::Pid};
 use parking_lot::Mutex;
-use shpool_protocol::{Chunk, ChunkKind, MaybeSwitch, TtySize};
+use shpool_protocol::{Attachment, Chunk, ChunkKind, MaybeSwitch, TtySize};
 use tracing::{debug, error, info, instrument, span, trace, warn, Level};
 
 use crate::{
@@ -76,6 +76,12 @@ pub struct SessionLifecycleTimestamps {
 pub struct Session {
     pub started_at: time::SystemTime,
     pub lifecycle_timestamps: Mutex<SessionLifecycleTimestamps>,
+    /// This session's attachment, if any. An `Option` here, but reported by
+    /// `handle_list` as a list so the wire can grow to multiple attachments
+    /// without a breaking change. Kept in its own lock rather than in `inner`
+    /// because a client holds `inner` while attached, which would otherwise
+    /// prevent `handle_list` from reading it while a client is attached.
+    pub attachment: Mutex<Option<Attachment>>,
     pub child_pid: libc::pid_t,
     pub child_exit_notifier: Arc<ExitNotifier>,
     pub shell_to_client_ctl: Arc<Mutex<ShellToClientCtl>>,

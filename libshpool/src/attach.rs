@@ -286,6 +286,7 @@ impl Attach {
                 cmd: resolved.cmd.clone(),
                 dir: start_dir,
                 start_cmd: resolved.start_cmd.clone(),
+                name_template: self.tmpls.session_name.source().to_string(),
             }))
             .context("writing attach header")?;
 

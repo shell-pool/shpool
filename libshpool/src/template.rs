@@ -25,10 +25,14 @@ const VAR_SIZE_GUESS: usize = 40;
 /// by the templated session name feature to allow automatic client
 /// switching.
 ///
-/// The template syntax is that variable subsitutions look like
-/// `#{var_name}`, where var_name must be some alphanumeric string.
+/// The template syntax is that variable substitutions look like `{var_name}`,
+/// where var_name must be some alphanumeric string.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Template {
+    /// The original source string, e.g. `"{workspace}-edit"` or `"htop"`.
+    src: String,
+    /// The parse of `src`, e.g. `[Var("workspace"), Raw("-edit")]` or
+    /// `[Raw("htop")]`.
     chunks: Vec<Chunk>,
     instantiated_size_guess: usize,
 }
@@ -82,7 +86,12 @@ impl Template {
             };
         }
 
-        Ok(Template { chunks, instantiated_size_guess })
+        Ok(Template { src: src.to_string(), chunks, instantiated_size_guess })
+    }
+
+    /// The original source string, e.g. `"{workspace}-edit"` or `"htop"`.
+    pub fn source(&self) -> &str {
+        &self.src
     }
 
     /// Given a variable mapping, instantiate the given template.
