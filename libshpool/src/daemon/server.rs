@@ -35,11 +35,11 @@ use anyhow::{anyhow, Context};
 use nix::unistd;
 use parking_lot::{ArcMutexGuard, Mutex, RawMutex};
 use shpool_protocol::{
-    AttachHeader, AttachReplyHeader, AttachStatus, ConnectHeader, DetachReply, DetachRequest,
-    KillReply, KillRequest, ListReply, LogLevel, MaybeSwitch, ModifyVarReply, ModifyVarRequest,
-    ResizeReply, Session, SessionMessageDetachReply, SessionMessageReply, SessionMessageRequest,
-    SessionMessageRequestPayload, SessionStatus, SetLogLevelReply, SetLogLevelRequest,
-    VersionHeader,
+    AttachHeader, AttachReplyHeader, AttachStatus, Attachment, ConnectHeader, DetachReply,
+    DetachRequest, KillReply, KillRequest, ListReply, LogLevel, MaybeSwitch, ModifyVarReply,
+    ModifyVarRequest, ResizeReply, Session, SessionMessageDetachReply, SessionMessageReply,
+    SessionMessageRequest, SessionMessageRequestPayload, SessionStatus, SetLogLevelReply,
+    SetLogLevelRequest, VersionHeader,
 };
 use tracing::{debug, error, info, instrument, span, warn, Level};
 
@@ -376,6 +376,7 @@ impl Server {
                     if let Some(session) = shells.get(&header.name) {
                         session.lifecycle_timestamps.lock().last_disconnected_at =
                             Some(time::SystemTime::now());
+                        *session.attachment.lock() = None;
                         self.events_bus.publish(&events::Event::SessionDetached);
                     }
                 }
@@ -410,6 +411,8 @@ impl Server {
     )> {
         let warnings = vec![];
 
+        let peer_pid = peer_pid(&stream)?;
+
         // Critical section for the global shells lock. We only hold it
         // while grubbing about for an existing session, then release it
         // so that we do not hold it during shell startup, which might
@@ -441,6 +444,10 @@ impl Server {
                             inner.client_stream = Some(stream.try_clone()?);
                             session.lifecycle_timestamps.lock().last_connected_at =
                                 Some(time::SystemTime::now());
+                            *session.attachment.lock() = Some(Attachment {
+                                template: header.name_template.clone(),
+                                pid: peer_pid,
+                            });
 
                             if inner
                                 .shell_to_client_join_h
@@ -526,6 +533,8 @@ impl Server {
         )?;
 
         session.lifecycle_timestamps.lock().last_connected_at = Some(time::SystemTime::now());
+        *session.attachment.lock() =
+            Some(Attachment { template: header.name_template.clone(), pid: peer_pid });
         {
             let _s = span!(Level::INFO, "select_shell_lock_2(shells)").entered();
             let mut shells = self.shells.lock();
@@ -640,6 +649,7 @@ impl Server {
                         // reflects the detach immediately.
                         s.lifecycle_timestamps.lock().last_disconnected_at =
                             Some(time::SystemTime::now());
+                        *s.attachment.lock() = None;
                     }
                 } else {
                     not_found_sessions.push(session);
@@ -789,6 +799,7 @@ impl Server {
                     last_connected_at_unix_ms,
                     last_disconnected_at_unix_ms,
                     status,
+                    attachments: v.attachment.lock().iter().cloned().collect(),
                 })
             })
             .collect();
@@ -890,7 +901,7 @@ impl Server {
         }
     }
 
-    /// Spawn a subshell and return the sessession descriptor for it. The
+    /// Spawn a subshell and return the session descriptor for it. The
     /// session is wrapped in an Arc so the inner session can hold a Weak
     /// back-reference to the session.
     #[instrument(skip_all)]
@@ -1167,6 +1178,7 @@ impl Server {
             child_exit_notifier,
             started_at: time::SystemTime::now(),
             lifecycle_timestamps: Mutex::new(shell::SessionLifecycleTimestamps::default()),
+            attachment: Mutex::new(None),
             inner: Arc::new(Mutex::new(session_inner)),
         })
     }
@@ -1368,7 +1380,34 @@ fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
         return Err(anyhow!("shpool prohibits connections across users"));
     }
 
-    let mut peer_pid: libc::pid_t = 0;
+    let peer_pid = unistd::Pid::from_raw(peer_pid(sock)?);
+    let self_pid = unistd::Pid::this();
+    let peer_exe = exe_for_pid(peer_pid).context("could not resolve exe from the pid")?;
+    let self_exe = exe_for_pid(self_pid).context("could not resolve our own exe")?;
+    if peer_exe != self_exe {
+        warn!("attach binary differs from daemon binary");
+    }
+
+    Ok(())
+}
+
+/// Read the pid of the process on the other end of the socket. Peer credentials
+/// are captured by the kernel at connect time and stay fixed for the life of
+/// the connection, so the result is stable across repeated calls.
+#[cfg(target_os = "linux")]
+fn peer_pid(sock: &UnixStream) -> anyhow::Result<libc::pid_t> {
+    use nix::sys::socket;
+
+    let peer_creds = socket::getsockopt(sock, socket::sockopt::PeerCredentials)
+        .context("could not get peer creds from socket")?;
+    Ok(peer_creds.pid())
+}
+
+#[cfg(target_os = "macos")]
+fn peer_pid(sock: &UnixStream) -> anyhow::Result<libc::pid_t> {
+    use std::os::unix::io::AsRawFd;
+
+    let mut pid: libc::pid_t = 0;
     let mut len = std::mem::size_of::<libc::pid_t>() as libc::socklen_t;
     // Safety: getsockopt is standard POSIX FFI, all pointers and sizes are valid
     unsafe {
@@ -1376,7 +1415,7 @@ fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
             sock.as_raw_fd(),
             libc::SOL_LOCAL,
             libc::LOCAL_PEERPID,
-            &mut peer_pid as *mut _ as *mut libc::c_void,
+            &mut pid as *mut _ as *mut libc::c_void,
             &mut len,
         ) != 0
         {
@@ -1386,16 +1425,7 @@ fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
             ));
         }
     }
-
-    let peer_pid = unistd::Pid::from_raw(peer_pid);
-    let self_pid = unistd::Pid::this();
-    let peer_exe = exe_for_pid(peer_pid).context("could not resolve exe from the pid")?;
-    let self_exe = exe_for_pid(self_pid).context("could not resolve our own exe")?;
-    if peer_exe != self_exe {
-        warn!("attach binary differs from daemon binary");
-    }
-
-    Ok(())
+    Ok(pid)
 }
 
 #[cfg(target_os = "linux")]

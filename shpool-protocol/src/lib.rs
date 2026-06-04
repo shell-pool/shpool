@@ -205,9 +205,14 @@ pub enum ResizeReply {
 /// to attach to.
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct AttachHeader {
-    /// The name of the session to create or attach to.
+    /// The name of the session to create or attach to, e.g. `myproj-edit` or
+    /// `htop`.
     #[serde(default)]
     pub name: String,
+    /// The original session name template before variable substitution, e.g.
+    /// `{workspace}-edit` or `htop`.
+    #[serde(default)]
+    pub name_template: String,
     /// The size of the local tty. Passed along so that the remote
     /// pty can be kept in sync (important so curses applications look
     /// right).
@@ -279,6 +284,23 @@ pub struct Session {
     pub last_disconnected_at_unix_ms: Option<i64>,
     #[serde(default)]
     pub status: SessionStatus,
+    /// This session's attachments. Currently, a session can have at most one
+    /// attachment, but this is a list in case that changes. Maintained
+    /// independently of `status`, so they can briefly disagree.
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
+}
+
+/// A session's attachment.
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
+pub struct Attachment {
+    /// The original session name template before variable substitution, e.g.
+    /// `{workspace}-edit` or `htop`.
+    #[serde(default)]
+    pub template: String,
+    /// The pid of the attach process.
+    #[serde(default)]
+    pub pid: i32,
 }
 
 /// Indicates if a shpool session currently has a client attached.
