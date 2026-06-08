@@ -178,7 +178,9 @@ impl Pager {
         // setting it up to go away when _ctl_guard removes the ctl
         // handle.
         let pty_master_fd = pty_master.raw_fd();
-        init_tty_size.set_fd(pty_master_fd).context("setting init tty size")?;
+        if let Err(e) = init_tty_size.set_fd(pty_master_fd) {
+            warn!("setting init tty size for pager: {:?}", e);
+        }
         let tty_size = Arc::new(Mutex::new(init_tty_size.clone()));
         let tty_size_ref = Arc::clone(&tty_size);
         info!("spawning pager size change listener");
@@ -261,7 +263,11 @@ impl Pager {
                     // the pager process has some data for us
                     let len = pty_master.read(&mut buf).context("reading chunk from pty master")?;
                     if len == 0 {
-                        return Err(anyhow!("EOF from pty while displaying pager"));
+                        info!("pager EOF");
+                        // The pager hung up, which we should treat as a graceful
+                        // exit.
+                        let tty_size = tty_size.lock();
+                        return Ok(tty_size.clone());
                     }
                     let chunk = Chunk { kind: ChunkKind::Data, buf: &buf[..len] };
                     match chunk.write_to(client_stream).and_then(|_| client_stream.flush()) {
@@ -279,8 +285,9 @@ impl Pager {
                 if client_stream_poll_fd.any().unwrap_or(false) {
                     let len = client_stream.read(&mut buf).context("reading client chunk")?;
                     if len == 0 {
-                        info!("EOF");
-                        return Err(anyhow!("EOF from client while displaying pager"));
+                        info!("client EOF");
+                        let tty_size = tty_size.lock();
+                        return Ok(tty_size.clone());
                     }
 
                     trace!("user input: {}", String::from_utf8_lossy(&buf[..len]));

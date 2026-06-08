@@ -300,3 +300,37 @@ fn concurrent_attach_to_existing_session_race() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+/// Regression test for a bug where shpool would abort the attach process
+/// if the MOTD pager exited normally (e.g. less EOF). It should transition
+/// to the shell instead.
+#[test]
+#[timeout(15000)]
+fn pager_exit_transitions_to_shell() -> anyhow::Result<()> {
+    let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test")?;
+    let motd_file = tmp_dir.path().join("motd.txt");
+    fs::write(&motd_file, "this is a motd\n")?;
+
+    let config_tmpl = fs::read_to_string(support::testdata_file("motd_pager.toml.tmpl"))?;
+    let config_contents = config_tmpl
+        .replace("TMP_MOTD_MSG_FILE", motd_file.to_str().unwrap())
+        .replace("bin = \"less\"", "bin = \"cat\"");
+    let config_file = tmp_dir.path().join("motd_pager.toml");
+    fs::write(&config_file, config_contents)?;
+
+    let mut daemon_proc = support::daemon::Proc::new(&config_file, DaemonArgs::default())
+        .context("starting daemon proc")?;
+
+    let mut attach_proc =
+        daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+
+    daemon_proc.await_event("daemon-bidi-stream-enter")?;
+
+    let mut line_matcher = attach_proc.line_matcher()?;
+
+    // We should be able to run a command in the shell.
+    attach_proc.run_cmd("echo 'in-shell'")?;
+    line_matcher.scan_until_re("in-shell$")?;
+
+    Ok(())
+}
