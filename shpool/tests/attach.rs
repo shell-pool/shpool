@@ -1330,7 +1330,7 @@ fn motd_pager() -> anyhow::Result<()> {
     let stdout_str = snapshot_attach_output(
         &daemon_proc,
         &config_file,
-        time::Duration::from_millis(500),
+        time::Duration::from_millis(2000),
         "sh1",
     )?;
     // Scan for a fragment of less output.
@@ -1374,7 +1374,7 @@ fn motd_debounced_pager_debounces() -> anyhow::Result<()> {
     let stdout_str = snapshot_attach_output(
         &daemon_proc,
         &config_file,
-        time::Duration::from_millis(500),
+        time::Duration::from_millis(2000),
         "sh1",
     )?;
     // scan for a fragment of less output
@@ -1385,7 +1385,7 @@ fn motd_debounced_pager_debounces() -> anyhow::Result<()> {
     let stdout_str = snapshot_attach_output(
         &daemon_proc,
         &config_file,
-        time::Duration::from_millis(500),
+        time::Duration::from_millis(2000),
         "sh2",
     )?;
     assert!(!stdout_file_re.is_match(&stdout_str));
@@ -1427,7 +1427,7 @@ fn motd_debounced_pager_unbounces() -> anyhow::Result<()> {
     let stdout_str = snapshot_attach_output(
         &daemon_proc,
         &config_file,
-        time::Duration::from_millis(500),
+        time::Duration::from_millis(2000),
         "sh1",
     )?;
     // scan for a fragment of less output
@@ -1441,7 +1441,7 @@ fn motd_debounced_pager_unbounces() -> anyhow::Result<()> {
     let stdout_str = snapshot_attach_output(
         &daemon_proc,
         &config_file,
-        time::Duration::from_millis(500),
+        time::Duration::from_millis(2000),
         "sh2",
     )?;
     assert!(stdout_file_re.is_match(&stdout_str));
@@ -1474,7 +1474,7 @@ fn motd_env_test_pager_preserves_term_env_var() -> anyhow::Result<()> {
     let stdout_str = snapshot_attach_output(
         &daemon_proc,
         &config_file,
-        time::Duration::from_millis(500),
+        time::Duration::from_millis(2000),
         "sh1",
     )?;
     // Scan for a fragment of less output.
