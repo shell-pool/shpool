@@ -206,15 +206,18 @@ impl Server {
 
         let header = parse_connect_header(&mut stream).context("parsing connect header")?;
 
-        if let Err(err) = check_peer(&stream) {
-            if let ConnectHeader::Attach(_) = header {
-                write_reply(
-                    &mut stream,
-                    AttachReplyHeader { status: AttachStatus::Forbidden(format!("{err:?}")) },
-                )?;
+        let peer_pid = match check_peer(&stream) {
+            Ok(peer_pid) => peer_pid,
+            Err(err) => {
+                if let ConnectHeader::Attach(_) = header {
+                    write_reply(
+                        &mut stream,
+                        AttachReplyHeader { status: AttachStatus::Forbidden(format!("{err:?}")) },
+                    )?;
+                }
+                stream.shutdown(net::Shutdown::Both).context("closing stream")?;
+                return Err(err);
             }
-            stream.shutdown(net::Shutdown::Both).context("closing stream")?;
-            return Err(err);
         };
 
         // Unset the read timeout before we pass things off to a
@@ -224,7 +227,7 @@ impl Server {
         stream.set_read_timeout(None).context("unsetting read timout on inbound session")?;
 
         match header {
-            ConnectHeader::Attach(h) => self.handle_attach(stream, conn_id, h),
+            ConnectHeader::Attach(h) => self.handle_attach(stream, conn_id, h, peer_pid),
             ConnectHeader::Detach(r) => self.handle_detach(stream, r),
             ConnectHeader::Kill(r) => self.handle_kill(stream, r),
             ConnectHeader::List => self.handle_list(stream),
@@ -241,6 +244,7 @@ impl Server {
         mut stream: UnixStream,
         conn_id: usize,
         header: AttachHeader,
+        peer_pid: libc::pid_t,
     ) -> anyhow::Result<()> {
         if header.name.chars().any(|c| '/' == c || c.is_whitespace())
             || header.name == "."
@@ -263,19 +267,20 @@ impl Server {
         let shell_env = self.build_shell_env(&user_info, &header).context("building shell env")?;
 
         test_hooks::emit("handle-attach-before-select-shell");
-        let (shell_results, status) =
-            match self.select_shell_desc(stream, conn_id, &header, &user_info, &shell_env) {
-                Ok(t) => t,
-                Err(err)
-                    if err
-                        .downcast_ref::<ShellSelectionError>()
-                        .map(|e| e == &ShellSelectionError::BusyShellSession)
-                        .unwrap_or(false) =>
-                {
-                    return Ok(());
-                }
-                Err(err) => return Err(err)?,
-            };
+        let (shell_results, status) = match self
+            .select_shell_desc(stream, conn_id, &header, &user_info, &shell_env, peer_pid)
+        {
+            Ok(t) => t,
+            Err(err)
+                if err
+                    .downcast_ref::<ShellSelectionError>()
+                    .map(|e| e == &ShellSelectionError::BusyShellSession)
+                    .unwrap_or(false) =>
+            {
+                return Ok(());
+            }
+            Err(err) => return Err(err)?,
+        };
 
         self.link_ssh_auth_sock(&header).context("linking SSH_AUTH_SOCK")?;
         self.populate_session_env_file(&header).context("populating session env file")?;
@@ -401,6 +406,7 @@ impl Server {
         header: &AttachHeader,
         user_info: &user::Info,
         shell_env: &[(OsString, OsString)],
+        peer_pid: libc::pid_t,
     ) -> anyhow::Result<(
         Option<(
             Arc<ExitNotifier>,
@@ -410,8 +416,6 @@ impl Server {
         AttachStatus,
     )> {
         let warnings = vec![];
-
-        let peer_pid = peer_pid(&stream)?;
 
         // Critical section for the global shells lock. We only hold it
         // while grubbing about for an existing session, then release it
@@ -1333,11 +1337,12 @@ where
     Ok(())
 }
 
-/// check_peer makes sure that a process dialing in on the shpool
-/// control socket has the same UID as the current user and that
-/// both have the same executable path.
+/// check_peer makes sure that a process dialing in on the shpool control socket
+/// has the same UID as the current user and that both have the same executable
+/// path. Returns the peer's pid, which the kernel captures at connect time and
+/// keeps fixed for the life of the connection.
 #[cfg(target_os = "linux")]
-fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
+fn check_peer(sock: &UnixStream) -> anyhow::Result<libc::pid_t> {
     use nix::sys::socket;
 
     let peer_creds = socket::getsockopt(sock, socket::sockopt::PeerCredentials)
@@ -1356,11 +1361,11 @@ fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
         warn!("attach binary differs from daemon binary");
     }
 
-    Ok(())
+    Ok(peer_creds.pid())
 }
 
 #[cfg(target_os = "macos")]
-fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
+fn check_peer(sock: &UnixStream) -> anyhow::Result<libc::pid_t> {
     use std::os::unix::io::AsRawFd;
 
     let mut peer_uid: libc::uid_t = 0;
@@ -1380,34 +1385,7 @@ fn check_peer(sock: &UnixStream) -> anyhow::Result<()> {
         return Err(anyhow!("shpool prohibits connections across users"));
     }
 
-    let peer_pid = unistd::Pid::from_raw(peer_pid(sock)?);
-    let self_pid = unistd::Pid::this();
-    let peer_exe = exe_for_pid(peer_pid).context("could not resolve exe from the pid")?;
-    let self_exe = exe_for_pid(self_pid).context("could not resolve our own exe")?;
-    if peer_exe != self_exe {
-        warn!("attach binary differs from daemon binary");
-    }
-
-    Ok(())
-}
-
-/// Read the pid of the process on the other end of the socket. Peer credentials
-/// are captured by the kernel at connect time and stay fixed for the life of
-/// the connection, so the result is stable across repeated calls.
-#[cfg(target_os = "linux")]
-fn peer_pid(sock: &UnixStream) -> anyhow::Result<libc::pid_t> {
-    use nix::sys::socket;
-
-    let peer_creds = socket::getsockopt(sock, socket::sockopt::PeerCredentials)
-        .context("could not get peer creds from socket")?;
-    Ok(peer_creds.pid())
-}
-
-#[cfg(target_os = "macos")]
-fn peer_pid(sock: &UnixStream) -> anyhow::Result<libc::pid_t> {
-    use std::os::unix::io::AsRawFd;
-
-    let mut pid: libc::pid_t = 0;
+    let mut peer_pid: libc::pid_t = 0;
     let mut len = std::mem::size_of::<libc::pid_t>() as libc::socklen_t;
     // Safety: getsockopt is standard POSIX FFI, all pointers and sizes are valid
     unsafe {
@@ -1415,7 +1393,7 @@ fn peer_pid(sock: &UnixStream) -> anyhow::Result<libc::pid_t> {
             sock.as_raw_fd(),
             libc::SOL_LOCAL,
             libc::LOCAL_PEERPID,
-            &mut pid as *mut _ as *mut libc::c_void,
+            &mut peer_pid as *mut _ as *mut libc::c_void,
             &mut len,
         ) != 0
         {
@@ -1425,7 +1403,16 @@ fn peer_pid(sock: &UnixStream) -> anyhow::Result<libc::pid_t> {
             ));
         }
     }
-    Ok(pid)
+
+    let self_pid = unistd::Pid::this();
+    let peer_exe = exe_for_pid(unistd::Pid::from_raw(peer_pid))
+        .context("could not resolve exe from the pid")?;
+    let self_exe = exe_for_pid(self_pid).context("could not resolve our own exe")?;
+    if peer_exe != self_exe {
+        warn!("attach binary differs from daemon binary");
+    }
+
+    Ok(peer_pid)
 }
 
 #[cfg(target_os = "linux")]
