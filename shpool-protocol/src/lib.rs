@@ -297,7 +297,7 @@ pub struct Attachment {
     /// The original session name template before variable substitution, e.g.
     /// `{workspace}-edit` or `htop`.
     #[serde(default)]
-    pub template: String,
+    pub session_name_template: String,
     /// The pid of the attach process.
     #[serde(default)]
     pub pid: i32,

@@ -232,7 +232,7 @@ fn json_attachment_literal_name() -> anyhow::Result<()> {
         session["attachments"].as_array().ok_or_else(|| anyhow!("missing attachments array"))?;
     assert_eq!(attachments.len(), 1, "expected exactly one attachment");
     // A var-free name still has a template: the literal source string.
-    assert_eq!(attachments[0]["template"], "htop");
+    assert_eq!(attachments[0]["session_name_template"], "htop");
     assert_eq!(attachments[0]["pid"], sess1.proc.id());
 
     Ok(())
@@ -262,7 +262,7 @@ fn json_attachment_templated_name() -> anyhow::Result<()> {
         session["attachments"].as_array().ok_or_else(|| anyhow!("missing attachments array"))?;
     assert_eq!(attachments.len(), 1, "expected exactly one attachment");
     // The reported template is the unresolved source, not the resolved name.
-    assert_eq!(attachments[0]["template"], "{workspace}-edit");
+    assert_eq!(attachments[0]["session_name_template"], "{workspace}-edit");
     assert_eq!(attachments[0]["pid"], sess1.proc.id());
 
     Ok(())
@@ -331,7 +331,9 @@ fn json_attachment_survives_var_switch() -> anyhow::Result<()> {
         let dev_ok = sessions.iter().find(|s| s["name"] == "dev-session").is_some_and(|s| {
             s["status"] == "Attached"
                 && s["attachments"].as_array().is_some_and(|a| {
-                    a.len() == 1 && a[0]["template"] == "{env}-session" && a[0]["pid"] == attach_pid
+                    a.len() == 1
+                        && a[0]["session_name_template"] == "{env}-session"
+                        && a[0]["pid"] == attach_pid
                 })
         });
         Ok(prod_ok && dev_ok)
@@ -497,8 +499,8 @@ fn json_attachment_per_session_isolation() -> anyhow::Result<()> {
     assert_eq!(a2.len(), 1);
     assert_eq!(a1[0]["pid"], pid1);
     assert_eq!(a2[0]["pid"], pid2);
-    assert_eq!(a1[0]["template"], "sh1");
-    assert_eq!(a2[0]["template"], "sh2");
+    assert_eq!(a1[0]["session_name_template"], "sh1");
+    assert_eq!(a2[0]["session_name_template"], "sh2");
 
     Ok(())
 }
