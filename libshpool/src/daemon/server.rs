@@ -445,7 +445,7 @@ impl Server {
                             session.lifecycle_timestamps.lock().last_connected_at =
                                 Some(time::SystemTime::now());
                             *session.attachment.lock() = Some(Attachment {
-                                template: header.name_template.clone(),
+                                session_name_template: header.name_template.clone(),
                                 pid: peer_pid,
                             });
 
@@ -534,7 +534,7 @@ impl Server {
 
         session.lifecycle_timestamps.lock().last_connected_at = Some(time::SystemTime::now());
         *session.attachment.lock() =
-            Some(Attachment { template: header.name_template.clone(), pid: peer_pid });
+            Some(Attachment { session_name_template: header.name_template.clone(), pid: peer_pid });
         {
             let _s = span!(Level::INFO, "select_shell_lock_2(shells)").entered();
             let mut shells = self.shells.lock();
