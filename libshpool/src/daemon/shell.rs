@@ -29,7 +29,7 @@ use std::{
 use anyhow::{anyhow, Context};
 use nix::{poll, poll::PollFlags, sys::signal, unistd::Pid};
 use parking_lot::Mutex;
-use shpool_protocol::{Chunk, ChunkKind, MaybeSwitch, TtySize};
+use shpool_protocol::{Attachment, Chunk, ChunkKind, MaybeSwitch, TtySize};
 use tracing::{debug, error, info, instrument, span, trace, warn, Level};
 
 use crate::{
@@ -63,19 +63,54 @@ const SHELL_TO_CLIENT_POLL_MS: u16 = 50;
 // shell->client thread.
 const SHELL_TO_CLIENT_CTL_TIMEOUT: time::Duration = time::Duration::from_millis(300);
 
-/// Timestamps tracking when sessions were last connected/disconnected.
-/// Combined behind a single lock to avoid taking multiple locks.
+/// Lifecycle state tracking when sessions were last connected/disconnected and
+/// by whom. The fields update in lockstep, so they live behind a single private
+/// lock that only this type's methods take, exactly once per update or read.
 #[derive(Debug, Default)]
-pub struct SessionLifecycleTimestamps {
+pub struct SessionLifecycle {
+    state: Mutex<SessionLifecycleState>,
+}
+
+impl SessionLifecycle {
+    /// Record a client attaching to the session.
+    pub fn record_attached(&self, attachment: Attachment) {
+        let mut state = self.state.lock();
+        state.last_connected_at = Some(time::SystemTime::now());
+        state.attachment = Some(attachment);
+    }
+
+    /// Record the attached client going away.
+    pub fn record_detached(&self) {
+        let mut state = self.state.lock();
+        state.last_disconnected_at = Some(time::SystemTime::now());
+        state.attachment = None;
+    }
+
+    /// Return a copy of the current lifecycle state.
+    pub fn snapshot(&self) -> SessionLifecycleState {
+        self.state.lock().clone()
+    }
+}
+
+/// A session's lifecycle data, handed out by value via
+/// [`SessionLifecycle::snapshot`].
+#[derive(Clone, Debug, Default)]
+pub struct SessionLifecycleState {
     pub last_connected_at: Option<time::SystemTime>,
     pub last_disconnected_at: Option<time::SystemTime>,
+    /// This session's attachment, if any. An `Option` here, but reported by
+    /// `handle_list` as a list so the wire can grow to multiple attachments
+    /// without a breaking change. Kept here rather than in `inner` because a
+    /// client holds `inner` while attached, which would otherwise prevent
+    /// `handle_list` from reading it while a client is attached.
+    pub attachment: Option<Attachment>,
 }
 
 /// Session represent a shell session
 #[derive(Debug)]
 pub struct Session {
     pub started_at: time::SystemTime,
-    pub lifecycle_timestamps: Mutex<SessionLifecycleTimestamps>,
+    pub lifecycle: SessionLifecycle,
     pub child_pid: libc::pid_t,
     pub child_exit_notifier: Arc<ExitNotifier>,
     pub shell_to_client_ctl: Arc<Mutex<ShellToClientCtl>>,
