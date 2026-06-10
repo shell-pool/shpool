@@ -379,9 +379,7 @@ impl Server {
                     let _s = span!(Level::INFO, "disconnect_lock(shells)").entered();
                     let shells = self.shells.lock();
                     if let Some(session) = shells.get(&header.name) {
-                        session.lifecycle_timestamps.lock().last_disconnected_at =
-                            Some(time::SystemTime::now());
-                        *session.attachment.lock() = None;
+                        session.lifecycle.record_detached();
                         self.events_bus.publish(&events::Event::SessionDetached);
                     }
                 }
@@ -446,9 +444,7 @@ impl Server {
                             // the channel is still open so the subshell is still running
                             info!("taking over existing session inner");
                             inner.client_stream = Some(stream.try_clone()?);
-                            session.lifecycle_timestamps.lock().last_connected_at =
-                                Some(time::SystemTime::now());
-                            *session.attachment.lock() = Some(Attachment {
+                            session.lifecycle.record_attached(Attachment {
                                 session_name_template: header.name_template.clone(),
                                 pid: peer_pid,
                             });
@@ -536,9 +532,10 @@ impl Server {
             matches!(motd, MotdDisplayMode::Dump),
         )?;
 
-        session.lifecycle_timestamps.lock().last_connected_at = Some(time::SystemTime::now());
-        *session.attachment.lock() =
-            Some(Attachment { session_name_template: header.name_template.clone(), pid: peer_pid });
+        session.lifecycle.record_attached(Attachment {
+            session_name_template: header.name_template.clone(),
+            pid: peer_pid,
+        });
         {
             let _s = span!(Level::INFO, "select_shell_lock_2(shells)").entered();
             let mut shells = self.shells.lock();
@@ -647,13 +644,10 @@ impl Server {
                     if let shell::ClientConnectionStatus::DetachNone = status {
                         not_attached_sessions.push(session);
                     } else {
-                        // The bidi-loop unwind in handle_attach owns the
-                        // SessionDetached publish; we just update
-                        // last_disconnected_at eagerly so a concurrent list()
+                        // The bidi-loop unwind in handle_attach owns the SessionDetached publish;
+                        // we just update the lifecycle state eagerly so a concurrent list()
                         // reflects the detach immediately.
-                        s.lifecycle_timestamps.lock().last_disconnected_at =
-                            Some(time::SystemTime::now());
-                        *s.attachment.lock() = None;
+                        s.lifecycle.record_detached();
                     }
                 } else {
                     not_found_sessions.push(session);
@@ -786,12 +780,12 @@ impl Server {
                     None => SessionStatus::Attached,
                 };
 
-                let timestamps = v.lifecycle_timestamps.lock();
-                let last_connected_at_unix_ms = timestamps
+                let lifecycle_state = v.lifecycle.snapshot();
+                let last_connected_at_unix_ms = lifecycle_state
                     .last_connected_at
                     .map(|t| t.duration_since(time::UNIX_EPOCH).map(|d| d.as_millis() as i64))
                     .transpose()?;
-                let last_disconnected_at_unix_ms = timestamps
+                let last_disconnected_at_unix_ms = lifecycle_state
                     .last_disconnected_at
                     .map(|t| t.duration_since(time::UNIX_EPOCH).map(|d| d.as_millis() as i64))
                     .transpose()?;
@@ -803,7 +797,7 @@ impl Server {
                     last_connected_at_unix_ms,
                     last_disconnected_at_unix_ms,
                     status,
-                    attachments: v.attachment.lock().iter().cloned().collect(),
+                    attachments: lifecycle_state.attachment.into_iter().collect(),
                 })
             })
             .collect();
@@ -1181,8 +1175,7 @@ impl Server {
             child_pid,
             child_exit_notifier,
             started_at: time::SystemTime::now(),
-            lifecycle_timestamps: Mutex::new(shell::SessionLifecycleTimestamps::default()),
-            attachment: Mutex::new(None),
+            lifecycle: shell::SessionLifecycle::default(),
             inner: Arc::new(Mutex::new(session_inner)),
         })
     }
