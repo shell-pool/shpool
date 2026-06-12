@@ -359,7 +359,18 @@ impl<'writer> tracing_subscriber::fmt::MakeWriter<'writer> for LogWriterBuilder 
 
 /// Run the shpool tool with the given arguments. If hooks is provided,
 /// inject the callbacks into the daemon.
-pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> anyhow::Result<()> {
+///
+/// # Safety
+///
+/// Callers MUST NOT call this routine after forking a thread.
+/// internally shpool will double-fork to daemonize, and doing so with
+/// multiple threads running is unsafe. Really this only applies when
+/// consts::AUTODAEMONIZE_VAR is set to true in the environment, but
+/// we still need to mark this entrypoint unsafe to be sound.
+pub unsafe fn run(
+    args: Args,
+    hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>,
+) -> anyhow::Result<()> {
     match (&args.command, env::var(consts::SENTINEL_FLAG_VAR).as_deref()) {
         (Commands::Daemon, Ok("prompt")) => {
             println!("{}", consts::PROMPT_SENTINEL);
@@ -433,7 +444,7 @@ pub fn run(args: Args, hooks: Option<Box<dyn hooks::Hooks + Send + Sync>>) -> an
     if !config_manager.get().nodaemonize.unwrap_or(false) || args.daemonize {
         let arg0 = env::args().next().ok_or(anyhow!("arg0 missing"))?;
         if !args.no_daemonize && !matches!(args.command, Commands::Daemon) {
-            daemonize::maybe_fork_daemon(&config_manager, &args, arg0, &socket)?;
+            daemonize::maybe_launch_daemon(&config_manager, &args, arg0, &socket)?;
         }
     }
 

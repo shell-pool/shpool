@@ -27,5 +27,6 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    libshpool::run(args, None)
+    // Safety: there is only a single thread running.
+    unsafe { libshpool::run(args, None) }
 }
