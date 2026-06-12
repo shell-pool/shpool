@@ -137,7 +137,8 @@ where
 
 impl TrieTab<u8> for Vec<Option<usize>> {
     fn new() -> Self {
-        vec![None; u8::MAX as usize]
+        // One slot for every possible byte value (0..=255).
+        vec![None; u8::MAX as usize + 1]
     }
 
     fn get(&self, index: u8) -> Option<&usize> {

@@ -181,6 +181,30 @@ fn forward_env() -> anyhow::Result<()> {
     Ok(())
 }
 
+// Regression test: a high byte (0xFF) in the raw input stream must not
+// kill the session. The keybinding scanner used to index out of bounds
+// on 0xFF, panicking the client->shell thread and disconnecting the
+// client.
+#[test]
+#[timeout(30000)]
+fn high_byte_input_does_not_kill_session() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+        .context("starting daemon proc")?;
+    let mut a1 = daemon_proc.attach("sess", Default::default()).context("starting attach proc")?;
+    let mut lm1 = a1.line_matcher()?;
+
+    a1.run_cmd("echo ready")?;
+    lm1.scan_until_re("ready$")?;
+
+    a1.run_raw(vec![0xFF])?;
+
+    // the session must survive the high byte
+    a1.run_cmd("echo alive")?;
+    lm1.scan_until_re("alive$")?;
+
+    Ok(())
+}
+
 #[test]
 #[timeout(30000)]
 fn symlink_ssh_auth_sock() -> anyhow::Result<()> {
