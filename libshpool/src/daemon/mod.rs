@@ -56,7 +56,19 @@ pub fn run(
             let pid_file = socket.with_file_name("daemonized-shpool.pid");
 
             info!("daemonizing with pid_file={:?}", pid_file);
-            daemonize::Daemonize::new().pid_file(pid_file).start().context("daemonizing")?;
+
+            // Preserve the inherited umask instead of using daemonize's default of 0o027.
+            let inherited_umask = {
+                let current_mask = nix::sys::stat::umask(nix::sys::stat::Mode::empty());
+                nix::sys::stat::umask(current_mask);
+                current_mask.bits() as u32
+            };
+
+            daemonize::Daemonize::new()
+                .pid_file(pid_file)
+                .umask(inherited_umask)
+                .start()
+                .context("daemonizing")?;
         }
     }
 
