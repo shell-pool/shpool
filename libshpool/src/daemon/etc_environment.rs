@@ -46,7 +46,9 @@ pub fn parse_compat<R: Read>(file: R) -> anyhow::Result<Vec<(String, String)>> {
                     warn!("parsing /etc/environment: empty key");
                     continue;
                 }
-                if !key.chars().all(char::is_alphanumeric) {
+                // pam_env checks `!isalnum(key[i]) && key[i] != '_'`,
+                // so underscores are legal (JAVA_HOME, LC_ALL, ...).
+                if !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
                     warn!("parsing /etc/environment: non alphanum key");
                     continue;
                 }
@@ -88,6 +90,7 @@ export  EXPORTED2SPACE=foo
 MISMATCHQUOTE='wut is going on"
 DOUBLEEQUALS=foo=bar
 DOUBLEEQUALSQUOTE='foo=bar'
+JAVA_HOME=/opt/jdk
         "#,
         ))?;
         assert_eq!(
@@ -102,6 +105,9 @@ DOUBLEEQUALSQUOTE='foo=bar'
                 (String::from("MISMATCHQUOTE"), String::from("wut is going on")),
                 (String::from("DOUBLEEQUALS"), String::from("foo=bar")),
                 (String::from("DOUBLEEQUALSQUOTE"), String::from("foo=bar")),
+                // pam_env allows underscores in keys, and most real
+                // /etc/environment entries (JAVA_HOME, LC_ALL, ...) use them
+                (String::from("JAVA_HOME"), String::from("/opt/jdk")),
             ]
         );
 
