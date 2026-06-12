@@ -64,6 +64,12 @@ fn parse_colon_duration(src: &str) -> anyhow::Result<time::Duration> {
 fn parse_suffix_duration(src: &str) -> anyhow::Result<time::Duration> {
     let num: String = src.chars().take_while(|c| c.is_numeric()).collect();
     let c = src.chars().last().ok_or(anyhow!("internal error: no suffix"))?;
+    // The unit must directly follow the number and end the string,
+    // otherwise compound durations like "1h30m" would silently parse
+    // as 1 minute.
+    if src.chars().count() != num.chars().count() + 1 {
+        bail!("could not parse '{}' as duration", src);
+    }
     make_suffix_duration(num.parse::<u64>().context("parsing num part of duration")?, c)
         .ok_or(anyhow!("unknown time unit '{}'", c))
 }
@@ -113,6 +119,12 @@ mod test {
             ("12x", "unknown time unit"),
             (":1", "parsing minutes part"),
             ("1:1:1:1:1", "cannot have more than 4"),
+            // compound durations are not supported and must not silently
+            // parse as just their first number + last unit
+            ("1h30m", "could not parse"),
+            ("2d12h", "could not parse"),
+            ("12.5h", "could not parse"),
+            ("5x7d", "could not parse"),
         ];
 
         for (src, err_substring) in cases.into_iter() {
