@@ -100,7 +100,8 @@ struct ChordAtom(u8);
 
 impl TrieTab<ChordAtom> for Vec<Option<usize>> {
     fn new() -> Self {
-        vec![None; u8::MAX as usize]
+        // One slot for every possible atom value (0..=255).
+        vec![None; u8::MAX as usize + 1]
     }
 
     fn get(&self, index: ChordAtom) -> Option<&usize> {
@@ -656,6 +657,18 @@ mod test {
         for (src, want) in cases.into_iter() {
             let got = tokenizer.tokenize(src.chars())?;
             assert_eq!(got, want);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_high_input_bytes() -> anyhow::Result<()> {
+        // High bytes, 0xFF in particular, show up in raw input streams
+        // (8-bit meta keys, pasted binary) and must not panic the engine.
+        let mut bindings = Bindings::new(vec![("Ctrl-Space Ctrl-q", Action::Detach)])?;
+        for byte in [0xF0u8, 0xFE, 0xFF] {
+            assert_eq!(bindings.transition(byte), BindingResult::NoMatch);
         }
 
         Ok(())
