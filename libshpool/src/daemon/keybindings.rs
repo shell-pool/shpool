@@ -457,8 +457,8 @@ const CONTROL_CODES: [(&str, u8); 42] = [
     ("Ctrl-u", 21),
     ("Ctrl-v", 22),
     ("Ctrl-w", 23),
-    ("Ctrl-y", 24),
-    ("Ctrl-x", 25),
+    ("Ctrl-x", 24),
+    ("Ctrl-y", 25),
     ("Ctrl-z", 26),
     ("Ctrl-@", 0),
     ("Ctrl-2", 0),
@@ -574,6 +574,18 @@ mod test {
                 panic!("bad success, want err with: {errstr}");
             }
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_ctrl_x_and_ctrl_y_codes() -> anyhow::Result<()> {
+        // ASCII control codes: Ctrl-X = CAN = 24, Ctrl-Y = EM = 25
+        let mut bindings = Bindings::new(vec![("Ctrl-x", Action::Detach)])?;
+        assert_eq!(bindings.transition(24), BindingResult::Match(Action::Detach));
+
+        let mut bindings = Bindings::new(vec![("Ctrl-y", Action::Detach)])?;
+        assert_eq!(bindings.transition(25), BindingResult::Match(Action::Detach));
 
         Ok(())
     }
