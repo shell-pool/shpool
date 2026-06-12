@@ -212,17 +212,17 @@ unsafe fn redirect_std_fds_to_null() -> anyhow::Result<()> {
     )
     .context("opening /dev/null")?;
 
-    // Safety: nullfd is valid and newfd need not be open for saftey
+    // Safety: nullfd is valid and newfd need not be open for safety
     let fd = unsafe { libc::dup2(nullfd.as_raw_fd(), libc::STDIN_FILENO) };
     if fd == -1 {
         return Err(anyhow!("redirecting stdin to /dev/null: {}", nix::errno::Errno::last()));
     }
-    // Safety: nullfd is valid and newfd need not be open for saftey
+    // Safety: nullfd is valid and newfd need not be open for safety
     let fd = unsafe { libc::dup2(nullfd.as_raw_fd(), libc::STDOUT_FILENO) };
     if fd == -1 {
         return Err(anyhow!("redirecting stdout to /dev/null: {}", nix::errno::Errno::last()));
     }
-    // Safety: nullfd is valid and newfd need not be open for saftey
+    // Safety: nullfd is valid and newfd need not be open for safety
     let fd = unsafe { libc::dup2(nullfd.as_raw_fd(), libc::STDERR_FILENO) };
     if fd == -1 {
         return Err(anyhow!("redirecting stderr to /dev/null: {}", nix::errno::Errno::last()));

@@ -1037,7 +1037,7 @@ impl Server {
             let mut status = 0;
             let mut unpacked_status = None;
             loop {
-                // Saftey: all basic ffi, the pid is valid before this returns.
+                // Safety: all basic ffi, the pid is valid before this returns.
                 unsafe {
                     match libc::waitpid(waitable_child_pid, &mut status, 0) {
                         0 => continue,
