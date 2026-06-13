@@ -1,4 +1,17 @@
 
+shpool (0.11.1) unstable; urgency=low
+
+  Fixed
+
+  * 0xFF input byte panicking session threads
+  * /etc/environment keys with underscores being dropped ([#391](https://github.com/shell-pool/shpool/pull/391))
+
+  Other
+
+  * bump signal-hook from 0.3.18 to 0.4.4 ([#297](https://github.com/shell-pool/shpool/pull/297))
+
+ -- Shpool Authors <shpool-eng@google.com>  Sat, 13 Jun 2026 14:58:31 +0000
+
 shpool (0.11.0) unstable; urgency=low
 
   Other
