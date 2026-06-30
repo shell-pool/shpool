@@ -180,7 +180,7 @@ impl Client {
             }),
             cmp::Ordering::Greater => Ok(ClientResult::VersionMismatch {
                 warning: format!(
-                    "client protocol ({:?}) is newer than daemon protocol (version {:?})",
+                    "shpool: client protocol ({:?}) is newer than daemon protocol (version {:?})",
                     shpool_protocol::VERSION,
                     daemon_version.version,
                 ),
