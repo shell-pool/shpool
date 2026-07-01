@@ -1,4 +1,16 @@
 
+shpool-protocol (0.4.2) unstable; urgency=low
+
+  Added
+
+  * report attachments in shpool list --json
+
+  Other
+
+  * name the attachment field session_name_template
+
+ -- Shpool Authors <shpool-eng@google.com>  Wed, 01 Jul 2026 18:08:56 +0000
+
 shpool-protocol (0.4.1) unstable; urgency=low
 
   Added

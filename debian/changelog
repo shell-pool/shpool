@@ -1,4 +1,27 @@
 
+shpool (0.11.1) unstable; urgency=low
+
+  Added
+
+  * report attachments in shpool list --json
+
+  Fixed
+
+  * 0xFF input byte panicking session threads
+  * version errors with shpool
+  * /etc/environment keys with underscores being dropped ([#391](https://github.com/shell-pool/shpool/pull/391))
+
+  Other
+
+  * name the attachment field session_name_template
+  * keep session attachments behind the lifecycle state lock
+  * return peer pid from check_peer for attachments
+  * fix "saftey" typo
+  * bump toml from 0.8.23 to 1.1.2+spec-1.1.0
+  * bump signal-hook from 0.3.18 to 0.4.4 ([#297](https://github.com/shell-pool/shpool/pull/297))
+
+ -- Shpool Authors <shpool-eng@google.com>  Wed, 01 Jul 2026 18:08:56 +0000
+
 shpool (0.11.0) unstable; urgency=low
 
   Other
