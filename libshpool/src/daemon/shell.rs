@@ -63,6 +63,11 @@ const SHELL_TO_CLIENT_POLL_MS: u16 = 50;
 // shell->client thread.
 const SHELL_TO_CLIENT_CTL_TIMEOUT: time::Duration = time::Duration::from_millis(300);
 
+// Keep socket backpressure out of the shell->client control loop. At the
+// largest protocol chunk size this allows a few MiB of temporary client lag.
+const CLIENT_OUTPUT_QUEUE_DEPTH: usize = 256;
+const CLIENT_OUTPUT_DRAIN_TIMEOUT: time::Duration = time::Duration::from_millis(100);
+
 /// Lifecycle state tracking when sessions were last connected/disconnected and
 /// by whom. The fields update in lockstep, so they live behind a single private
 /// lock that only this type's methods take, exactly once per update or read.
@@ -168,13 +173,79 @@ pub struct SessionInner {
 pub struct ClientConnection {
     /// All output data should be written to this sink rather than
     /// directly to the unix stream.
-    sink: io::BufWriter<UnixStream>,
+    sink: io::BufWriter<ClientWriter>,
     /// The size of the client tty.
     size: TtySize,
     /// The raw unix socket stream. The shell->client thread should
     /// never write to this directly, just use it for control
     /// operations like shutdown.
     stream: UnixStream,
+}
+
+struct ClientWriter {
+    queue: crossbeam_channel::Sender<ClientOutputMsg>,
+}
+
+enum ClientOutputMsg {
+    Data(Vec<u8>),
+    Flush(crossbeam_channel::Sender<()>),
+}
+
+impl ClientWriter {
+    fn new(mut stream: UnixStream) -> io::Result<Self> {
+        let (queue, pending) =
+            crossbeam_channel::bounded::<ClientOutputMsg>(CLIENT_OUTPUT_QUEUE_DEPTH);
+        thread::Builder::new().name(String::from("client-output-writer")).spawn(move || {
+            test_hooks::emit("daemon-client-output-writer-before-read");
+            while let Ok(msg) = pending.recv() {
+                match msg {
+                    ClientOutputMsg::Data(buf) => {
+                        if let Err(err) = stream.write_all(&buf).and_then(|_| stream.flush()) {
+                            trace!("client output writer stopped: {}", err);
+                            return;
+                        }
+                    }
+                    ClientOutputMsg::Flush(ack) => {
+                        let _ = ack.send(());
+                    }
+                }
+            }
+        })?;
+        Ok(Self { queue })
+    }
+
+    fn wait_flushed(&self) -> bool {
+        let (ack, flushed) = crossbeam_channel::bounded(0);
+        if self
+            .queue
+            .send_timeout(ClientOutputMsg::Flush(ack), CLIENT_OUTPUT_DRAIN_TIMEOUT)
+            .is_err()
+        {
+            return false;
+        }
+        flushed.recv_timeout(CLIENT_OUTPUT_DRAIN_TIMEOUT).is_ok()
+    }
+}
+
+impl io::Write for ClientWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        match self.queue.try_send(ClientOutputMsg::Data(buf.to_vec())) {
+            Ok(()) => Ok(buf.len()),
+            Err(crossbeam_channel::TrySendError::Full(_)) => {
+                Err(io::Error::new(io::ErrorKind::WouldBlock, "client output queue is full"))
+            }
+            Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
+                Err(io::Error::new(io::ErrorKind::BrokenPipe, "client output writer stopped"))
+            }
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -411,6 +482,7 @@ impl SessionInner {
                         }
                     }
                     recv(args.heartbeat) -> _ => {
+                        let mut write_error = None;
                         let client_present = if let ClientConnectionMsg::New(conn) = &mut client_conn {
                             let chunk = Chunk { kind: ChunkKind::Heartbeat, buf: &[] };
                             match chunk.write_to(&mut conn.sink).and_then(|_| conn.sink.flush()) {
@@ -418,18 +490,21 @@ impl SessionInner {
                                     trace!("wrote heartbeat");
                                     true
                                 }
-                                Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {
-                                    trace!("client hangup: {:?}", e);
-                                    false
-                                }
                                 Err(e) => {
-                                    error!("unexpected IO error while writing heartbeat: {}", e);
-                                    return Err(e).context("writing heartbeat")?;
+                                    write_error = Some(e);
+                                    false
                                 }
                             }
                         } else {
                             false
                         };
+                        if let Some(err) = write_error.as_ref() {
+                            Self::disconnect_client_after_write_error(
+                                &mut client_conn,
+                                "heartbeat",
+                                err,
+                            );
+                        }
 
                         args.heartbeat_ack.send(client_present)
                             .context("sending heartbeat ack")?;
@@ -457,17 +532,22 @@ impl SessionInner {
                         }
 
                         let chunk = Chunk { kind: ChunkKind::MaybeSwitch, buf: &encoded[..] };
-                        match chunk.write_to(&mut conn.sink).and_then(|_| conn.sink.flush()) {
+                        let write_error = match chunk
+                            .write_to(&mut conn.sink)
+                            .and_then(|_| conn.sink.flush())
+                        {
                             Ok(_) => {
                                 trace!("wrote MaybeSwitch");
+                                None
                             }
-                            Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {
-                                trace!("writing MaybeSwitch: client hangup: {:?}", e);
-                            }
-                            Err(e) => {
-                                error!("unexpected IO error while writing heartbeat: {}", e);
-                                return Err(e).context("writing MaybeSwitch")?;
-                            }
+                            Err(e) => Some(e),
+                        };
+                        if let Some(err) = write_error.as_ref() {
+                            Self::disconnect_client_after_write_error(
+                                &mut client_conn,
+                                "MaybeSwitch",
+                                err,
+                            );
                         }
                     }
 
@@ -498,6 +578,7 @@ impl SessionInner {
                 if do_reattach {
                     info!("executing reattach protocol");
                     let restore_buf = output_spool.restore_buffer();
+                    let mut write_error = None;
                     if let (true, ClientConnectionMsg::New(conn)) =
                         (!restore_buf.is_empty(), &mut client_conn)
                     {
@@ -508,12 +589,22 @@ impl SessionInner {
                             let chunk = Chunk { kind: ChunkKind::Data, buf: block };
 
                             if let Err(err) = chunk.write_to(&mut conn.sink) {
-                                warn!("err writing session-restore buf: {:?}", err);
+                                write_error = Some(err);
+                                break;
                             }
                         }
-                        if let Err(err) = conn.sink.flush() {
-                            warn!("err flushing session-restore: {:?}", err);
+                        if write_error.is_none() {
+                            if let Err(err) = conn.sink.flush() {
+                                write_error = Some(err);
+                            }
                         }
+                    }
+                    if let Some(err) = write_error.as_ref() {
+                        Self::disconnect_client_after_write_error(
+                            &mut client_conn,
+                            "session restore",
+                            err,
+                        );
                     }
                 }
 
@@ -588,7 +679,7 @@ impl SessionInner {
                     output_spool.process(buf);
                 }
 
-                let mut reset_client_conn = false;
+                let mut write_error = None;
                 if let (ClientConnectionMsg::New(conn), true) =
                     (&mut client_conn, has_seen_prompt_sentinel)
                 {
@@ -607,14 +698,13 @@ impl SessionInner {
                     let write_result =
                         chunk.write_to(&mut conn.sink).and_then(|_| conn.sink.flush());
                     if let Err(err) = write_result {
-                        info!("client_stream write err, assuming hangup: {:?}", err);
-                        reset_client_conn = true;
+                        write_error = Some(err);
                     } else {
                         test_hooks::emit("daemon-wrote-s2c-chunk");
                     }
                 }
-                if reset_client_conn {
-                    client_conn = ClientConnectionMsg::Disconnect;
+                if let Some(err) = write_error.as_ref() {
+                    Self::disconnect_client_after_write_error(&mut client_conn, "PTY output", err);
                 }
             }
         };
@@ -624,12 +714,16 @@ impl SessionInner {
             .spawn(move || log_if_error("error in shell->client", closure()))?)
     }
 
-    fn write_exit_chunk<W: io::Write>(mut sink: W, status: i32) {
+    fn write_exit_chunk(sink: &mut io::BufWriter<ClientWriter>, status: i32) {
         let status_buf: [u8; 4] = status.to_le_bytes();
         let chunk = Chunk { kind: ChunkKind::ExitStatus, buf: status_buf.as_slice() };
-        match chunk.write_to(&mut sink).and_then(|_| sink.flush()) {
+        match chunk.write_to(&mut *sink).and_then(|_| sink.flush()) {
             Ok(_) => {
-                trace!("wrote exit status chunk");
+                if sink.get_ref().wait_flushed() {
+                    trace!("wrote exit status chunk");
+                } else {
+                    trace!("timed out draining exit status chunk");
+                }
             }
             Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {
                 trace!("client hangup: {:?}", e);
@@ -638,6 +732,20 @@ impl SessionInner {
                 error!("writing exit status chunk: {:?}", e);
             }
         };
+    }
+
+    fn disconnect_client_after_write_error(
+        client_conn: &mut ClientConnectionMsg,
+        operation: &str,
+        err: &dyn std::fmt::Display,
+    ) {
+        info!("{} write failed; detaching stalled client: {}", operation, err);
+        if let ClientConnectionMsg::New(conn) = client_conn {
+            if let Err(shutdown_err) = shutdown_socket(&conn.stream, net::Shutdown::Both) {
+                warn!("failed to shut down stalled client socket: {}", shutdown_err);
+            }
+        }
+        *client_conn = ClientConnectionMsg::Disconnect;
     }
 
     /// bidi_stream shuffles bytes between the subprocess and
@@ -665,8 +773,10 @@ impl SessionInner {
             client_stream.try_clone().context("creating client->shell client stream")?;
         let shell_to_client_client_stream =
             client_stream.try_clone().context("creating shell->client client stream handle")?;
-        let output_sink =
-            io::BufWriter::new(client_stream.try_clone().context("wrapping stream in bufwriter")?);
+        let output_stream = client_stream.try_clone().context("cloning client output stream")?;
+        let output_sink = io::BufWriter::new(
+            ClientWriter::new(output_stream).context("starting client output writer")?,
+        );
 
         {
             let _s = span!(Level::INFO, "initial_attach_lock(shell_to_client_ctl)").entered();
