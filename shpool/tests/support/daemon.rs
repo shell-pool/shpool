@@ -51,6 +51,7 @@ pub struct AttachArgs {
     pub config: Option<String>,
     pub force: bool,
     pub background: bool,
+    pub error_status_mode: Option<&'static str>,
     pub extra_env: Vec<(String, String)>,
     pub ttl: Option<time::Duration>,
     pub cmd: Option<String>,
@@ -362,6 +363,10 @@ impl Proc {
         }
         if args.background {
             cmd.arg("-b");
+        }
+        if let Some(error_status_mode) = args.error_status_mode {
+            cmd.arg("--error-status-mode");
+            cmd.arg(error_status_mode);
         }
         if let Some(ttl) = args.ttl {
             cmd.arg("--ttl");
