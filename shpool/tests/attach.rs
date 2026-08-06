@@ -1040,6 +1040,48 @@ fn lines_restore() -> anyhow::Result<()> {
     Ok(())
 }
 
+// The restore buffer has to carry the input modes the application turned on,
+// not just the screen contents. A terminal that attaches without them silently
+// loses bracketed paste, application cursor/keypad and mouse reporting.
+//
+// We drive mouse reporting here rather than bracketed paste because no shell
+// sets it on our behalf, so a match can only come from the restore buffer.
+#[test]
+#[timeout(30000)]
+fn screen_restore_input_modes() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new("restore_screen.toml", DaemonArgs::default())
+        .context("starting daemon proc")?;
+    let bidi_done_w = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
+
+    {
+        let mut attach_proc =
+            daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+        let mut line_matcher = attach_proc.line_matcher()?;
+
+        attach_proc.run_cmd("printf '\\033[?1000h'; echo modes-on")?;
+        line_matcher.scan_until_re("modes-on$")?;
+    }
+
+    // wait until the daemon has noticed that the connection
+    // has dropped before we attempt to open the connection again
+    daemon_proc.events = Some(bidi_done_w.wait_final_event("daemon-bidi-stream-done")?);
+
+    {
+        let mut attach_proc =
+            daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+        let mut line_matcher = attach_proc.line_matcher()?;
+
+        // The restore buffer does not end in a newline, so give the line
+        // matcher something that does before asserting on it. Nothing in the
+        // shell emits mouse reporting, so a match can only come from the
+        // restore buffer we are testing.
+        attach_proc.run_cmd("echo flushed")?;
+        line_matcher.scan_until_re("\\x1b\\[\\?1000h")?;
+    }
+
+    Ok(())
+}
+
 // Test to make sure that when we do a restore, we don't send back too many
 // bytes in once chunk. The attach client has a fixed size buffer it reads into,
 // and it will crash if it gets sent a chunk with too large a length.
