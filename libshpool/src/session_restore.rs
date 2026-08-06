@@ -86,7 +86,15 @@ impl SessionSpool for Vt100Screen {
     fn restore_buffer(&self) -> Vec<u8> {
         let (rows, cols) = self.parser.screen().size();
         info!("computing screen restore buf with (rows={}, cols={})", rows, cols);
-        self.parser.screen().contents_formatted()
+        // The screen contents alone do not tell a freshly attached terminal
+        // which input modes the application enabled (bracketed paste,
+        // application cursor/keypad, mouse protocol). Without them a paste
+        // into a reattached session arrives unbracketed: terminals flag it
+        // as unsafe and every newline submits early. Replay the tracked
+        // input modes after the contents.
+        let mut buf = self.parser.screen().contents_formatted();
+        buf.extend(self.parser.screen().input_mode_formatted());
+        buf
     }
 
     fn process(&mut self, bytes: &[u8]) {
@@ -111,7 +119,12 @@ impl SessionSpool for Vt100Lines {
     fn restore_buffer(&self) -> Vec<u8> {
         let (rows, cols) = self.parser.screen().size();
         info!("computing lines({}) restore buf with (rows={}, cols={})", self.nlines, rows, cols);
-        self.parser.screen().last_n_rows_contents_formatted(self.nlines)
+        // See Vt100Screen::restore_buffer: input modes must ride along with
+        // the restored contents or the attached terminal loses bracketed
+        // paste (and friends) across a reattach.
+        let mut buf = self.parser.screen().last_n_rows_contents_formatted(self.nlines);
+        buf.extend(self.parser.screen().input_mode_formatted());
+        buf
     }
 
     fn process(&mut self, bytes: &[u8]) {
