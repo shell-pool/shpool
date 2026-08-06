@@ -313,6 +313,64 @@ fn running_env_var() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A session whose shell has already died while nothing was attached still
+/// sits in the daemon's table. Killing it must succeed and remove it, rather
+/// than failing on ESRCH and leaving a session that can never be killed.
+#[test]
+#[timeout(30000)]
+fn already_dead_shell() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+        .context("starting daemon proc")?;
+    let bidi_done_w = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
+
+    let child_pid: i32;
+    {
+        let mut attach_proc =
+            daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+        let mut line_matcher = attach_proc.line_matcher()?;
+
+        attach_proc.run_cmd("echo shellpid=$$")?;
+        let caps = line_matcher.scan_until_re_captures("shellpid=([0-9]+)$")?;
+        child_pid = caps[1].as_ref().ok_or(anyhow::anyhow!("no pid captured"))?.parse()?;
+    }
+
+    // Let the daemon notice the client is gone, so the session is sitting in
+    // the table with no one attached.
+    daemon_proc.events = Some(bidi_done_w.wait_final_event("daemon-bidi-stream-done")?);
+
+    // Kill the shell out from under the daemon, the way an OOM kill or a stray
+    // `kill -9` would.
+    nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(child_pid),
+        Some(nix::sys::signal::Signal::SIGKILL),
+    )
+    .context("killing shell out from under the daemon")?;
+
+    // Wait for the daemon's child watcher to reap it. Until it does the shell
+    // is a zombie, and signals to a zombie still succeed.
+    let start = std::time::Instant::now();
+    while nix::sys::signal::kill(nix::unistd::Pid::from_raw(child_pid), None).is_ok() {
+        if start.elapsed() > std::time::Duration::from_secs(10) {
+            anyhow::bail!("shell {child_pid} was never reaped");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    // On buggy code the SIGHUP fails with ESRCH, the error propagates, and the
+    // session is never removed from the table.
+    let out = daemon_proc.kill(vec![String::from("sh1")])?;
+    let stderr = String::from_utf8_lossy(&out.stderr[..]);
+    assert!(out.status.success(), "kill failed: {stderr}");
+    assert!(stderr.is_empty(), "unexpected stderr: {stderr}");
+
+    // and the session should really be gone, not just reported as killed.
+    let list_out = daemon_proc.list()?;
+    let listing = String::from_utf8_lossy(&list_out.stdout[..]);
+    assert!(!listing.contains("sh1"), "session survived the kill: {listing}");
+
+    Ok(())
+}
+
 #[test]
 #[timeout(30000)]
 fn missing() -> anyhow::Result<()> {

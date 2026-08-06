@@ -130,13 +130,21 @@ impl Session {
         // from a process. We can't use the normal SIGTERM graceful-shutdown
         // signal since shells just forward those to their child process,
         // but for shells SIGHUP serves as the graceful shutdown signal.
-        signal::kill(Pid::from_raw(self.child_pid), Some(signal::Signal::SIGHUP))
-            .context("sending SIGHUP to child proc")?;
+        match signal::kill(Pid::from_raw(self.child_pid), Some(signal::Signal::SIGHUP)) {
+            // ESRCH means "no such process", so the child is already gone and
+            // there is nothing left to kill.
+            Err(nix::errno::Errno::ESRCH) => return Ok(()),
+            res => res.context("sending SIGHUP to child proc")?,
+        }
 
         if self.child_exit_notifier.wait(Some(SHELL_KILL_TIMEOUT)).is_none() {
             info!("child failed to exit within kill timeout, no longer being polite");
-            signal::kill(Pid::from_raw(self.child_pid), Some(signal::Signal::SIGKILL))
-                .context("sending SIGKILL to child proc")?;
+            match signal::kill(Pid::from_raw(self.child_pid), Some(signal::Signal::SIGKILL)) {
+                // ESRCH means "no such process", so the child exited on its own
+                // between the SIGHUP and now.
+                Err(nix::errno::Errno::ESRCH) => return Ok(()),
+                res => res.context("sending SIGKILL to child proc")?,
+            }
         }
 
         Ok(())

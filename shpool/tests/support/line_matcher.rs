@@ -29,6 +29,13 @@ where
 
     /// Scan lines until one matches the given regex
     pub fn scan_until_re(&mut self, re: &str) -> anyhow::Result<()> {
+        self.scan_until_re_captures(re)?;
+
+        Ok(())
+    }
+
+    /// Scan lines until one matches the given regex, returning its captures.
+    pub fn scan_until_re_captures(&mut self, re: &str) -> anyhow::Result<Vec<Option<String>>> {
         let compiled_re = Regex::new(re)?;
         let start = time::Instant::now();
         let mut line = String::new();
@@ -62,13 +69,15 @@ where
             self.check_persistant_assertions(&line)?;
 
             eprint!("scanning for /{re}/... ");
-            if compiled_re.is_match(&line) {
+            if let Some(caps) = compiled_re.captures(&line) {
                 eprintln!(" match");
-                return Ok(());
-            } else {
-                eprintln!(" no match");
-                line.clear();
+                return Ok(caps
+                    .iter()
+                    .map(|maybe_match| maybe_match.map(|m| String::from(m.as_str())))
+                    .collect());
             }
+            eprintln!(" no match");
+            line.clear();
         }
     }
 
