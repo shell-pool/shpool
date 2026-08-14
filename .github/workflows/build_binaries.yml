@@ -6,6 +6,7 @@ permissions:
 on:
   release:
     types: [published]
+  workflow_dispatch:
 
 env:
   CARGO_INCREMENTAL: 0
@@ -23,7 +24,13 @@ defaults:
 jobs:
   upload-assets:
     name: ${{ matrix.target }}
-    if: github.repository_owner == 'shell-pool' && startsWith(github.event.release.name, 'shpool')
+    if: |
+      github.repository_owner == 'shell-pool' &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        startsWith(github.event.release.tag_name, 'v') ||
+        startsWith(github.event.release.name, 'v')
+      )
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -36,12 +43,10 @@ jobs:
             os: ubuntu-22.04
           - target: x86_64-unknown-linux-musl
             os: ubuntu-22.04
-          #- target: aarch64-apple-darwin
-          #  os: macos-12
-          #- target: x86_64-apple-darwin
-          #  os: macos-12
-          #- target: x86_64-unknown-freebsd
-          #  os: ubuntu-22.04
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-13
     timeout-minutes: 60
     steps:
       - name: Checkout repository
@@ -54,9 +59,7 @@ jobs:
       - uses: taiki-e/setup-cross-toolchain-action@3d9770ce98eb7dbcf378563182a5e8031165f75b
         with:
           target: ${{ matrix.target }}
-        if: startsWith(matrix.os, 'ubuntu') && !contains(matrix.target, '-musl')
-      - run: echo "RUSTFLAGS=${RUSTFLAGS} -C target-feature=+crt-static" >> "${GITHUB_ENV}"
-        if: endsWith(matrix.target, 'windows-msvc')
+        if: startsWith(matrix.os, 'ubuntu')
       - uses: taiki-e/upload-rust-binary-action@f0d45ae91ee7b8ee928de7a9d04d893a08bcbec6
         with:
           bin: shpool
