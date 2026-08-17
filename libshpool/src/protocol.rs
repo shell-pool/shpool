@@ -395,6 +395,29 @@ impl Client {
                     + (sock_to_stdout_h.is_finished() as usize);
 
                 if nfinished_threads > 0 {
+                    // A finished stdin->sock thread only means our stdin closed;
+                    // the shell's exit status may still be in flight. Stamping
+                    // the fallback now makes sock->stdout bail before reading
+                    // the ExitStatus frame, reporting 1 instead of the real
+                    // status, so wait briefly for the socket side. It returns as
+                    // soon as the frame lands, not after the whole window.
+                    if stdin_to_sock_h.is_finished() && !sock_to_stdout_h.is_finished() {
+                        common::sleep_unless(
+                            MAX_DETACH_WAIT_DUR,
+                            || {
+                                sock_to_stdout_h.is_finished()
+                                    || result_slot.lock().unwrap().is_some()
+                            },
+                            common::PollStrategy::Backoff {
+                                initial_interval: DETACH_BACKOFF_INITIAL_DUR,
+                                factor: 2.0,
+                                max_interval: DETACH_BACKOFF_MAX_STEP_DUR,
+                            },
+                        );
+                        nfinished_threads = (stdin_to_sock_h.is_finished() as usize)
+                            + (sock_to_stdout_h.is_finished() as usize);
+                    }
+
                     // If one of the threads has exited, but not the other
                     // make sure that the exit result slot has some contents
                     // so the other thread will exit the next time it wakes
