@@ -305,6 +305,43 @@ fn concurrent_attach_to_existing_session_race() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Regression test for a slow heartbeat ack killing the session. The
+/// shell->client thread can be busy when the heartbeat thread asks it for an
+/// ack (generating a large session restore buffer is the usual cause). Treating
+/// that as fatal tore down the thread scope along with the session's
+/// shell->client thread, leaving a session that could never be attached again.
+///
+/// We stall the shell->client thread right after it writes a heartbeat but
+/// before it acks, hold it past the ack timeout, then check the session still
+/// works.
+#[test]
+#[timeout(30000)]
+fn slow_heartbeat_ack_does_not_wedge_session() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+        .context("starting daemon proc")?;
+
+    let mut attach_proc =
+        daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+    daemon_proc.await_event("daemon-bidi-stream-enter")?;
+
+    daemon_proc.send_event_command("pause-at daemon-wrote-heartbeat")?;
+    daemon_proc.await_event("paused-at daemon-wrote-heartbeat")?;
+
+    // SHELL_TO_CLIENT_CTL_TIMEOUT is 300ms, so this guarantees the ack recv
+    // times out at least once.
+    std::thread::sleep(Duration::from_millis(600));
+
+    daemon_proc.send_event_command("release daemon-wrote-heartbeat")?;
+
+    // On buggy code the heartbeat thread has already returned an error, the
+    // scope has unwound, and this command never produces output.
+    let mut line_matcher = attach_proc.line_matcher()?;
+    attach_proc.run_cmd("echo still-alive")?;
+    line_matcher.scan_until_re("still-alive$")?;
+
+    Ok(())
+}
+
 /// Regression test for a bug where shpool would abort the attach process
 /// if the MOTD pager exited normally (e.g. less EOF). It should transition
 /// to the shell instead.
