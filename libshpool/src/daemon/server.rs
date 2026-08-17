@@ -625,32 +625,72 @@ impl Server {
     fn handle_detach(&self, mut stream: UnixStream, request: DetachRequest) -> anyhow::Result<()> {
         let mut not_found_sessions = vec![];
         let mut not_attached_sessions = vec![];
+
+        // Resolve the requested names to control handles while the shells lock
+        // is held, then drop it. The ctl handshake below MUST NOT run under
+        // that lock: client_connection and client_connection_ack are both
+        // rendezvous channels (bounded(0)), so each half only completes when
+        // the shell->client thread is sitting in its select loop. A client
+        // whose socket has stopped draining (a stalled ssh window, a suspended
+        // laptop) leaves that thread blocked in write() instead, and an
+        // unbounded exchange here then parks the global shells lock forever --
+        // every list, attach, detach and kill in the daemon wedges behind a
+        // single unresponsive session. Holding only an Arc keeps the ctl alive
+        // if the session is removed while we talk to it.
+        let mut targets = Vec::with_capacity(request.sessions.len());
         {
             let _s = span!(Level::INFO, "lock(shells)").entered();
             let shells = self.shells.lock();
             for session in request.sessions.into_iter() {
                 if let Some(s) = shells.get(&session) {
-                    let _s = span!(Level::INFO, "lock(shell_to_client_ctl)", s = session).entered();
-                    let shell_to_client_ctl = s.shell_to_client_ctl.lock();
-                    shell_to_client_ctl
-                        .client_connection
-                        .send(shell::ClientConnectionMsg::Disconnect)
-                        .context("sending client detach to shell->client")?;
-                    let status = shell_to_client_ctl
-                        .client_connection_ack
-                        .recv()
-                        .context("getting client conn ack")?;
-                    info!("detached session({}), status = {:?}", session, status);
-                    if let shell::ClientConnectionStatus::DetachNone = status {
-                        not_attached_sessions.push(session);
-                    } else {
-                        // The bidi-loop unwind in handle_attach owns the SessionDetached publish;
-                        // we just update the lifecycle state eagerly so a concurrent list()
-                        // reflects the detach immediately.
-                        s.lifecycle.record_detached();
-                    }
+                    targets.push((session, Arc::clone(&s.shell_to_client_ctl)));
                 } else {
                     not_found_sessions.push(session);
+                }
+            }
+        }
+
+        // Both halves are bounded, matching the session-message detach path.
+        // A session that cannot complete the handshake in time is reported as
+        // not attached rather than being allowed to stall the daemon.
+        let mut detached_sessions = vec![];
+        for (session, shell_to_client_ctl) in targets.into_iter() {
+            let _s = span!(Level::INFO, "lock(shell_to_client_ctl)", s = session).entered();
+            let shell_to_client_ctl = shell_to_client_ctl.lock();
+            if let Err(err) = shell_to_client_ctl
+                .client_connection
+                .send_timeout(shell::ClientConnectionMsg::Disconnect, SESSION_MSG_TIMEOUT)
+            {
+                error!("sending client detach to shell->client for {}: {:?}", session, err);
+                not_attached_sessions.push(session);
+                continue;
+            }
+            let status =
+                match shell_to_client_ctl.client_connection_ack.recv_timeout(SESSION_MSG_TIMEOUT) {
+                    Ok(status) => status,
+                    Err(err) => {
+                        error!("getting client conn ack for {}: {:?}", session, err);
+                        not_attached_sessions.push(session);
+                        continue;
+                    }
+                };
+            info!("detached session({}), status = {:?}", session, status);
+            if let shell::ClientConnectionStatus::DetachNone = status {
+                not_attached_sessions.push(session);
+            } else {
+                detached_sessions.push(session);
+            }
+        }
+
+        // The bidi-loop unwind in handle_attach owns the SessionDetached
+        // publish; we just update the lifecycle state eagerly so a concurrent
+        // list() reflects the detach immediately.
+        if !detached_sessions.is_empty() {
+            let _s = span!(Level::INFO, "timestamp_lock(shells)").entered();
+            let shells = self.shells.lock();
+            for session in detached_sessions.iter() {
+                if let Some(s) = shells.get(session) {
+                    s.lifecycle.record_detached();
                 }
             }
         }
