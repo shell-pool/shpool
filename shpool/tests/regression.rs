@@ -334,3 +334,147 @@ fn pager_exit_transitions_to_shell() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+/// Regression test for resize bursts reaching the session one-for-one. A
+/// fullscreen animation under a dragging window delivers a stream of
+/// SIGWINCHes to the attach client; forwarding each one makes the attached
+/// application repaint per event, shoving a stale frame into scrollback every
+/// time. The client should coalesce a burst and forward one resize carrying
+/// the final size.
+///
+/// We attach through a real pty, have the session shell count the WINCHes it
+/// receives, then deliver a rapid burst of client-side resizes.
+#[test]
+#[timeout(30000)]
+fn resize_burst_reaches_session_as_one_resize() -> anyhow::Result<()> {
+    use std::os::fd::{AsRawFd, OwnedFd};
+
+    let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+        .context("starting daemon proc")?;
+
+    let pty = nix::pty::openpty(
+        Some(&nix::pty::Winsize { ws_row: 24, ws_col: 80, ws_xpixel: 0, ws_ypixel: 0 }),
+        None,
+    )
+    .context("opening pty pair")?;
+    let master: OwnedFd = pty.master;
+    let slave: OwnedFd = pty.slave;
+
+    let attach_log = daemon_proc.tmp_dir.path().join("pty_attach.log");
+    let mut cmd = Command::new(support::shpool_bin()?);
+    cmd.stdin(std::process::Stdio::from(slave.try_clone()?))
+        .stdout(std::process::Stdio::from(slave.try_clone()?))
+        .stderr(std::process::Stdio::from(slave))
+        .arg("--config-file")
+        .arg(support::testdata_file("norc.toml"))
+        .arg("-v")
+        .arg("--log-file")
+        .arg(&attach_log)
+        .arg("--socket")
+        .arg(&daemon_proc.socket_path)
+        .arg("attach")
+        .arg("sh1")
+        .env_clear();
+    if let Ok(path) = std::env::var("PATH") {
+        cmd.env("PATH", path);
+    }
+    if let Ok(xdg_runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
+        cmd.env("XDG_RUNTIME_DIR", xdg_runtime_dir);
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        cmd.env("HOME", home);
+    }
+    let mut attach_proc = cmd.spawn().context("spawning pty attach")?;
+    std::thread::sleep(Duration::from_millis(1500));
+    match attach_proc.try_wait() {
+        Ok(Some(status)) => {
+            let log = std::fs::read_to_string(&attach_log).unwrap_or_default();
+            let mut pty_out = Vec::new();
+            let flags = unsafe { nix::libc::fcntl(master.as_raw_fd(), nix::libc::F_GETFL) };
+            unsafe {
+                nix::libc::fcntl(
+                    master.as_raw_fd(),
+                    nix::libc::F_SETFL,
+                    flags | nix::libc::O_NONBLOCK,
+                );
+            }
+            let mut buf = [0u8; 4096];
+            while let Ok(n) = nix::unistd::read(&master, &mut buf) {
+                if n == 0 {
+                    break;
+                }
+                pty_out.extend_from_slice(&buf[..n]);
+            }
+            panic!(
+                "pty attach exited early ({status:?}); log tail: {}; pty: {}",
+                &log[log.len().saturating_sub(2000)..],
+                String::from_utf8_lossy(&pty_out),
+            );
+        }
+        _ => {}
+    }
+    daemon_proc.await_event("daemon-bidi-stream-enter")?;
+
+    let mut reader = std::io::BufReader::new(std::fs::File::from(master.try_clone()?));
+    let mut writer = std::fs::File::from(master.try_clone()?);
+    writer.write_all(b"trap 'echo W-I-N-C-H' WINCH; echo t-r-a-p-s-e-t\n")?;
+    let mut seen = String::new();
+    {
+        use std::io::BufRead;
+        let mut line = String::new();
+        loop {
+            line.clear();
+            reader.read_line(&mut line)?;
+            if line.contains("t-r-a-p-s-e-t") && !line.contains("echo") {
+                break;
+            }
+        }
+        let _ = &seen;
+    }
+
+    // A burst of eight client resizes inside the coalescing window, each with
+    // a genuinely different size so every forwarded resize would move the
+    // session pty and raise a WINCH in the shell.
+    for step in 0..24u16 {
+        let size =
+            nix::pty::Winsize { ws_row: 25 + step, ws_col: 81 + step, ws_xpixel: 0, ws_ypixel: 0 };
+        let res = unsafe { nix::libc::ioctl(master.as_raw_fd(), nix::libc::TIOCSWINSZ, &size) };
+        assert_eq!(res, 0, "setting pty size");
+        // The client is not the pty's foreground process group, so deliver
+        // the signal a real terminal would raise.
+        let killed =
+            Command::new("kill").args(["-WINCH", &attach_proc.id().to_string()]).status()?;
+        assert!(killed.success(), "signalling attach client");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    // Let the burst settle, then fence with a marker so every WINCH echo the
+    // shell will ever print is already in the stream when we count.
+    std::thread::sleep(Duration::from_millis(1200));
+    writer.write_all(b"echo f-e-n-c-e\n")?;
+    {
+        use std::io::BufRead;
+        let mut line = String::new();
+        loop {
+            line.clear();
+            reader.read_line(&mut line)?;
+            if line.contains("W-I-N-C-H") && !line.contains("trap") {
+                seen.push('W');
+            }
+            if line.contains("f-e-n-c-e") && !line.contains("echo") {
+                break;
+            }
+        }
+    }
+
+    let _ = Command::new("kill").arg(attach_proc.id().to_string()).status();
+    let _ = attach_proc.wait();
+
+    assert!(
+        seen.len() <= 2,
+        "a resize burst reached the session as {} resizes; it should coalesce to one",
+        seen.len()
+    );
+
+    Ok(())
+}

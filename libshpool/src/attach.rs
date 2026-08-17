@@ -421,11 +421,16 @@ enum AttachResult {
 struct SignalHandler {
     session_name: Arc<Mutex<String>>,
     socket: PathBuf,
+    last_sent_size: Mutex<Option<(u16, u16)>>,
 }
 
 impl SignalHandler {
     fn new(session_name: String, socket: PathBuf) -> Self {
-        SignalHandler { session_name: Arc::new(Mutex::new(session_name)), socket }
+        SignalHandler {
+            session_name: Arc::new(Mutex::new(session_name)),
+            socket,
+            last_sent_size: Mutex::new(None),
+        }
     }
 
     fn spawn(self) -> anyhow::Result<Arc<Mutex<String>>> {
@@ -436,18 +441,43 @@ impl SignalHandler {
         let sigs = vec![SIGWINCH];
         let mut signals = Signals::new(sigs).context("creating signal iterator")?;
 
-        thread::spawn(move || {
-            for signal in &mut signals {
-                let res = match signal {
-                    SIGWINCH => self.handle_sigwinch(),
+        thread::spawn(move || loop {
+            let mut got_winch = false;
+            for signal in signals.wait() {
+                match signal {
+                    SIGWINCH => got_winch = true,
                     sig => {
                         error!("unknown signal: {}", sig);
                         panic!("unknown signal: {sig}");
                     }
-                };
-                if let Err(e) = res {
-                    error!("signal handler error: {:?}", e);
                 }
+            }
+            if !got_winch {
+                continue;
+            }
+            // Coalesce resize bursts. A fullscreen animation delivers a
+            // stream of SIGWINCHes; forwarding each one makes the attached
+            // application repaint per event, shoving one stale frame into
+            // the client's scrollback every time (operator finding X19,
+            // 2026-08-14). Wait for the reported size to stop moving and
+            // for the queue to run dry, then forward one resize carrying
+            // the final size.
+            loop {
+                let before = TtySize::from_fd(0).ok().map(|s| (s.rows, s.cols));
+                thread::sleep(time::Duration::from_millis(120));
+                let mut more = false;
+                for signal in signals.pending() {
+                    if signal == SIGWINCH {
+                        more = true;
+                    }
+                }
+                let after = TtySize::from_fd(0).ok().map(|s| (s.rows, s.cols));
+                if !more && before == after {
+                    break;
+                }
+            }
+            if let Err(e) = self.handle_sigwinch() {
+                error!("signal handler error: {:?}", e);
             }
         });
 
@@ -466,6 +496,17 @@ impl SignalHandler {
 
         let tty_size = TtySize::from_fd(0).context("getting tty size")?;
         info!("handle_sigwinch: tty_size={:?}", tty_size);
+
+        // A size the daemon already holds triggers a whole-frame repaint
+        // for nothing; skip the duplicate instead of forwarding it.
+        {
+            let mut last = self.last_sent_size.lock().unwrap();
+            if *last == Some((tty_size.rows, tty_size.cols)) {
+                info!("handle_sigwinch: size unchanged, not forwarding");
+                return Ok(());
+            }
+            *last = Some((tty_size.rows, tty_size.cols));
+        }
 
         // write the request on a new, seperate connection
         client
