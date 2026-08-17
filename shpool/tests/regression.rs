@@ -1,6 +1,6 @@
 use std::{fs, io::Write, process::Command, sync::mpsc, time::Duration};
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use ntest::timeout;
 
 mod support;
@@ -331,6 +331,47 @@ fn pager_exit_transitions_to_shell() -> anyhow::Result<()> {
     // We should be able to run a command in the shell.
     attach_proc.run_cmd("echo 'in-shell'")?;
     line_matcher.scan_until_re("in-shell$")?;
+
+    Ok(())
+}
+
+/// Regression test for the attach client discarding the shell's real exit
+/// status. The client stamps its fallback status of 1 into the result slot as
+/// soon as EITHER pipe thread finishes. A terminal that closes the client's
+/// stdin before the shell's ExitStatus frame arrives -- which any terminal
+/// does when it hangs up first -- therefore reported 1 no matter how the
+/// shell actually exited.
+///
+/// We close the client's stdin while the shell is still sleeping toward a
+/// distinctive exit code, so the stdin->sock thread always finishes first.
+#[test]
+#[timeout(30000)]
+fn stdin_close_does_not_discard_exit_status() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+        .context("starting daemon proc")?;
+
+    let mut attach_proc =
+        daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+    daemon_proc.await_event("daemon-bidi-stream-enter")?;
+
+    let mut line_matcher = attach_proc.line_matcher()?;
+    attach_proc.run_cmd("echo ready")?;
+    line_matcher.scan_until_re("ready$")?;
+
+    // MAX_DETACH_WAIT_DUR is 300ms: the frame must arrive inside the bounded
+    // window the client waits after its stdin side finishes.
+    attach_proc.run_cmd("sleep 0.15; exit 19")?;
+    // Close our stdin immediately: the fallback status must not win the race
+    // against the ExitStatus frame that arrives moments later.
+    drop(attach_proc.proc.stdin.take());
+
+    let code = attach_proc
+        .proc
+        .wait()
+        .context("waiting for attach proc to exit")?
+        .code()
+        .ok_or(anyhow!("no exit code"))?;
+    assert_eq!(code, 19, "shell exit status was discarded");
 
     Ok(())
 }
