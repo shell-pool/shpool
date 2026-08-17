@@ -1,6 +1,10 @@
 use std::{fs, io::Write, process::Command, sync::mpsc, time::Duration};
 
 use anyhow::{anyhow, Context};
+use nix::{
+    sys::signal::{self, Signal},
+    unistd::Pid,
+};
 use ntest::timeout;
 
 mod support;
@@ -372,6 +376,59 @@ fn stdin_close_does_not_discard_exit_status() -> anyhow::Result<()> {
         .code()
         .ok_or(anyhow!("no exit code"))?;
     assert_eq!(code, 19, "shell exit status was discarded");
+
+    Ok(())
+}
+
+/// Regression test for a daemon-wide wedge in the detach handler. The
+/// client_connection/client_connection_ack exchange is a rendezvous, so it
+/// only completes while the shell->client thread is parked in its select
+/// loop. A client whose socket has stopped draining (a stalled ssh window, a
+/// suspended laptop) leaves that thread blocked in write() instead, and
+/// handle_detach used to run the exchange while still holding the global
+/// shells lock -- one unresponsive client wedged every list, attach, detach
+/// and kill in the daemon.
+///
+/// We stop the attach client with SIGSTOP, flood the session with output
+/// until the kernel socket buffers fill and the shell->client thread is stuck
+/// in write(), then detach. The daemon must answer the detach (reporting the
+/// session rather than hanging) and a follow-up list must come back.
+#[test]
+#[timeout(30000)]
+fn detach_of_stalled_client_does_not_wedge_daemon() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+        .context("starting daemon proc")?;
+
+    let mut attach_proc =
+        daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
+    daemon_proc.await_event("daemon-bidi-stream-enter")?;
+
+    let mut line_matcher = attach_proc.line_matcher()?;
+    attach_proc.run_cmd("echo ready")?;
+    line_matcher.scan_until_re("ready$")?;
+
+    // Ask the shell for far more output than the socket buffers hold, then
+    // immediately stop the client so nothing drains.
+    attach_proc.run_cmd("yes | head -c 8000000; echo flood-done")?;
+    let client_pid = Pid::from_raw(attach_proc.proc.id() as i32);
+    signal::kill(client_pid, Signal::SIGSTOP).context("stopping attach client")?;
+
+    // Give the flood time to fill the kernel buffers behind the stopped
+    // client so the shell->client thread is genuinely parked in write().
+    std::thread::sleep(Duration::from_millis(1500));
+
+    // On buggy code this call never returns: the rendezvous send blocks
+    // under the shells lock and the whole daemon wedges behind it. The exit
+    // status does not matter here -- a stalled client is correctly reported
+    // as not attached -- only that the daemon answered at all.
+    let _detach_out =
+        daemon_proc.detach(vec![String::from("sh1")]).context("detaching stalled client")?;
+
+    // The real assertion: the daemon still answers.
+    let list_out = daemon_proc.list().context("listing after detach")?;
+    assert!(list_out.status.success(), "list did not complete");
+
+    let _ = signal::kill(client_pid, Signal::SIGCONT);
 
     Ok(())
 }
