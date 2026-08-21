@@ -14,17 +14,14 @@
 
 use anyhow::{anyhow, Context as _, Result};
 use crossbeam_channel::{bounded, select, unbounded, Receiver, Sender};
-use notify::{
-    event::ModifyKind, recommended_watcher, Event, EventKind, RecommendedWatcher, RecursiveMode,
-    Watcher as _,
-};
+use notify::{event::ModifyKind, RecursiveMode, Watcher as _};
 use std::{
     collections::{hash_map::Entry, HashMap},
     path::{Path, PathBuf},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
-use tracing::{debug, error, instrument, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::test_hooks;
 
@@ -54,35 +51,31 @@ fn canonicalize_path(path: &Path) -> PathBuf {
     path.to_path_buf()
 }
 
-/// Watches on `path`, returnes the watched path, which is the closest existing
-/// ancestor of `path`, and the immediate child that is of interest.
-pub fn best_effort_watch<'a>(
-    watcher: &mut RecommendedWatcher,
-    path: &'a Path,
-) -> Result<(&'a Path, Option<&'a Path>)> {
-    let mut watched_path = Err(anyhow!("empty path"));
-    // Ok or last Err
-    for watch_path in path.ancestors() {
-        match watcher.watch(watch_path, RecursiveMode::NonRecursive) {
-            Ok(_) => {
-                watched_path = Ok(watch_path);
-                break;
-            }
-            Err(err) => watched_path = Err(err.into()),
-        }
-    }
-    // watched path could be any ancestor of the original path
-    let watched_path = watched_path.context("adding notify watch for config file")?;
-    let remaining_path = path
-        .strip_prefix(watched_path)
-        .expect("watched_path was obtained as an ancestor of path, yet it is not a prefix");
-    let immediate_child = remaining_path.iter().next();
-    debug!("Actually watching {}, ic {:?}", watched_path.display(), &immediate_child);
-    Ok((watched_path, immediate_child.map(Path::new)))
-}
-
 // Note that you can't add doctest for private items.
 // See https://stackoverflow.com/a/76289746
+
+/// Configuration options for [`ConfigWatcher`].
+#[derive(Debug, Clone)]
+pub struct Options {
+    /// Time to wait after a filesystem event before triggering a reload.
+    pub debounce: Duration,
+    /// Interval at which missing config file paths are checked for existence.
+    pub poll_interval: Duration,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            debounce: Duration::from_millis(100),
+            // Parent paths can change much more frequently than target watch
+            // files, so if the target file doesn't exist, rather than watching
+            // parent dirs directly, we instead wake up at least every poll dur
+            // and check if the target files do exist. If they do, we install proper
+            // watchers.
+            poll_interval: Duration::from_secs(5),
+        }
+    }
+}
 
 /// Notify watcher to detect config file changes.
 ///
@@ -116,7 +109,7 @@ pub struct ConfigWatcher {
 }
 
 impl ConfigWatcher {
-    /// Creates a new [`ConfigWatcher`] with default debounce time 100ms.
+    /// Creates a new [`ConfigWatcher`] with default options.
     ///
     /// Event processing happens in another thread, so the passed in `handler`
     /// is expected to properly handle synchronization and locking.
@@ -126,46 +119,38 @@ impl ConfigWatcher {
     /// thread failed.
     #[instrument(skip_all)]
     pub fn new(handler: impl FnMut() + Send + 'static) -> Result<Self> {
-        Self::with_debounce(handler, Duration::from_millis(100))
+        Self::with_options(handler, Options::default())
     }
 
-    /// Creates a new [`ConfigWatcher`] with default debounce time
-    /// `reload_debounce`.
+    /// Creates a new [`ConfigWatcher`] with the given [`Options`].
     ///
     /// Event processing happens in another thread, so the passed in `handler`
     /// is expected to properly handle synchronization and locking.
-    ///
-    /// # Arguments
-    /// * `handler` - The handler is called when the watcher determines there is
-    ///   a need to reload config files
-    /// * `reload_debounce` - Reloads happen within `reload_debounce` time will
-    ///   only trigger the handler once
     ///
     /// # Errors
     /// Returns error if the creation of underlying `notify` watcher or worker
     /// thread failed.
     #[instrument(skip_all)]
-    pub fn with_debounce(
-        handler: impl FnMut() + Send + 'static,
-        reload_debounce: Duration,
-    ) -> Result<Self> {
+    pub fn with_options(handler: impl FnMut() + Send + 'static, options: Options) -> Result<Self> {
         let (notify_tx, notify_rx) = unbounded();
         let (req_tx, req_rx) = unbounded();
 
         #[cfg(test)]
         let (debug_tx, debug_rx) = unbounded();
 
-        let watcher = recommended_watcher(notify_tx).context("create notify watcher")?;
+        let watcher = notify::recommended_watcher(notify_tx).context("create notify watcher")?;
 
         let mut inner = ConfigWatcherInner {
-            reload_debounce,
+            reload_debounce: options.debounce,
             reload_deadline: None,
+            poll_interval: options.poll_interval,
             handler,
             watcher,
             notify_rx,
             req_rx,
             #[cfg(test)]
             debug_tx,
+            last_paths_presence_poll: Instant::now(),
             paths: Default::default(),
         };
         let worker = thread::Builder::new()
@@ -227,20 +212,31 @@ struct ConfigWatcherInner<Handler> {
     reload_debounce: Duration,
     /// deadline to do a reload
     reload_deadline: Option<Instant>,
+    /// interval to poll for missing paths
+    poll_interval: Duration,
 
     /// handle is called to signify the need to reload configs
     handler: Handler,
 
+    /// A table mapping target paths to a flag indicating if the
+    /// underlying watcher is actually watching the path or not.
+    /// A false entry indicates that we should check to see if
+    /// this path exists every poll_interval and install
+    /// a watcher if the user has created the file.
+    paths: HashMap<PathBuf, bool>,
+
     /// underlying notify-rs watcher
-    watcher: RecommendedWatcher,
+    watcher: notify::RecommendedWatcher,
+
     /// receiving notify events
     notify_rx: Receiver<Result<notify::Event, notify::Error>>,
 
     /// receiving watch requests from the outer `ConfigWatcher`
     req_rx: Receiver<Command>,
-    /// Current watching status, it is a map from target_path to (watched_path,
-    /// immediate_child_path)
-    paths: HashMap<PathBuf, (PathBuf, PathBuf)>,
+
+    // The last time we checked in on all the target paths that
+    // don't have a watcher installed.
+    last_paths_presence_poll: Instant,
 
     /// for sending out debug info
     #[cfg(test)]
@@ -253,8 +249,12 @@ enum Outcome {
     Event(notify::Result<notify::Event>),
     /// A control command from outside
     AddWatch(PathBuf, Sender<Result<()>>),
-    /// Timeout on notify event, trigger reload
-    Timeout,
+    /// Timeout indicating that the debounce period is up and the
+    /// reload handler needs to be called.
+    DebounceTimeout,
+    /// Timeout indicating that we need to recheck paths that we were
+    /// unable to install a watcher for.
+    RescanTimeout,
     /// Any channel was disconnected, or a explicit shutdown was requested
     Shutdown,
 }
@@ -277,13 +277,16 @@ impl From<notify::Result<notify::Event>> for Outcome {
 impl<Handler> ConfigWatcherInner<Handler> {
     /// get next event to work on
     fn select(&self) -> Outcome {
-        debug!("now {:?} select with ddl {:?}", Instant::now(), &self.reload_deadline);
+        trace!("now {:?} select with ddl {:?}", Instant::now(), &self.reload_deadline);
 
         // only impose a deadline if there is pending reload
-        let timeout = self
+        let debounce_timeout = self
             .reload_deadline
             .map(crossbeam_channel::at)
             .unwrap_or_else(crossbeam_channel::never);
+
+        let rescan_timeout =
+            crossbeam_channel::at(self.last_paths_presence_poll + self.poll_interval);
 
         #[cfg(test)]
         {
@@ -295,8 +298,11 @@ impl<Handler> ConfigWatcherInner<Handler> {
             if let Ok(res) = self.req_rx.try_recv() {
                 return Outcome::from(res);
             }
-            if timeout.try_recv().is_ok() {
-                return Outcome::Timeout;
+            if debounce_timeout.try_recv().is_ok() {
+                return Outcome::DebounceTimeout;
+            }
+            if rescan_timeout.try_recv().is_ok() {
+                return Outcome::RescanTimeout;
             }
 
             // Only signal idle if there's no pending reload deadline.
@@ -310,7 +316,8 @@ impl<Handler> ConfigWatcherInner<Handler> {
         select! {
             recv(self.notify_rx) -> res => res.map(Outcome::from).unwrap_or(Outcome::Shutdown),
             recv(self.req_rx) -> res => res.map(Outcome::from).unwrap_or(Outcome::Shutdown),
-            recv(timeout) -> _ => Outcome::Timeout,
+            recv(debounce_timeout) -> _ => Outcome::DebounceTimeout,
+            recv(rescan_timeout) -> _ => Outcome::RescanTimeout,
         }
     }
 
@@ -326,42 +333,87 @@ impl<Handler> ConfigWatcherInner<Handler> {
         debug!("defer config reloading to {:?}!", &self.reload_deadline);
     }
 
+    fn remove_watch(&mut self, path: PathBuf) -> Result<()> {
+        if let Entry::Occupied(mut e) = self.paths.entry(path.clone()) {
+            e.insert(false);
+        }
+
+        // error sometimes is expected if the watched_path was
+        // simply removed, in that case notify will automatically
+        // remove the watch.
+        self.watcher.unwatch(&path).context("removing file watcher")
+    }
+
     /// Handle add watch command from `ConfigWatcher`.
-    fn add_watch_by_command(&mut self, path: PathBuf) -> Result<()> {
+    fn add_watch(&mut self, path: PathBuf) -> Result<()> {
         let canonical_path = canonicalize_path(&path);
-        match self.paths.entry(canonical_path) {
+        match self.paths.entry(canonical_path.clone()) {
             Entry::Occupied(e) => Err(anyhow!("{} is already being watched", e.key().display())),
-            e @ Entry::Vacant(_) => {
-                let reload = watch_and_add(&mut self.watcher, e)?;
-                if reload {
-                    self.trigger_reload();
+            entry @ Entry::Vacant(_) => {
+                if canonical_path.exists() {
+                    if let Err(err) =
+                        self.watcher.watch(&canonical_path, RecursiveMode::NonRecursive)
+                    {
+                        warn!("error watching {:?}: {:?}", canonical_path, err);
+                        entry.insert_entry(false);
+                    } else {
+                        entry.insert_entry(true);
+                    }
+                } else {
+                    entry.insert_entry(false);
                 }
+
                 Ok(())
             }
         }
+    }
+
+    fn recheck_missing_paths(&mut self) -> Result<()> {
+        self.last_paths_presence_poll = Instant::now();
+        let mut reload = false;
+        for (path, has_watcher) in self.paths.iter_mut() {
+            if !*has_watcher && path.exists() {
+                if let Err(err) = self.watcher.watch(path, RecursiveMode::NonRecursive) {
+                    warn!("error watching {:?}: {:?}", path, err);
+                } else {
+                    *has_watcher = true;
+                    reload = true;
+                }
+            }
+        }
+        if reload {
+            self.trigger_reload();
+        }
+
+        Ok(())
     }
 
     /// Do rewatch according to the enum, return whether reload is necessary
     fn rewatch(&mut self, rewatch: ReWatch) -> bool {
         let rewatch_paths = match rewatch {
             ReWatch::Some(rewatch_paths) => rewatch_paths,
-            ReWatch::All => {
-                // drain paths and collect into vec first, to avoid keeping a mutable borrow on
-                // self.paths
-                self.paths.drain().map(|(path, (watched_path, _))| (path, watched_path)).collect()
-            }
+            ReWatch::All => self.paths.keys().cloned().collect::<Vec<_>>(),
         };
-        rewatch_paths.into_iter().any(|(path, watched_path)| {
-            if let Err(err) = self.watcher.unwatch(&watched_path) {
-                // error sometimes is expected if the watched_path was simply removed, in that
-                // case notify will automatically remove the watch.
+        rewatch_paths.into_iter().any(|path| {
+            if let Err(err) = self.remove_watch(path.clone()) {
                 error!("error unwatch {:?}", err);
             } else {
-                debug!("unwatched {}", watched_path.display());
+                debug!("unwatched {}", path.display());
             }
-            watch_and_add(&mut self.watcher, self.paths.entry(path))
-                .map_err(|err| error!("Failed to add watch: {:?}", err))
-                .unwrap_or(true)
+
+            if path.exists() {
+                if let Err(err) = self.watcher.watch(&path, RecursiveMode::NonRecursive) {
+                    warn!("error watching {:?}: {:?}", path, err);
+                    false
+                } else {
+                    if let Some(has_watcher) = self.paths.get_mut(&path) {
+                        *has_watcher = true;
+                    }
+                    true
+                }
+            } else {
+                false
+            }
         })
     }
 }
@@ -377,15 +429,15 @@ where
         loop {
             match self.select() {
                 Outcome::Event(res) => {
-                    debug!("event: {:?}", res);
+                    trace!("event: {:?}", res);
                     let (rewatch, mut reload) = match res {
                         Err(error) => {
                             error!("Error: {error:?}");
                             (ReWatch::All, false)
                         }
-                        Ok(event) => handle_event(event, &self.paths),
+                        Ok(event) => handle_event(event),
                     };
-                    debug!("rewatch = {rewatch:?}, reload = {reload}");
+                    trace!("rewatch = {rewatch:?}, reload = {reload}");
                     reload |= self.rewatch(rewatch);
                     if reload {
                         test_hooks::emit("daemon-config-watcher-file-change");
@@ -393,16 +445,21 @@ where
                     }
                 }
                 Outcome::AddWatch(path, sender) => {
-                    debug!("addwatch: {:?}", path);
-                    let _ = sender.send(self.add_watch_by_command(path));
+                    trace!("addwatch: {:?}", path);
+                    let _ = sender.send(self.add_watch(path));
                 }
-                Outcome::Timeout => {
-                    debug!("timeout");
+                Outcome::DebounceTimeout => {
+                    trace!("debounce timeout");
                     self.reload_deadline = None;
                     (self.handler)();
                 }
+                Outcome::RescanTimeout => {
+                    if let Err(e) = self.recheck_missing_paths() {
+                        warn!("while rechecking missing paths: {:?}", e);
+                    }
+                }
                 Outcome::Shutdown => {
-                    debug!("stopping config watcher thread");
+                    info!("stopping config watcher thread");
                     break;
                 }
             }
@@ -414,87 +471,35 @@ where
 #[derive(Debug, PartialEq, Eq)]
 enum ReWatch {
     /// rewatch a few (target path, watched path)
-    Some(Vec<(PathBuf, PathBuf)>),
+    Some(Vec<PathBuf>),
     /// rewatch all paths
     All,
 }
 
 /// Return wether need to rewatch, and whether need to reload
-fn handle_event(event: Event, paths: &HashMap<PathBuf, (PathBuf, PathBuf)>) -> (ReWatch, bool) {
+fn handle_event(event: notify::Event) -> (ReWatch, bool) {
     if event.need_rescan() {
         debug!("need rescan");
         return (ReWatch::All, true);
     }
 
-    // this event is about one of the watched target
-    let is_original = event.paths.iter().any(|p| paths.contains_key(p));
-
     match event.kind {
         // create/remove in any segment in path
-        EventKind::Remove(_) | EventKind::Create(_) | EventKind::Modify(ModifyKind::Name(_)) => {
+        notify::EventKind::Remove(_)
+        | notify::EventKind::Create(_)
+        | notify::EventKind::Modify(ModifyKind::Name(_)) => {
             debug!("create/remove: {:?}", event);
-            // find all path entries about this event
-            let rewatch = paths
-                .iter()
-                .filter(|(_, (watched_path, immediate_child_path))| {
-                    event.paths.iter().any(|p| p == watched_path || p == immediate_child_path)
-                })
-                .map(|(path, (watched_path, _))| (path.to_owned(), watched_path.to_owned()))
-                .collect();
-            (ReWatch::Some(rewatch), is_original)
+            (ReWatch::Some(event.paths), true)
         }
         // modification in any segment in path
-        EventKind::Modify(_) => {
+        notify::EventKind::Modify(_) => {
             debug!("modify: {:?}", event);
-            (ReWatch::Some(vec![]), is_original)
+            (ReWatch::Some(vec![]), true)
         }
         _ => {
             debug!("ignore {:?}", event);
 
             (ReWatch::Some(vec![]), false)
-        }
-    }
-}
-
-/// Add a watch at `path`, update paths `entry` if success, or remove `entry` if
-/// failed. Note that this will overwrite any existing state.
-/// Return whether reload is needed.
-fn watch_and_add(
-    watcher: &mut RecommendedWatcher,
-    entry: Entry<PathBuf, (PathBuf, PathBuf)>,
-) -> Result<bool> {
-    // make a version of watch path that doesn't retain a borrow in its return value
-    let best_effort_watch_owned = |watcher: &mut RecommendedWatcher, path: &Path| {
-        best_effort_watch(watcher, path).map(|(w, ic)| {
-            let watched = w.canonicalize().unwrap_or_else(|_| w.to_path_buf());
-            let immediate = watched.join(ic.unwrap_or_else(|| Path::new("")));
-            (watched, immediate)
-        })
-    };
-    match best_effort_watch_owned(watcher, entry.key()) {
-        Ok((watched_path, immediate_child_path)) => {
-            let reload = &watched_path == entry.key();
-            // update entry after `match watch_a_path(...)`, as that takes a borrow on entry
-            // (entry.key())
-            match entry {
-                Entry::Occupied(mut entry) => {
-                    entry.insert((watched_path, immediate_child_path));
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert((watched_path, immediate_child_path));
-                }
-            }
-            if reload {
-                debug!("Force reload since now watching on target file");
-            }
-            Ok(reload)
-        }
-        Err(err) => {
-            let context_msg = format!("best_effort_watch on {}", entry.key().display());
-            if let Entry::Occupied(entry) = entry {
-                entry.remove();
-            }
-            Err(err).context(context_msg)
         }
     }
 }
@@ -507,183 +512,86 @@ mod test {
     use std::fs;
     use tempfile::TempDir;
 
-    mod watch {
-        use super::*;
-        use std::fs;
-
-        #[test]
-        #[timeout(30000)]
-        fn all_non_existing() {
-            let mut watcher = recommended_watcher(|_| {}).unwrap();
-
-            let (watched_path, immediate_child) =
-                best_effort_watch(&mut watcher, Path::new("/non_existing/subdir")).unwrap();
-
-            assert_eq!(watched_path, Path::new("/"));
-            assert_eq!(immediate_child, Some(Path::new("non_existing")));
-        }
-
-        #[test]
-        #[timeout(30000)]
-        fn non_existing_parent() {
-            let tmpdir = tempfile::tempdir().unwrap();
-            let target_path = tmpdir.path().join(Path::new("sub1/sub2/c.txt"));
-
-            let parent_path = target_path.parent().unwrap().parent().unwrap();
-
-            fs::create_dir_all(parent_path).unwrap();
-
-            let mut watcher = recommended_watcher(|_| {}).unwrap();
-            let (watched_path, immediate_child) =
-                best_effort_watch(&mut watcher, &target_path).unwrap();
-
-            assert_eq!(watched_path, parent_path);
-            assert_eq!(immediate_child, Some(Path::new("sub2")));
-        }
-
-        #[test]
-        #[timeout(30000)]
-        fn existing_file() {
-            let tmpdir = tempfile::tempdir().unwrap();
-            let target_path = tmpdir.path().join(Path::new("sub1/sub2/c.txt"));
-
-            let parent_path = target_path.parent().unwrap();
-
-            fs::create_dir_all(parent_path).unwrap();
-            fs::write(&target_path, "test").unwrap();
-
-            let mut watcher = recommended_watcher(|_| {}).unwrap();
-            let (watched_path, immediate_child) =
-                best_effort_watch(&mut watcher, &target_path).unwrap();
-
-            assert_eq!(watched_path, target_path);
-            assert_eq!(immediate_child, None);
-        }
-    }
-
     mod handle_event {
         use super::*;
-        use assert_matches::assert_matches;
-        use notify::{
-            event::{CreateKind, ModifyKind, RemoveKind, RenameMode},
-            Event, EventKind,
-        };
-        use ntest::test_case;
-
-        fn paths_entry(target: &str, watched: &str) -> (PathBuf, (PathBuf, PathBuf)) {
-            let target = PathBuf::from(target);
-            let base = PathBuf::from(watched);
-            let immediate =
-                base.join(target.strip_prefix(&base).unwrap().iter().next().unwrap_or_default());
-            (target, (base, immediate))
-        }
-
-        // create event from spec:
-        // <create|mv|modify|rm> path1 [path2]
-        // `base` is prepended to all paths
-        fn event_from_spec(base: &str, evt: &str) -> notify::Event {
-            let base = Path::new(base);
-            let (evt, path) = evt.split_once(' ').unwrap_or((evt, ""));
-            match evt {
-                "create" => {
-                    Event::new(EventKind::Create(CreateKind::Any)).add_path(base.join(path))
-                }
-                "mv" => {
-                    let (src, dst) = path.split_once(' ').unwrap();
-                    Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Both)))
-                        .add_path(base.join(src))
-                        .add_path(base.join(dst))
-                }
-                "mvselfother" => Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Both)))
-                    .add_path(base.to_owned())
-                    .add_path(PathBuf::from("/some/other/path")),
-                "modify" => {
-                    Event::new(EventKind::Modify(ModifyKind::Any)).add_path(base.join(path))
-                }
-                "modifyself" => {
-                    Event::new(EventKind::Modify(ModifyKind::Any)).add_path(base.to_owned())
-                }
-                "rm" => Event::new(EventKind::Remove(RemoveKind::Any)).add_path(base.join(path)),
-                "rmself" => {
-                    Event::new(EventKind::Remove(RemoveKind::Any)).add_path(base.to_owned())
-                }
-                _ => panic!("malformatted event spec"),
-            }
-        }
+        use notify::event::{AccessKind, CreateKind, ModifyKind, RemoveKind, RenameMode};
 
         #[test]
         #[timeout(30000)]
         fn need_rescan() {
             let event = notify::Event::default().set_flag(notify::event::Flag::Rescan);
-            let paths = Default::default();
-            let (rewatch, reload) = handle_event(event, &paths);
+            let (rewatch, reload) = handle_event(event);
             assert_eq!(rewatch, ReWatch::All);
             assert!(reload);
         }
 
-        const TARGET: &str = "/base/sub/config.toml";
-
-        #[test_case(TARGET, "/base", "create sub", true, false, name = "base_create_sub")]
-        #[test_case(TARGET, "/base", "create other", false, false, name = "base_create_other")]
-        #[test_case(TARGET, "/base", "mv other sub", true, false, name = "base_other_to_sub")]
-        #[test_case(TARGET, "/base", "mv other another", false, false, name = "base_other_to_another")]
-        #[test_case(TARGET, "/base", "mv sub other", true, false, name = "base_sub_to_other")]
-        #[test_case(TARGET, "/base", "rm sub", true, false, name = "base_rm_sub")]
-        #[test_case(TARGET, "/base", "rm other", false, false, name = "base_rm_other")]
-        #[test_case(TARGET, "/base", "modify other.toml", false, false, name = "base_modify_other")]
-        #[test_case(TARGET, "/base/sub", "create config.toml", true, true, name = "sub_create_cfg")]
-        #[test_case(TARGET, "/base/sub", "mv other.toml config.toml", true, true, name = "sub_other_to_cfg")]
-        #[test_case(TARGET, "/base/sub", "mv other.toml another.toml", false, false, name = "sub_other_to_another")]
-        #[test_case(TARGET, "/base/sub", "modify config.toml", false, true, name = "sub_modify_cfg")]
-        #[test_case(TARGET, "/base/sub", "modify other.toml", false, false, name = "sub_modify_other")]
-        #[test_case(TARGET, "/base/sub", "rmself", true, false, name = "sub_rm_self")]
-        #[test_case(TARGET, "/base/sub/config.toml", "rmself", true, true, name = "cfg_rm_self")]
-        #[test_case(TARGET, "/base/sub/config.toml", "mvselfother", true, true, name = "cfg_self_to_other")]
-        #[test_case(TARGET, "/base/sub/config.toml", "modifyself", false, true, name = "cfg_modify_self")]
+        #[test]
         #[timeout(30000)]
-        fn single_path(
-            target: &str,
-            watched: &str,
-            evt: &str,
-            expected_rewatch: bool,
-            expected_reload: bool,
-        ) {
-            let paths = HashMap::from([paths_entry(target, watched)]);
-            let event = event_from_spec(watched, evt);
-
-            let (rewatch, reload) = handle_event(event, &paths);
-
-            let expected_rewatch = if expected_rewatch {
-                ReWatch::Some(vec![(PathBuf::from(target), PathBuf::from(watched))])
-            } else {
-                ReWatch::Some(vec![])
-            };
-            assert_eq!(rewatch, expected_rewatch);
-            assert_eq!(reload, expected_reload);
+        fn create_event() {
+            let path = PathBuf::from("/some/config.toml");
+            let event = notify::Event::new(notify::EventKind::Create(CreateKind::Any))
+                .add_path(path.clone());
+            let (rewatch, reload) = handle_event(event);
+            assert_eq!(rewatch, ReWatch::Some(vec![path]));
+            assert!(reload);
         }
 
         #[test]
         #[timeout(30000)]
-        fn both_paths_are_updated() {
-            let paths = HashMap::from([
-                paths_entry("/base/sub/config.toml", "/base"),
-                paths_entry("/base/other/another.toml", "/base"),
-            ]);
-            let event = event_from_spec("/base", "rm /base");
+        fn modify_event() {
+            let path = PathBuf::from("/some/config.toml");
+            let event =
+                notify::Event::new(notify::EventKind::Modify(ModifyKind::Any)).add_path(path);
+            let (rewatch, reload) = handle_event(event);
+            assert_eq!(rewatch, ReWatch::Some(vec![]));
+            assert!(reload);
+        }
 
-            let (rewatch, reload) = handle_event(event, &paths);
+        #[test]
+        #[timeout(30000)]
+        fn remove_event() {
+            let path = PathBuf::from("/some/config.toml");
+            let event = notify::Event::new(notify::EventKind::Remove(RemoveKind::Any))
+                .add_path(path.clone());
+            let (rewatch, reload) = handle_event(event);
+            assert_eq!(rewatch, ReWatch::Some(vec![path]));
+            assert!(reload);
+        }
 
-            assert_matches!(rewatch, ReWatch::Some(p) if p.len() == 2);
+        #[test]
+        #[timeout(30000)]
+        fn rename_event() {
+            let path1 = PathBuf::from("/some/config.toml");
+            let path2 = PathBuf::from("/some/config.toml.bak");
+            let event =
+                notify::Event::new(notify::EventKind::Modify(ModifyKind::Name(RenameMode::Both)))
+                    .add_path(path1.clone())
+                    .add_path(path2.clone());
+            let (rewatch, reload) = handle_event(event);
+            assert_eq!(rewatch, ReWatch::Some(vec![path1, path2]));
+            assert!(reload);
+        }
+
+        #[test]
+        #[timeout(30000)]
+        fn ignore_other_event() {
+            let path = PathBuf::from("/some/config.toml");
+            let event =
+                notify::Event::new(notify::EventKind::Access(AccessKind::Any)).add_path(path);
+            let (rewatch, reload) = handle_event(event);
+            assert_eq!(rewatch, ReWatch::Some(vec![]));
             assert!(!reload);
         }
     }
 
-    // Smaller debounce time for faster testing
+    // Smaller debounce and poll times for faster testing
     const DEBOUNCE_TIME: Duration = Duration::from_millis(50);
+    const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
     struct WatcherState {
         #[allow(dead_code)]
         tmpdir: TempDir,
+        #[allow(dead_code)]
         base_path: PathBuf,
         target_path: PathBuf,
         rx: Receiver<()>,
@@ -698,10 +606,14 @@ mod test {
         let target_path = base_path.join(target);
         assert!(target_path.strip_prefix(&base_path).is_ok());
 
-        fs::create_dir_all(&base_path)?;
+        fs::create_dir_all(target_path.parent().unwrap())?;
+        fs::write(&target_path, "initial")?;
 
         let (tx, rx) = unbounded();
-        let watcher = ConfigWatcher::with_debounce(move || tx.send(()).unwrap(), DEBOUNCE_TIME)?;
+        let watcher = ConfigWatcher::with_options(
+            move || tx.send(()).unwrap(),
+            Options { debounce: DEBOUNCE_TIME, poll_interval: POLL_INTERVAL },
+        )?;
         watcher.watch(&target_path)?;
 
         Ok(WatcherState { tmpdir, base_path, target_path, rx, watcher })
@@ -713,14 +625,11 @@ mod test {
         watcher.worker_ready();
     }
 
-    // This test passes locally on macos, but fails in CI.
     #[test]
     #[timeout(30000)]
     #[cfg_attr(target_os = "macos", ignore)]
     fn debounce() {
         let state = setup("base", "sub/config.toml").unwrap();
-
-        fs::create_dir_all(state.target_path.parent().unwrap()).unwrap();
 
         state.watcher.worker_ready();
         // Write twice in quick succession - both should be within debounce window
@@ -738,7 +647,6 @@ mod test {
     fn writes_larger_than_debounce() {
         let state = setup("base", "sub/config.toml").unwrap();
 
-        fs::create_dir_all(state.target_path.parent().unwrap()).unwrap();
         state.watcher.worker_ready();
         fs::write(&state.target_path, "test").unwrap();
 
@@ -752,40 +660,47 @@ mod test {
         assert_eq!(reloads.len(), 2);
     }
 
-    // /base, mv /base/other (with config.toml) /base/sub (with config.toml) =>
-    // rewatch, reload
     #[test]
     #[timeout(30000)]
-    fn move_multiple_levels_in_place() {
+    fn missing_file_discovered_by_polling() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let target_path = tmpdir.path().join("sub/config.toml");
+        fs::create_dir_all(target_path.parent().unwrap()).unwrap();
+
+        let (tx, rx) = unbounded();
+        let watcher = ConfigWatcher::with_options(
+            move || tx.send(()).unwrap(),
+            Options { debounce: DEBOUNCE_TIME, poll_interval: POLL_INTERVAL },
+        )
+        .unwrap();
+        watcher.watch(&target_path).unwrap();
+
+        watcher.worker_ready();
+        // Create the file after the watcher is already running
+        fs::write(&target_path, "created").unwrap();
+
+        thread::sleep(POLL_INTERVAL * 4 + DEBOUNCE_TIME * 2);
+
+        drop_watcher(watcher);
+
+        let reloads: Vec<_> = rx.into_iter().collect();
+        assert_eq!(
+            reloads.len(),
+            1,
+            "expected 1 reload after file creation, got {}",
+            reloads.len()
+        );
+    }
+
+    #[test]
+    #[timeout(30000)]
+    fn already_watched_error() {
         let state = setup("base", "sub/config.toml").unwrap();
-
-        // create /base/other/config.toml
-        fs::create_dir_all(state.base_path.join("other")).unwrap();
-        fs::write(state.base_path.join("other/config.toml"), "test").unwrap();
-
-        // mv /base/other /base/sub
-        state.watcher.worker_ready();
-        fs::rename(state.base_path.join("other"), state.base_path.join("sub")).unwrap();
-
-        drop_watcher(state.watcher);
-
-        let reloads: Vec<_> = state.rx.into_iter().collect();
-        assert_eq!(reloads.len(), 1, "expected 1 reload, got {}", reloads.len());
+        let err = state.watcher.watch(&state.target_path);
+        assert!(err.is_err());
     }
 
     /// Regression test: ConfigWatcher should resolve symlinks in watched paths.
-    ///
-    /// File system watchers (inotify on Linux, FSEvents on macOS) report
-    /// canonical paths. If we watch through a symlink, we need to canonicalize
-    /// the stored path to match events we receive. Without this, events are
-    /// missed because the symlinked path doesn't match the canonical event
-    /// path.
-    ///
-    /// This commonly manifests on macOS where /var -> /private/var, but affects
-    /// any platform when symlinks are in the watched path.
-    ///
-    /// N.B. this test seems to pass locally on macos, but is failing in CI
-    /// on macos, so disabling it for now.
     #[test]
     #[timeout(30000)]
     #[cfg_attr(target_os = "macos", ignore)]
@@ -800,11 +715,17 @@ mod test {
         let link_dir = tmpdir.path().join("link");
         symlink(&real_dir, &link_dir).unwrap();
 
+        let real_target = real_dir.join("config.toml");
+        fs::write(&real_target, "initial").unwrap();
+
         // watch through the symlink
         let symlinked_target = link_dir.join("config.toml");
         let (tx, rx) = unbounded();
-        let watcher =
-            ConfigWatcher::with_debounce(move || tx.send(()).unwrap(), DEBOUNCE_TIME).unwrap();
+        let watcher = ConfigWatcher::with_options(
+            move || tx.send(()).unwrap(),
+            Options { debounce: DEBOUNCE_TIME, ..Default::default() },
+        )
+        .unwrap();
         watcher.watch(&symlinked_target).unwrap();
 
         watcher.worker_ready();
