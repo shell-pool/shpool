@@ -1111,13 +1111,18 @@ impl Server {
         let (tty_size_change_ack_tx, tty_size_change_ack_rx) = crossbeam_channel::bounded(0);
 
         let (heartbeat_tx, heartbeat_rx) = crossbeam_channel::bounded(0);
-        let (heartbeat_ack_tx, heartbeat_ack_rx) = crossbeam_channel::bounded(0);
+        // One slot rather than a rendezvous, so the shell->client thread can
+        // always deposit an ack and get back to its select loop. If the
+        // heartbeat thread gave up waiting, the ack it abandoned sits here and
+        // is discarded by request id on the next pass.
+        let (heartbeat_ack_tx, heartbeat_ack_rx) = crossbeam_channel::bounded(1);
 
         // We make this buffered to avoid blocking during a broadcast. There is
         // no ack chan so we can afford to buffer a bit.
         let (maybe_switch_tx, maybe_switch_rx) = crossbeam_channel::bounded(10);
 
         let shell_to_client_ctl = Arc::new(Mutex::new(shell::ShellToClientCtl {
+            next_heartbeat_id: std::sync::atomic::AtomicU64::new(0),
             client_connection: client_connection_tx,
             client_connection_ack: client_connection_ack_rx,
             tty_size_change: tty_size_change_tx,
