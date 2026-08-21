@@ -1,4 +1,12 @@
 
+shpool (0.11.3) unstable; urgency=low
+
+  Fixed
+
+  * do not discard the shell's exit status when stdin closes first
+
+ -- Shpool Authors <shpool-eng@google.com>  Fri, 21 Aug 2026 20:04:22 +0000
+
 shpool (0.11.2) unstable; urgency=low
 
   Other
