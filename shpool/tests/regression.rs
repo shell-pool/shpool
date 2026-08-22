@@ -215,6 +215,50 @@ fn client_eof_does_not_spin() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A client can stay connected while its terminal stops consuming output. The
+/// daemon must drop only that client before its socket write blocks the
+/// shell-to-client control loop, then allow a fresh client to reattach.
+#[test]
+#[timeout(30000)]
+fn stalled_output_client_does_not_wedge_session() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new(
+        "norc.toml",
+        DaemonArgs { verbosity: 1, ..DaemonArgs::default() },
+    )
+    .context("starting daemon proc")?;
+    let marker = daemon_proc.tmp_dir.path().join("burst-finished");
+
+    daemon_proc.send_event_command("pause-at daemon-client-output-writer-before-read")?;
+
+    let mut stalled =
+        daemon_proc.attach("sh1", Default::default()).context("starting stalled attach proc")?;
+    daemon_proc.await_event("daemon-bidi-stream-enter")?;
+    daemon_proc.await_event("paused-at daemon-client-output-writer-before-read")?;
+
+    let burst = format!(
+        "i=0; while [ \"$i\" -lt 131072 ]; do printf \
+         '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\\n'; \
+         i=$((i + 1)); done; touch {}",
+        marker.display()
+    );
+    stalled.run_cmd(&burst)?;
+
+    daemon_proc.wait_until_list_matches(|out| out.contains("disconnected"))?;
+    support::wait_until(|| Ok(marker.exists()))?;
+
+    let mut reattached = daemon_proc
+        .attach("sh1", Default::default())
+        .context("reattaching after stalled client")?;
+    daemon_proc.await_event("daemon-bidi-stream-enter")?;
+    daemon_proc.await_event("paused-at daemon-client-output-writer-before-read")?;
+    daemon_proc.send_event_command("release daemon-client-output-writer-before-read")?;
+    let mut line_matcher = reattached.line_matcher()?;
+    reattached.run_cmd("echo transport-recovered")?;
+    line_matcher.scan_until_re("transport-recovered$")?;
+
+    Ok(())
+}
+
 /// Regression test for an EOF spin loop in the pager display thread.
 /// If the client abruptly disconnects while viewing the MOTD pager, the daemon
 /// should quickly detect EOF and abort the pager display.
