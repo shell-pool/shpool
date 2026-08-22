@@ -562,6 +562,37 @@ fn busy_background() -> anyhow::Result<()> {
 
 #[test]
 #[timeout(30000)]
+fn busy_background_reports_attach_failure() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new(
+        "norc.toml",
+        DaemonArgs { listen_events: false, ..DaemonArgs::default() },
+    )
+    .context("starting daemon proc")?;
+
+    let mut tty1 = daemon_proc.attach("sh1", Default::default()).context("attaching from tty1")?;
+    let mut line_matcher1 = tty1.line_matcher()?;
+    tty1.run_cmd("echo foo")?;
+    line_matcher1.scan_until_re("foo$")?;
+
+    let mut tty2 = daemon_proc
+        .attach(
+            "sh1",
+            AttachArgs {
+                background: true,
+                error_status_mode: Some("attach"),
+                ..Default::default()
+            },
+        )
+        .context("background attaching from tty2")?;
+    let mut line_matcher2 = tty2.stderr_line_matcher()?;
+    line_matcher2.scan_until_re("already has a terminal attached$")?;
+    assert_eq!(tty2.proc.wait()?.code(), Some(1), "busy attach should report failure");
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
 fn busy_background_force() -> anyhow::Result<()> {
     let mut daemon_proc = support::daemon::Proc::new(
         "norc.toml",
@@ -1156,6 +1187,25 @@ fn exits_with_same_status_as_shell() -> anyhow::Result<()> {
             .code()
             .ok_or(anyhow!("no exit code"))?,
         19
+    );
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
+fn attach_error_status_ignores_shell_status() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
+        .context("starting daemon proc")?;
+    let mut attach_proc = daemon_proc
+        .attach("sh", AttachArgs { error_status_mode: Some("attach"), ..Default::default() })
+        .context("starting attach proc")?;
+
+    attach_proc.run_cmd("exit 19")?;
+
+    assert!(
+        attach_proc.proc.wait().context("waiting for attach proc to exit")?.success(),
+        "successful attach should exit successfully"
     );
 
     Ok(())

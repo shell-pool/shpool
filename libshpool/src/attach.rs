@@ -35,6 +35,7 @@ use crate::{
     protocol::{ClientResult, PipeBytesResult},
     template, test_hooks,
     tty::TtySizeExt as _,
+    ErrorStatusMode,
 };
 
 const MAX_FORCE_RETRIES: usize = 20;
@@ -46,6 +47,7 @@ pub fn run(
     name: String,
     force: bool,
     background: bool,
+    error_status_mode: ErrorStatusMode,
     ttl: Option<String>,
     cmd: Option<String>,
     dir: Option<String>,
@@ -83,7 +85,8 @@ pub fn run(
         None => None,
     };
 
-    let attach = Attach { config_manager, force, background, ttl, tmpls, socket };
+    let attach =
+        Attach { config_manager, force, background, error_status_mode, ttl, tmpls, socket };
 
     attach.run()
 }
@@ -92,6 +95,7 @@ struct Attach {
     config_manager: config::Manager,
     force: bool,
     background: bool,
+    error_status_mode: ErrorStatusMode,
     ttl: Option<time::Duration>,
     tmpls: Templates,
     socket: PathBuf,
@@ -140,19 +144,19 @@ impl Attach {
     pub fn attach_resolved(&self, resolved: ResolvedTemplates) -> anyhow::Result<AttachResult> {
         if resolved.session_name.is_empty() {
             eprintln!("blank session names are not allowed");
-            return Ok(AttachResult::Done);
+            return self.attach_error(anyhow!("blank session name"));
         }
         if resolved.session_name.contains(char::is_whitespace) {
             eprintln!("session name '{}' may not have whitespace", resolved.session_name);
-            return Ok(AttachResult::Done);
+            return self.attach_error(anyhow!("session name contains whitespace"));
         }
         if resolved.session_name.chars().any(|c| '/' == c) {
             eprintln!("session names may not contain slashes");
-            return Ok(AttachResult::Done);
+            return self.attach_error(anyhow!("session name contains a slash"));
         }
         if resolved.session_name == "." || resolved.session_name == ".." {
             eprintln!("session names may not be special directory names");
-            return Ok(AttachResult::Done);
+            return self.attach_error(anyhow!("session name is a special directory name"));
         }
 
         let mut detached = false;
@@ -166,7 +170,7 @@ impl Attach {
                             "session '{}' already has a terminal attached",
                             resolved.session_name
                         );
-                        return Ok(AttachResult::Done);
+                        return self.attach_error(BusyError.into());
                     }
                     Ok(BusyError) => {
                         if !detached {
@@ -232,9 +236,23 @@ impl Attach {
             let var_map: HashMap<String, String> = maybe_switch.vars.iter().cloned().collect();
             session_name_tmpl.apply(&var_map) != resolved.session_name
         }) {
-            Ok(PipeBytesResult::Exit(exit_status)) => std::process::exit(exit_status),
+            Ok(PipeBytesResult::Exit(exit_status)) => {
+                std::process::exit(if self.error_status_mode == ErrorStatusMode::Attach {
+                    0
+                } else {
+                    exit_status
+                })
+            }
             Ok(PipeBytesResult::MaybeSwitch(s)) => Ok(AttachResult::Switch(s)),
             Err(e) => Err(e),
+        }
+    }
+
+    fn attach_error(&self, err: anyhow::Error) -> anyhow::Result<AttachResult> {
+        if self.error_status_mode == ErrorStatusMode::Attach {
+            Err(err)
+        } else {
+            Ok(AttachResult::Done)
         }
     }
 
