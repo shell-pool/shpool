@@ -1,4 +1,15 @@
 
+shpool (0.11.3) unstable; urgency=low
+
+  Fixed
+
+  * survive a slow heartbeat ack instead of wedging the session
+  * never run the detach handshake under the shells lock
+  * do not discard the shell's exit status when stdin closes first
+  * config watcher: avoid excessive wakes
+
+ -- Shpool Authors <shpool-eng@google.com>  Wed, 26 Aug 2026 21:25:37 +0000
+
 shpool (0.11.2) unstable; urgency=low
 
   Other
