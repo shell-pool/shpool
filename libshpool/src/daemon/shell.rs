@@ -290,7 +290,7 @@ impl SessionInner {
             let _s = span!(Level::INFO, "shell->client", s = name, cid = args.conn_id).entered();
 
             let mut output_spool =
-                session_restore::new(config, &args.tty_size, args.scrollback_lines);
+                session_restore::new(config, &args.tty_size, args.scrollback_lines, &name);
             let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
             let mut poll_fds = [poll::PollFd::new(
                 watchable_master.borrow_fd(),

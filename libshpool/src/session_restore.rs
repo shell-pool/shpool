@@ -164,6 +164,7 @@ pub fn new(
     config: config::Manager,
     size: &TtySize,
     scrollback_lines: usize,
+    session_name: &str,
 ) -> Box<dyn SessionSpool + 'static> {
     let restore_engine = config.get().session_restore_engine.clone().unwrap_or_default();
     let mode = config.get().session_restore_mode.clone().unwrap_or_default();
@@ -179,12 +180,13 @@ pub fn new(
             nlines,
             config,
         }),
-        (mode, SessionRestoreEngine::Vterm) => Box::new(Vterm {
-            term: shpool_vterm::Term::new(
+        (mode, SessionRestoreEngine::Vterm) => {
+            let mut term = shpool_vterm::Term::new(
                 scrollback_lines,
                 shpool_vterm::Size { width: size.cols as usize, height: size.rows as usize },
-            ),
-            mode,
-        }),
+            );
+            term.tag(String::from(session_name));
+            Box::new(Vterm { term, mode })
+        }
     }
 }
