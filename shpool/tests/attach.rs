@@ -181,6 +181,119 @@ fn forward_env() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test]
+#[timeout(30000)]
+fn forward_env_all() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new("forward_env_all.toml", DaemonArgs::default())
+        .context("starting daemon proc")?;
+
+    let bidi_done_w = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
+    {
+        let mut attach_proc = daemon_proc
+            .attach(
+                "sh1",
+                AttachArgs {
+                    extra_env: vec![
+                        (String::from("FOO"), String::from("foo")),
+                        (String::from("BAR"), String::from("bar")),
+                        (String::from("BAZ"), String::from("baz")),
+                    ],
+                    ..Default::default()
+                },
+            )
+            .context("starting attach proc")?;
+
+        let mut line_matcher = attach_proc.line_matcher()?;
+
+        attach_proc.run_cmd(r#"echo "$FOO:$BAR:$BAZ" "#)?;
+        line_matcher.scan_until_re("foo:bar:baz$")?;
+    }
+
+    // wait until the daemon has noticed that the connection
+    // has dropped before we attempt to open the connection again
+    daemon_proc.events = Some(bidi_done_w.wait_final_event("daemon-bidi-stream-done")?);
+
+    {
+        let mut attach_proc = daemon_proc
+            .attach(
+                "sh1",
+                AttachArgs {
+                    extra_env: vec![
+                        (String::from("FOO"), String::from("foonew")),
+                        (String::from("BAR"), String::from("barnew")),
+                        (String::from("BAZ"), String::from("baznew")),
+                    ],
+                    ..Default::default()
+                },
+            )
+            .context("starting attach proc")?;
+
+        let mut line_matcher = attach_proc.line_matcher()?;
+
+        attach_proc.run_cmd(r#"source $SHPOOL_SESSION_DIR/forward.env "#)?;
+        attach_proc.run_cmd(r#"echo "$FOO:$BAR:$BAZ" "#)?;
+        line_matcher.scan_until_re("foonew:barnew:baznew$")?;
+    }
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
+fn forward_env_none() -> anyhow::Result<()> {
+    let mut daemon_proc =
+        support::daemon::Proc::new("forward_env_none.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
+
+    let bidi_done_w = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
+    {
+        let mut attach_proc = daemon_proc
+            .attach(
+                "sh1",
+                AttachArgs {
+                    extra_env: vec![
+                        (String::from("FOO"), String::from("foo")),
+                        (String::from("DISPLAY"), String::from("fake-display")),
+                    ],
+                    ..Default::default()
+                },
+            )
+            .context("starting attach proc")?;
+
+        let mut line_matcher = attach_proc.line_matcher()?;
+
+        attach_proc.run_cmd(r#"echo "$FOO:$DISPLAY" "#)?;
+        line_matcher.scan_until_re(":$")?;
+    }
+
+    // wait until the daemon has noticed that the connection
+    // has dropped before we attempt to open the connection again
+    daemon_proc.events = Some(bidi_done_w.wait_final_event("daemon-bidi-stream-done")?);
+
+    {
+        let mut attach_proc = daemon_proc
+            .attach(
+                "sh1",
+                AttachArgs {
+                    extra_env: vec![
+                        (String::from("FOO"), String::from("foonew")),
+                        (String::from("DISPLAY"), String::from("fake-display-new")),
+                    ],
+                    ..Default::default()
+                },
+            )
+            .context("starting attach proc")?;
+
+        let mut line_matcher = attach_proc.line_matcher()?;
+
+        attach_proc.run_cmd(r#"source $SHPOOL_SESSION_DIR/forward.env "#)?;
+        attach_proc.run_cmd(r#"echo "$FOO:$DISPLAY" "#)?;
+        line_matcher.scan_until_re(":$")?;
+    }
+
+    Ok(())
+}
+
 // Regression test: a high byte (0xFF) in the raw input stream must not
 // kill the session. The keybinding scanner used to index out of bounds
 // on 0xFF, panicking the client->shell thread and disconnecting the

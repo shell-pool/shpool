@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env, fmt, io,
     os::fd::AsFd,
     path::PathBuf,
@@ -253,13 +253,28 @@ impl Attach {
         };
 
         let forward_env = self.config_manager.get().forward_env.clone();
-        let mut local_env_keys = vec!["TERM", "DISPLAY", "LANG", "SSH_AUTH_SOCK"];
-        if let Some(fenv) = &forward_env {
-            for var in fenv.iter() {
-                local_env_keys.push(var);
-            }
+        let mut local_env_keys = HashSet::with_capacity(4);
+        for key in vec!["TERM", "DISPLAY", "LANG", "SSH_AUTH_SOCK"].into_iter() {
+            local_env_keys.insert(key);
         }
-        info!("local env keys: {local_env_keys:?}");
+        if let Some(config::ForwardEnv::List(fenv)) = &forward_env {
+            for var in fenv.iter() {
+                local_env_keys.insert(var);
+            }
+        };
+        let full_env: Vec<(String, String)> = env::vars().collect();
+        let local_env: Vec<(String, String)> = match forward_env {
+            Some(config::ForwardEnv::All(false)) => vec![],
+            Some(config::ForwardEnv::All(true)) => full_env,
+            None | Some(config::ForwardEnv::List(_)) => full_env
+                .into_iter()
+                .filter(|(var, _)| local_env_keys.contains(var.as_str()))
+                .collect(),
+        };
+        info!(
+            "local env keys: {:?}",
+            local_env.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>()
+        );
 
         let cwd = String::from(env::current_dir().context("getting cwd")?.to_string_lossy());
         let default_dir =
@@ -276,13 +291,7 @@ impl Attach {
             .write_connect_header(ConnectHeader::Attach(AttachHeader {
                 name: resolved.session_name.clone(),
                 local_tty_size: tty_size,
-                local_env: local_env_keys
-                    .into_iter()
-                    .filter_map(|var| {
-                        let val = env::var(var).context("resolving var").ok()?;
-                        Some((String::from(var), val))
-                    })
-                    .collect::<Vec<_>>(),
+                local_env,
                 ttl_secs: self.ttl.map(|d| d.as_secs()),
                 cmd: resolved.cmd.clone(),
                 dir: start_dir,
