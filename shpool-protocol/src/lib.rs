@@ -18,7 +18,10 @@ use anyhow::anyhow;
 use clap::ValueEnum;
 use serde_derive::{Deserialize, Serialize};
 
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+// We hardcode the version string to be able to track wire protocol
+// compatibility seperately from rust API compat. For example, adding
+// a new field is wire compatible, but not rust compatible.
+pub const VERSION: &str = "0.4.3";
 
 /// The header used to advertize daemon version.
 ///
