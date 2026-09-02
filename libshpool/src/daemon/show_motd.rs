@@ -130,8 +130,9 @@ impl DailyMessenger {
             .value(match &self.config.get().motd_args {
                 Some(args) => {
                     let mut args = args.clone();
-                    // On debian based systems we need to set noupdate in order to get
-                    // the motd from userspace. It should be ignored on non-debian systems.
+                    // On debian based systems we need to set noupdate in order
+                    // to get the motd from userspace. It
+                    // should be ignored on non-debian systems.
                     if !args.iter().any(|a| a == "noupdate") {
                         args.push(String::from("noupdate"));
                     }

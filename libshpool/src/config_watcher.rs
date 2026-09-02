@@ -290,8 +290,8 @@ impl<Handler> ConfigWatcherInner<Handler> {
 
         #[cfg(test)]
         {
-            // first try non-blocking recv, to give us a chance to to notify debug_tx about
-            // we are about to go into blocking wait.
+            // first try non-blocking recv, to give us a chance to to notify
+            // debug_tx about we are about to go into blocking wait.
             if let Ok(res) = self.notify_rx.try_recv() {
                 return Outcome::from(res);
             }
@@ -306,7 +306,8 @@ impl<Handler> ConfigWatcherInner<Handler> {
             }
 
             // Only signal idle if there's no pending reload deadline.
-            // If there's a pending deadline, we have work to do (wait for timeout).
+            // If there's a pending deadline, we have work to do (wait for
+            // timeout).
             if self.reload_deadline.is_none() {
                 self.debug_tx.send(()).unwrap();
             }
@@ -632,7 +633,8 @@ mod test {
         let state = setup("base", "sub/config.toml").unwrap();
 
         state.watcher.worker_ready();
-        // Write twice in quick succession - both should be within debounce window
+        // Write twice in quick succession - both should be within debounce
+        // window
         fs::write(&state.target_path, "test").unwrap();
         fs::write(&state.target_path, "another").unwrap();
 

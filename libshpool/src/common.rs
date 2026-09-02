@@ -48,7 +48,8 @@ where
     };
 
     if next_interval.is_zero() {
-        // Avoid a tight spin-loop if a zero interval is accidentally configured.
+        // Avoid a tight spin-loop if a zero interval is accidentally
+        // configured.
         next_interval = time::Duration::from_millis(1);
     }
 

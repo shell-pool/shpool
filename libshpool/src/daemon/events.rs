@@ -137,9 +137,10 @@ impl EventBus {
                 return;
             }
         }
-        // Wake the sink. A full pipe buffer (EAGAIN) means an unread wake is already
-        // pending, so this nudge is redundant -- expected under burst, not logged. Any
-        // other errno (EBADF, EIO, ...) is a real fault and is surfaced.
+        // Wake the sink. A full pipe buffer (EAGAIN) means an unread wake is
+        // already pending, so this nudge is redundant -- expected under
+        // burst, not logged. Any other errno (EBADF, EIO, ...) is a
+        // real fault and is surfaced.
         match unistd::write(&self.wake_tx, b"\0") {
             Ok(_) | Err(Errno::EAGAIN) => {}
             Err(e) => warn!("waking events sink: {e}"),
@@ -169,11 +170,13 @@ pub struct EventBusHandle {
 
 impl Drop for EventBusHandle {
     fn drop(&mut self) {
-        // Nudge the dedicated shutdown pipe so the sink's `poll` wakes, sees it, and
-        // returns (dropping its `ListenerGuard`). `EPIPE` means the sink already exited
-        // on its own via the wake-EOF fallback and closed its read end -- expected and
-        // benign; the join below is then a no-op. Any other errno is a real fault worth
-        // surfacing: a genuinely lost nudge can leave the join below hanging forever.
+        // Nudge the dedicated shutdown pipe so the sink's `poll` wakes, sees
+        // it, and returns (dropping its `ListenerGuard`). `EPIPE` means
+        // the sink already exited on its own via the wake-EOF fallback
+        // and closed its read end -- expected and benign; the join
+        // below is then a no-op. Any other errno is a real fault worth
+        // surfacing: a genuinely lost nudge can leave the join below hanging
+        // forever.
         match unistd::write(&self.shutdown_tx, b"\0") {
             Ok(_) | Err(Errno::EPIPE) => {}
             Err(e) => warn!("signaling events sink shutdown: {e}"),
@@ -331,9 +334,10 @@ impl Sink {
                 // the sub's pending was empty before, drive opportunistically:
                 // a fast consumer's kernel buffer is likely ready, so the
                 // event flushes immediately and the next enqueue starts from
-                // empty. Without this, a burst larger than SUBSCRIBER_QUEUE_DEPTH
-                // would overflow even healthy subs because broadcast enqueues
-                // every event before any drive runs.
+                // empty. Without this, a burst larger than
+                // SUBSCRIBER_QUEUE_DEPTH would overflow even
+                // healthy subs because broadcast enqueues every
+                // event before any drive runs.
                 while let Ok(line) = event_rx.try_recv() {
                     for sub in subs.iter_mut() {
                         if sub.dropped {
@@ -645,12 +649,13 @@ mod tests {
         assert_eq!(read_line(&mut probe), "{\"type\":\"session.attached\"}\n");
     }
 
-    // Publish is `try_send` + 1-byte wake -- independent of N. A regression that
-    // re-introduced per-sub work in publish would make these timings explode. The
-    // absolute threshold is timing-sensitive and can flake on a slow or contended
-    // CI runner, so this is kept as executable documentation behind `#[ignore]`
-    // rather than a CI gate; run it on demand with `--ignored` if a publish-path
-    // regression is ever suspected.
+    // Publish is `try_send` + 1-byte wake -- independent of N. A regression
+    // that re-introduced per-sub work in publish would make these timings
+    // explode. The absolute threshold is timing-sensitive and can flake on
+    // a slow or contended CI runner, so this is kept as executable
+    // documentation behind `#[ignore]` rather than a CI gate; run it on
+    // demand with `--ignored` if a publish-path regression is ever
+    // suspected.
     #[test]
     #[ignore = "timing-sensitive; run on demand with --ignored"]
     fn bus_publish_with_many_subscribers_is_not_quadratic() {
@@ -891,7 +896,8 @@ mod tests {
         assert_eq!(offset, 3);
         assert_eq!(pending.len(), 1);
 
-        // 2nd: writes "lo\n" (the remainder), then WouldBlock with empty pending.
+        // 2nd: writes "lo\n" (the remainder), then WouldBlock with empty
+        // pending.
         let outcome = drive_pending(&mut w, &mut pending, &mut offset).unwrap();
         assert_eq!(outcome, DriveOutcome::AllFlushed);
         assert_eq!(w.written, b"hello\n");

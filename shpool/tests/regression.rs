@@ -98,7 +98,8 @@ fn no_loop_on_shell_exit_during_startup() -> anyhow::Result<()> {
 
     let config_tmpl = fs::read_to_string(support::testdata_file("custom_shell.toml.tmpl"))?;
     // Use /bin/true as the shell so it exits immediately.
-    // We need to trigger wait_for_startup, which happens when prompt_prefix is set.
+    // We need to trigger wait_for_startup, which happens when prompt_prefix is
+    // set.
     let config_contents = config_tmpl.replace("SHELL", "/bin/true");
     let config_file = tmp_dir.path().join("exit_shell.toml");
     {
@@ -109,10 +110,10 @@ fn no_loop_on_shell_exit_during_startup() -> anyhow::Result<()> {
     let mut daemon_proc = support::daemon::Proc::new(&config_file, DaemonArgs::default())
         .context("starting daemon proc")?;
 
-    // Try to attach. This should trigger wait_for_startup because prompt_prefix is
-    // set in hang_shell.toml.tmpl.
-    // The shell (/bin/true) will exit immediately, causing wait_for_startup to get
-    // EOF. On BUGGY code: this loops forever in the daemon.
+    // Try to attach. This should trigger wait_for_startup because prompt_prefix
+    // is set in hang_shell.toml.tmpl.
+    // The shell (/bin/true) will exit immediately, causing wait_for_startup to
+    // get EOF. On BUGGY code: this loops forever in the daemon.
     // On FIXED code: this returns an error in the daemon, and the attach proc
     // finishes.
     let mut attach_proc =
@@ -203,7 +204,8 @@ fn client_eof_does_not_spin() -> anyhow::Result<()> {
     // wait for attach to finish startup so we know client_to_shell thread is
     // running
     daemon_proc.await_event("daemon-bidi-stream-enter")?;
-    std::thread::sleep(Duration::from_millis(100)); // give it a little more time to enter the loop
+    std::thread::sleep(Duration::from_millis(100)); // give it a little more
+                                                    // time to enter the loop
 
     // kill the attach proc abruptly. This closes the socket, sending EOF to
     // client_to_shell.
@@ -212,8 +214,8 @@ fn client_eof_does_not_spin() -> anyhow::Result<()> {
     // wait for the session to become disconnected
     // On BUGGY code: client_to_shell spins, causing bidi_stream to wait for
     // heartbeat_h which takes >= 500ms (often longer due to CPU starvation).
-    // On FIXED code: client_to_shell exits immediately on EOF, bidi_stream detects
-    // it within JOIN_POLL_DURATION (50ms).
+    // On FIXED code: client_to_shell exits immediately on EOF, bidi_stream
+    // detects it within JOIN_POLL_DURATION (50ms).
     daemon_proc.wait_until_list_matches(|out| out.contains("disconnected"))?;
 
     Ok(())
@@ -248,10 +250,10 @@ fn pager_eof_does_not_spin() -> anyhow::Result<()> {
     attach_proc.proc.kill()?;
 
     // Wait for the session to become disconnected.
-    // On BUGGY code: the pager thread spins 100% CPU on EOF, and never returns from
-    // display(). The session remains "Attached" forever (or until the 10s test
-    // timeout). On FIXED code: the pager detects EOF, exits, and the session
-    // quickly becomes "Disconnected".
+    // On BUGGY code: the pager thread spins 100% CPU on EOF, and never returns
+    // from display(). The session remains "Attached" forever (or until the
+    // 10s test timeout). On FIXED code: the pager detects EOF, exits, and
+    // the session quickly becomes "Disconnected".
     daemon_proc.wait_until_list_matches(|out| out.contains("disconnected"))?;
 
     Ok(())

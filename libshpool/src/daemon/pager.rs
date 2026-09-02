@@ -264,8 +264,8 @@ impl Pager {
                     let len = pty_master.read(&mut buf).context("reading chunk from pty master")?;
                     if len == 0 {
                         info!("pager EOF");
-                        // The pager hung up, which we should treat as a graceful
-                        // exit.
+                        // The pager hung up, which we should treat as a
+                        // graceful exit.
                         let tty_size = tty_size.lock();
                         return Ok(tty_size.clone());
                     }

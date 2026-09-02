@@ -101,7 +101,8 @@ pub fn set_attach_flags() -> anyhow::Result<AttachFlagsGuard<'static>> {
     let old = termios::tcgetattr(fd).context("grabbing term flags")?;
 
     // Set the input terminal to raw mode so we immediately get the input chars.
-    // The terminal for the remote shell is the one that will apply all the logic.
+    // The terminal for the remote shell is the one that will apply all the
+    // logic.
     let mut new = old.clone();
     new.input_flags &= !(InputFlags::IGNBRK
         | InputFlags::BRKINT

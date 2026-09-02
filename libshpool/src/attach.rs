@@ -203,9 +203,10 @@ impl Attach {
         info!("got attach client");
 
         if self.background {
-            // Close the attached connection first so the daemon can observe EOF.
-            // We still send an explicit Detach on a fresh connection as a best-effort
-            // fallback in case EOF processing is delayed.
+            // Close the attached connection first so the daemon can observe
+            // EOF. We still send an explicit Detach on a fresh
+            // connection as a best-effort fallback in case EOF
+            // processing is delayed.
             drop(attach_client);
             let mut client = self.dial_client(true)?;
             client

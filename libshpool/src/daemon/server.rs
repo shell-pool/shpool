@@ -363,10 +363,11 @@ impl Server {
                     }
                 }
 
-                // The child shell has exited, so the shell->client thread should
-                // attempt to read from its stdout and get an error, causing
-                // it to exit. That means we should be safe to join. We use
-                // a separate if statement to avoid holding the shells lock
+                // The child shell has exited, so the shell->client thread
+                // should attempt to read from its stdout and
+                // get an error, causing it to exit. That means
+                // we should be safe to join. We use a separate
+                // if statement to avoid holding the shells lock
                 // while we join the old thread.
                 if let Some(h) = inner.shell_to_client_join_h.take() {
                     h.join()
@@ -374,7 +375,8 @@ impl Server {
                         .context("within shell->client thread after child exit")?;
                 }
             } else {
-                // Client disconnected but shell is still running - set last_disconnected_at
+                // Client disconnected but shell is still running - set
+                // last_disconnected_at
                 {
                     let _s = span!(Level::INFO, "disconnect_lock(shells)").entered();
                     let shells = self.shells.lock();
@@ -429,19 +431,24 @@ impl Server {
                 if let Some(mut inner) = session.inner.try_lock_arc() {
                     let _s = span!(Level::INFO, "aquired_lock(session.inner)", s = header.name)
                         .entered();
-                    // We have an existing session in our table, but the subshell
-                    // proc might have exited in the meantime, for example if the
-                    // user typed `exit` right before the connection dropped there
+                    // We have an existing session in our table, but the
+                    // subshell proc might have exited in
+                    // the meantime, for example if the user
+                    // typed `exit` right before the connection dropped there
                     // could be a zombie entry in our session table. We need to
-                    // re-check whether the subshell has exited before taking this over.
+                    // re-check whether the subshell has exited before taking
+                    // this over.
                     //
-                    // N.B. this is still technically a race, but in practice it does
-                    // not ever cause problems, and there is no real way to avoid some
-                    // sort of race without just always creating a new session when
-                    // a shell exits, which would break `exit` typed at the shell prompt.
+                    // N.B. this is still technically a race, but in practice it
+                    // does not ever cause problems, and
+                    // there is no real way to avoid some
+                    // sort of race without just always creating a new session
+                    // when a shell exits, which would break
+                    // `exit` typed at the shell prompt.
                     match session.child_exit_notifier.wait(Some(time::Duration::from_millis(0))) {
                         None => {
-                            // the channel is still open so the subshell is still running
+                            // the channel is still open so the subshell is
+                            // still running
                             info!("taking over existing session inner");
                             inner.client_stream = Some(stream.try_clone()?);
                             session.lifecycle.record_attached(Attachment {
@@ -460,7 +467,8 @@ impl Server {
                                 );
                             } else {
                                 // Reattach confirmed; the create path won't run
-                                // and clobber the entry, so it's safe to publish.
+                                // and clobber the entry, so it's safe to
+                                // publish.
                                 self.events_bus.publish(&events::Event::SessionAttached);
                                 if let Err(err) = self.hooks.on_reattach(&header.name) {
                                     warn!("reattach hook: {:?}", err);
@@ -480,7 +488,8 @@ impl Server {
                             }
                         }
                         Some(exit_status) => {
-                            // the channel is closed so we know the subshell exited
+                            // the channel is closed so we know the subshell
+                            // exited
                             info!(
                                 "stale inner, (child exited with status {}) clobbering with new subshell",
                                 exit_status
@@ -505,7 +514,8 @@ impl Server {
                     // fallthrough to bidi streaming
                 } else {
                     info!("busy shell session, doing nothing");
-                    // The stream is busy, so we just inform the client and close the stream.
+                    // The stream is busy, so we just inform the client and
+                    // close the stream.
                     write_reply(&mut stream, AttachReplyHeader { status: AttachStatus::Busy })?;
                     stream.shutdown(net::Shutdown::Both).context("closing stream")?;
                     if let Err(err) = self.hooks.on_busy(&header.name) {
@@ -593,7 +603,8 @@ impl Server {
                     .context("locking down permissions for sessions dir")?;
             }
 
-            let _ = fs::remove_file(&symlink); // clean up the link if it exists already
+            let _ = fs::remove_file(&symlink); // clean up the link if it exists
+                                               // already
             os::unix::fs::symlink(ssh_auth_sock, &symlink).context(format!(
                 "could not symlink '{symlink:?}' to point to '{ssh_auth_sock:?}'"
             ))?;
@@ -786,8 +797,9 @@ impl Server {
                 if let Some(s) = shells.get(&session) {
                     s.kill().context("killing shell proc")?;
 
-                    // we don't need to wait since the dedicated reaping thread is active
-                    // even when a tty is not attached
+                    // we don't need to wait since the dedicated reaping thread
+                    // is active even when a tty is not
+                    // attached
                     to_remove.push(session);
                 } else {
                     not_found_sessions.push(session);
@@ -814,13 +826,13 @@ impl Server {
         let shells = self.shells.lock();
         let sessions: anyhow::Result<Vec<Session>> = shells
             .iter()
-            .map(|(k, v)| {
-                let status = match v.inner.try_lock() {
+            .map(|(session_name, session)| {
+                let status = match session.inner.try_lock() {
                     Some(_) => SessionStatus::Disconnected,
                     None => SessionStatus::Attached,
                 };
 
-                let lifecycle_state = v.lifecycle.snapshot();
+                let lifecycle_state = session.lifecycle.snapshot();
                 let last_connected_at_unix_ms = lifecycle_state
                     .last_connected_at
                     .map(|t| t.duration_since(time::UNIX_EPOCH).map(|d| d.as_millis() as i64))
@@ -831,12 +843,15 @@ impl Server {
                     .transpose()?;
 
                 Ok(Session {
-                    name: k.to_string(),
-                    started_at_unix_ms: v.started_at.duration_since(time::UNIX_EPOCH)?.as_millis()
-                        as i64,
+                    name: session_name.to_string(),
+                    started_at_unix_ms: session
+                        .started_at
+                        .duration_since(time::UNIX_EPOCH)?
+                        .as_millis() as i64,
                     last_connected_at_unix_ms,
                     last_disconnected_at_unix_ms,
                     status,
+                    shell_pid: session.child_pid,
                     attachments: lifecycle_state.attachment.into_iter().collect(),
                 })
             })
@@ -1069,12 +1084,13 @@ impl Server {
         // as a handle to the child process, and the pty fd which allows us to
         // do IO on it. The child watcher thread only needs the child pid.
         //
-        // Just cloning the fork and directly calling wait_for_exit() on it would
-        // be simpler, but it would be wrong because then the destructor for the
-        // cloned fork object would close the pty fd earlier than we want as the
-        // child watcher thread exits. This can cause the shell->client thread
-        // to read the wrong file (for example, the config file contents if the
-        // config watcher reloads).
+        // Just cloning the fork and directly calling wait_for_exit() on it
+        // would be simpler, but it would be wrong because then the
+        // destructor for the cloned fork object would close the pty fd
+        // earlier than we want as the child watcher thread exits. This
+        // can cause the shell->client thread to read the wrong file
+        // (for example, the config file contents if the config watcher
+        // reloads).
         let waitable_child_pid = fork.child_pid().ok_or(anyhow!("missing child pid"))?;
         let session_name = header.name.clone();
         let notifiable_child_exit_notifier = Arc::clone(&child_exit_notifier);
@@ -1124,9 +1140,9 @@ impl Server {
             && !does_not_support_sentinels(&shell);
         info!("supports_sentianls={}", supports_sentinels);
 
-        // Inject the prompt prefix, if any. For custom commands, avoid doing this
-        // since we have no idea what the command is so the shell code probably won't
-        // work.
+        // Inject the prompt prefix, if any. For custom commands, avoid doing
+        // this since we have no idea what the command is so the shell
+        // code probably won't work.
         if supports_sentinels {
             info!("injecting prompt prefix");
             let prompt_prefix = self
@@ -1425,7 +1441,8 @@ fn check_peer(sock: &UnixStream) -> anyhow::Result<libc::pid_t> {
 
     let mut peer_pid: libc::pid_t = 0;
     let mut len = std::mem::size_of::<libc::pid_t>() as libc::socklen_t;
-    // Safety: getsockopt is standard POSIX FFI, all pointers and sizes are valid
+    // Safety: getsockopt is standard POSIX FFI, all pointers and sizes are
+    // valid
     unsafe {
         if libc::getsockopt(
             sock.as_raw_fd(),

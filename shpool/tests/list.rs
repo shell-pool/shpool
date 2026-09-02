@@ -208,6 +208,16 @@ fn json_output() -> anyhow::Result<()> {
         first_session.get("last_connected_at_unix_ms").is_some(),
         "missing 'last_connected_at_unix_ms' field"
     );
+    let shell_pid = first_session
+        .get("shell_pid")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| anyhow!("missing or invalid 'shell_pid' field"))?;
+    assert!(shell_pid > 0, "expected 'shell_pid' to be positive, got {shell_pid}");
+    assert_ne!(
+        shell_pid,
+        _sess1.proc.id() as i64,
+        "expected 'shell_pid' to differ from attach client PID"
+    );
 
     Ok(())
 }
@@ -288,8 +298,8 @@ fn json_attachment_cleared_on_detach() -> anyhow::Result<()> {
     let out = daemon_proc.detach(vec![String::from("sh1")])?;
     assert!(out.status.success(), "detach proc did not exit successfully");
 
-    // The status flip (inner-lock release) and attachment clear race the detach RPC
-    // return, so poll until both settle.
+    // The status flip (inner-lock release) and attachment clear race the detach
+    // RPC return, so poll until both settle.
     support::wait_until(|| {
         let sessions = list_sessions(&mut daemon_proc)?;
         Ok(sessions.iter().find(|s| s["name"] == "sh1").is_some_and(|sh1| {
@@ -399,8 +409,9 @@ fn json_attachment_reattach_updates_pid() -> anyhow::Result<()> {
 
     daemon_proc.events = Some(bidi_done_w.wait_final_event("daemon-bidi-stream-done")?);
 
-    // Once the drop settles, the session lingers as Disconnected with no attachment
-    // (poll: the clear lands after bidi-stream-done, see the detach test).
+    // Once the drop settles, the session lingers as Disconnected with no
+    // attachment (poll: the clear lands after bidi-stream-done, see the
+    // detach test).
     support::wait_until(|| {
         let sessions = list_sessions(&mut daemon_proc)?;
         Ok(sessions.iter().find(|s| s["name"] == "sh1").is_some_and(|s| {
