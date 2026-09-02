@@ -1108,8 +1108,8 @@ fn lines_big_chunk_restore() -> anyhow::Result<()> {
         // wait for shell output to avoid racing against the shell
         waiter.wait_event("daemon-wrote-s2c-chunk")?;
 
-        // generate a bunch of data that will cause the restore buffer to be too large
-        // for a single chunk
+        // generate a bunch of data that will cause the restore buffer to be too
+        // large for a single chunk
         let blob = format!("echo {}", (0..max_chunk_size).map(|_| "x").collect::<String>());
         attach_proc.run_cmd(blob.as_str())?;
         line_matcher.scan_until_re("xx$")?;
@@ -1569,8 +1569,8 @@ fn dynamic_config_change() -> anyhow::Result<()> {
     attach_proc.run_cmd("echo $CHANGING_VAR")?;
     line_matcher.scan_until_re("REPLACE_ME$")?;
 
-    // Create waiter right before changing config file, since reload can also happen
-    // right after daemon startup.
+    // Create waiter right before changing config file, since reload can also
+    // happen right after daemon startup.
     let mut waiter = daemon_proc
         .events
         .take()

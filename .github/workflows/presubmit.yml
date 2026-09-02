@@ -1,4 +1,8 @@
 name: presubmit
+
+permissions:
+  contents: read
+
 on: [pull_request, workflow_call, workflow_dispatch]
 
 jobs:
@@ -23,7 +27,7 @@ jobs:
       - run: SHPOOL_LEAVE_TEST_LOGS=true RUST_BACKTRACE=full cargo test --all-features
       - name: Archive Logs
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         id: artifact-upload-step
         with:
           name: test-logs-${{ matrix.os }}
@@ -53,7 +57,6 @@ jobs:
         with:
           components: rustfmt
           channel: nightly
-      - run: sudo apt-get install libpam0g-dev
       - run: cargo +nightly fmt -- --check
 
   cranky:
@@ -66,7 +69,7 @@ jobs:
           components: clippy
           bins: cargo-cranky@0.3.0
           channel: nightly
-      - run: sudo apt-get install zsh fish libpam0g-dev
+      - run: sudo apt-get install zsh fish
       - run: cargo +nightly cranky --all-targets -- -D warnings
 
   deny:
@@ -79,5 +82,4 @@ jobs:
         with:
           inherit-toolchain: true
           bins: cargo-deny
-      - run: sudo apt-get install libpam0g-dev
       - run: cargo deny --all-features check licenses

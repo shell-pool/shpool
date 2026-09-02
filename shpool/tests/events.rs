@@ -147,16 +147,18 @@ fn force_reattach_kicks_old_client_and_keeps_subshell() -> anyhow::Result<()> {
     .context("starting daemon proc")?;
     let mut sub = d.connect_events()?;
 
-    // Foreground attach (no `background`) keeps the client attached and holding the
-    // session's inner lock, so the forced attach below actually hits the busy path.
+    // Foreground attach (no `background`) keeps the client attached and holding
+    // the session's inner lock, so the forced attach below actually hits
+    // the busy path.
     let _attach1 = d
         .attach("s", AttachArgs { null_stdin: true, ..AttachArgs::default() })
         .context("first attach")?;
     assert_eq!(next_event(&mut sub)?["type"], "session.created");
     assert_eq!(next_event(&mut sub)?["type"], "session.attached");
 
-    // Ensure attach1 is fully attached before forcing; otherwise attach2 could win
-    // the create/reattach race without a kick and no `session.detached` would fire.
+    // Ensure attach1 is fully attached before forcing; otherwise attach2 could
+    // win the create/reattach race without a kick and no `session.detached`
+    // would fire.
     d.wait_until_list_matches(|out| out.contains("attached"))?;
 
     let _attach2 = d
@@ -174,9 +176,9 @@ fn force_reattach_kicks_old_client_and_keeps_subshell() -> anyhow::Result<()> {
         "expected attached on forced reattach, got {attached}"
     );
 
-    // Sync so any late detached from the kicked client's unwind would already be
-    // queued, then fence with a kill: the subshell is still alive, so the next
-    // event must be exactly `session.removed`.
+    // Sync so any late detached from the kicked client's unwind would already
+    // be queued, then fence with a kill: the subshell is still alive, so
+    // the next event must be exactly `session.removed`.
     d.wait_until_list_matches(|out| out.contains("attached"))?;
 
     let kill_out = d.kill(vec!["s".into()]).context("running kill")?;

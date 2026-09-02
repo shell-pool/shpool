@@ -284,6 +284,8 @@ pub struct Session {
     pub last_disconnected_at_unix_ms: Option<i64>,
     #[serde(default)]
     pub status: SessionStatus,
+    #[serde(default)]
+    pub shell_pid: i32,
     /// This session's attachments. Currently, a session can have at most one
     /// attachment, but this is a list in case that changes. Maintained
     /// independently of `status`, so they can briefly disagree.

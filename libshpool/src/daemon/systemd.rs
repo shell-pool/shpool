@@ -39,8 +39,8 @@ pub fn activation_socket() -> anyhow::Result<UnixListener> {
         return Err(anyhow!("expected exactly 1 activation fd, got {}", num_activation_socks));
     }
 
-    // Safety: we have just checked that there is 1 activation fd, which starts at
-    // FIRST_ACTIVATION_SOCKET_FD. This FD can be closed by us.
+    // Safety: we have just checked that there is 1 activation fd, which starts
+    // at FIRST_ACTIVATION_SOCKET_FD. This FD can be closed by us.
     let fd = unsafe { OwnedFd::from_raw_fd(FIRST_ACTIVATION_SOCKET_FD) };
 
     let sock_stat = stat::fstat(&fd).context("stating activation sock")?;

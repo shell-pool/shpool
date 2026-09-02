@@ -297,8 +297,8 @@ impl SessionInner {
                 PollFlags::POLLIN | PollFlags::POLLHUP | PollFlags::POLLERR,
             )];
 
-            // block until we get the first connection attached so that we don't drop
-            // the initial prompt on the floor
+            // block until we get the first connection attached so that we don't
+            // drop the initial prompt on the floor
             info!("waiting for initial client connection");
             let mut client_conn: ClientConnectionMsg =
                 args.client_connection.recv().context("waiting for initial client connection")?;
@@ -514,8 +514,9 @@ impl SessionInner {
                         (!restore_buf.is_empty(), &mut client_conn)
                     {
                         trace!("restore chunk='{}'", String::from_utf8_lossy(&restore_buf[..]));
-                        // send the restore buffer, broken up into chunks so that we don't make
-                        // the client allocate too much
+                        // send the restore buffer, broken up into chunks so
+                        // that we don't make the client
+                        // allocate too much
                         for block in restore_buf.as_slice().chunks(consts::BUF_SIZE) {
                             let chunk = Chunk { kind: ChunkKind::Data, buf: block };
 
@@ -529,12 +530,13 @@ impl SessionInner {
                     }
                 }
 
-                // TODO(ethan): what if poll times out on a tick when we have just
-                // set up a restore chunk? It looks like we will just drop the
-                // data as things are now.
+                // TODO(ethan): what if poll times out on a tick when we have
+                // just set up a restore chunk? It looks like we
+                // will just drop the data as things are now.
 
-                // Block until the shell has some data for us so we can be sure our reads
-                // always succeed. We don't want to end up blocked forever on a read while
+                // Block until the shell has some data for us so we can be sure
+                // our reads always succeed. We don't want to
+                // end up blocked forever on a read while
                 // a client is trying to attach.
                 let nready = match poll::poll(&mut poll_fds, SHELL_TO_CLIENT_POLL_MS) {
                     Ok(n) => n,
@@ -557,8 +559,8 @@ impl SessionInner {
                 if hangup {
                     info!("pty master hung up, exiting shell->client thread");
 
-                    // If we have an attached client conn, make a best effort attempt
-                    // to forward the exit status.
+                    // If we have an attached client conn, make a best effort
+                    // attempt to forward the exit status.
                     if let ClientConnectionMsg::New(mut conn) = client_conn {
                         if let Some(exit_status) =
                             args.child_exit_notifier.wait(Some(SHELL_EXIT_WAIT_DUR))
@@ -586,7 +588,8 @@ impl SessionInner {
                     for (i, byte) in buf.iter().enumerate() {
                         if prompt_sentinel_scanner.transition(*byte) {
                             info!("saw prompt sentinel");
-                            // This will cause us to start actually sending data frames back to
+                            // This will cause us to start actually sending data
+                            // frames back to
                             // the client.
                             has_seen_prompt_sentinel = true;
 
@@ -606,8 +609,9 @@ impl SessionInner {
                 {
                     let chunk = Chunk { kind: ChunkKind::Data, buf };
 
-                    // If we still need to do an initial motd dump, it means we have just finished
-                    // dropping all the prompt setup stuff, we should dump the motd now before we
+                    // If we still need to do an initial motd dump, it means we
+                    // have just finished dropping all the
+                    // prompt setup stuff, we should dump the motd now before we
                     // write the first chunk.
                     if needs_initial_motd_dump {
                         needs_initial_motd_dump = false;
@@ -839,7 +843,8 @@ impl SessionInner {
                 let mut master_writer = pty_master.clone();
 
                 let mut snip_sections = vec![]; // (<len>, <end offset>)
-                let mut keep_sections = vec![]; // (<start offset>, <end offset>)
+                let mut keep_sections = vec![]; // (<start offset>, <end
+                                                // offset>)
                 let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
                 let mut partial_keybinding = vec![];
 
@@ -849,13 +854,15 @@ impl SessionInner {
                         return Ok(());
                     }
 
-                    // N.B. we don't need to muck about with chunking or anything
-                    // in this direction, because there is only one input stream
-                    // to the shell subprocess and we don't need to worry about
+                    // N.B. we don't need to muck about with chunking or
+                    // anything in this direction, because
+                    // there is only one input stream to the
+                    // shell subprocess and we don't need to worry about
                     // heartbeating to detect hangup or anything like that.
                     //
-                    // Also, note that we don't access through the mutex because reads
-                    // don't need to be excluded from trampling on writes.
+                    // Also, note that we don't access through the mutex because
+                    // reads don't need to be excluded from
+                    // trampling on writes.
                     let mut len = shell_to_client_client_stream
                         .read(&mut buf)
                         .context("reading client chunk")?;
@@ -866,9 +873,10 @@ impl SessionInner {
                     test_hooks::emit("daemon-read-c2s-chunk");
                     trace!("read client len={}: '{}'", len, String::from_utf8_lossy(&buf[..len]),);
 
-                    // We might be able to gain some perf by doing this scanning in
-                    // a background thread (though maybe not given the need to copy
-                    // the data), but just doing it inline doesn't seem have have
+                    // We might be able to gain some perf by doing this scanning
+                    // in a background thread (though maybe
+                    // not given the need to copy the data),
+                    // but just doing it inline doesn't seem have have
                     // a major perf impact, and this way is simpler.
                     snip_sections.clear();
                     for (i, byte) in buf[0..len].iter().enumerate() {
@@ -878,8 +886,10 @@ impl SessionInner {
                                 if !partial_keybinding.is_empty()
                                     && i < partial_keybinding.len() =>
                             {
-                                // it turned out the partial keybinding match was not
-                                // a real match, so flush it to the output stream
+                                // it turned out the partial keybinding match
+                                // was not
+                                // a real match, so flush it to the output
+                                // stream
                                 debug!(
                                     "flushing partial keybinding_len={} i={}",
                                     partial_keybinding.len(),
@@ -889,7 +899,8 @@ impl SessionInner {
                                     .write_all(&partial_keybinding)
                                     .context("writing partial keybinding")?;
                                 if i > 0 {
-                                    // snip the leading part of the input chunk that
+                                    // snip the leading part of the input chunk
+                                    // that
                                     // was part of this keybinding
                                     snip_sections.push((i, i - 1));
                                 }
@@ -905,7 +916,8 @@ impl SessionInner {
                                 info!("{:?} keybinding action fired", action);
                                 let keybinding_len = partial_keybinding.len() + 1;
                                 if keybinding_len < i {
-                                    // this keybinding is wholly contained in buf
+                                    // this keybinding is wholly contained in
+                                    // buf
                                     debug!("snipping keybinding_len={} i={}", keybinding_len, i);
                                     snip_sections.push((keybinding_len, i));
                                 } else {
@@ -1069,8 +1081,8 @@ impl SessionInner {
                             child_done.store(true, Ordering::Release);
 
                             // we don't need to worry about the ExitStatus frame
-                            // because the shell->client thread cleanup should handle
-                            // that.
+                            // because the shell->client thread cleanup should
+                            // handle that.
                             return Ok(());
                         }
                         None => {

@@ -75,7 +75,8 @@ impl Manager {
 
         let watcher = {
             let config = config.clone();
-            // create a owned version of config_files to move to the watcher thread.
+            // create a owned version of config_files to move to the watcher
+            // thread.
             let config_files: Vec<_> = config_files.iter().map(|f| f.to_path_buf()).collect();
             ConfigWatcher::new(move || {
                 info!("reloading config");
@@ -472,7 +473,8 @@ mod test {
         #[test]
         #[timeout(30000)]
         fn simple_value() -> Result<()> {
-            // 4 values are chosen to cover all combinations of None and Some cases.
+            // 4 values are chosen to cover all combinations of None and Some
+            // cases.
             let higher = Config {
                 norc: None,
                 noecho: None,

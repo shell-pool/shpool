@@ -188,9 +188,10 @@ fn wait_for_startup(pty_master: &mut shpool_pty::fork::Master) -> anyhow::Result
         debug!("buf='{}'", String::from_utf8_lossy(buf));
         for byte in buf.iter() {
             if startup_sentinel_scanner.transition(*byte) {
-                // This might drop trailing data from the chunk we just read, but
-                // it should be fine since we are about to inject the prompt setup
-                // stuff anyway, and shell.rs will scan for the prompt setup sentinel
+                // This might drop trailing data from the chunk we just read,
+                // but it should be fine since we are about to
+                // inject the prompt setup stuff anyway, and
+                // shell.rs will scan for the prompt setup sentinel
                 // in order to handle the smooth handoff.
                 return Ok(());
             }

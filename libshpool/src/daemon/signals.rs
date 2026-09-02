@@ -41,17 +41,19 @@ impl Handler {
             // When terminated by a second term signal, exit with exit code 1.
             // This will do nothing the first time (because term_now is false).
             flag::register_conditional_shutdown(*sig, 1, Arc::clone(&term_now))?;
-            // But this will "arm" the above for the second time, by setting it to true.
-            // The order of registering these is important, if you put this one first, it
-            // will first arm and then terminate ‒ all in the first round.
+            // But this will "arm" the above for the second time, by setting it
+            // to true. The order of registering these is important,
+            // if you put this one first, it will first arm and then
+            // terminate ‒ all in the first round.
             flag::register(*sig, Arc::clone(&term_now))?;
         }
 
         let mut signals = Signals::new(TERM_SIGNALS).context("creating signal iterator")?;
         thread::spawn(move || {
-            // Signals are exposed via an iterator so this loop is just to consume
-            // that by blocking until the first value is emitted. Clippy thinks we
-            // are looping over a collection and is confused about why we always
+            // Signals are exposed via an iterator so this loop is just to
+            // consume that by blocking until the first value is
+            // emitted. Clippy thinks we are looping over a
+            // collection and is confused about why we always
             // exit in the loop body.
             #[allow(clippy::never_loop)]
             for signal in &mut signals {

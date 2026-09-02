@@ -354,10 +354,14 @@ impl Client {
 
                             if let Err(e) = stdout.flush() {
                                 if e.kind() == std::io::ErrorKind::WouldBlock {
-                                    // If the fd is busy, we are likely just getting
-                                    // flooded with output and don't need to worry about
-                                    // flushing every last byte. Flushing is really
-                                    // about interactive situations where we want to
+                                    // If the fd is busy, we are likely just
+                                    // getting
+                                    // flooded with output and don't need to
+                                    // worry about
+                                    // flushing every last byte. Flushing is
+                                    // really
+                                    // about interactive situations where we
+                                    // want to
                                     // see echoed bytes immediately.
                                     continue;
                                 }
@@ -395,12 +399,14 @@ impl Client {
                     + (sock_to_stdout_h.is_finished() as usize);
 
                 if nfinished_threads > 0 {
-                    // A finished stdin->sock thread only means our stdin closed;
-                    // the shell's exit status may still be in flight. Stamping
+                    // A finished stdin->sock thread only means our stdin
+                    // closed; the shell's exit status may
+                    // still be in flight. Stamping
                     // the fallback now makes sock->stdout bail before reading
                     // the ExitStatus frame, reporting 1 instead of the real
-                    // status, so wait briefly for the socket side. It returns as
-                    // soon as the frame lands, not after the whole window.
+                    // status, so wait briefly for the socket side. It returns
+                    // as soon as the frame lands, not after
+                    // the whole window.
                     if stdin_to_sock_h.is_finished() && !sock_to_stdout_h.is_finished() {
                         common::sleep_unless(
                             MAX_DETACH_WAIT_DUR,
@@ -445,8 +451,9 @@ impl Client {
                         );
 
                         if !finished_waiting {
-                            // Re-probe after timeout because thread state can change
-                            // during the final sleep inside sleep_unless.
+                            // Re-probe after timeout because thread state can
+                            // change during the
+                            // final sleep inside sleep_unless.
                             nfinished_threads = (stdin_to_sock_h.is_finished() as usize)
                                 + (sock_to_stdout_h.is_finished() as usize);
                         }
@@ -461,17 +468,20 @@ impl Client {
                             // If one of the worker threads is done and the
                             // other is not exiting, we are likely blocked on
                             // some IO. Fortunately, since there isn't much else
-                            // going on in the client process and the thing to do
-                            // is to shut down at this point, we can resolve this
-                            // by just hard-exiting the whole process. This allows
+                            // going on in the client process and the thing to
+                            // do is to shut down at
+                            // this point, we can resolve this
+                            // by just hard-exiting the whole process. This
+                            // allows
                             // us to use simple blocking IO.
                             warn!(
                                 "internal error: exiting due to a stuck IO thread stdin_to_sock_finished={} sock_to_stdout_finished={}",
                                 stdin_to_sock_h.is_finished(),
                                 sock_to_stdout_h.is_finished(),
                             );
-                            // make sure that we restore the tty flags on the input
-                            // tty before exiting the process.
+                            // make sure that we restore the tty flags on the
+                            // input tty before
+                            // exiting the process.
                             drop(tty_guard);
 
                             let res = result_slot.lock().unwrap();

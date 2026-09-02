@@ -64,7 +64,8 @@ fn start() -> anyhow::Result<()> {
 
 #[test]
 #[timeout(30000)]
-#[cfg_attr(target_os = "macos", ignore)] // systemd activation is a linux only feature
+#[cfg_attr(target_os = "macos", ignore)] // systemd activation is a linux only
+                                         // feature
 fn systemd_activation() -> anyhow::Result<()> {
     let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test")?;
     let sock_path = tmp_dir.path().join("shpool.socket");
@@ -95,8 +96,8 @@ fn systemd_activation() -> anyhow::Result<()> {
         Ok(ForkResult::Parent { child, .. }) => child,
         Ok(ForkResult::Child) => {
             // place the unix socket file descriptor in the right place
-            // Safety: We are sure that FD 3 is not open, and the returned OwnedFd will be
-            // its only owner.
+            // Safety: We are sure that FD 3 is not open, and the returned
+            // OwnedFd will be its only owner.
             let fdarg = match unsafe { nix::unistd::dup2_raw(&activation_sock, 3) } {
                 Ok(newfd) => newfd,
                 Err(e) => {
