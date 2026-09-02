@@ -1,4 +1,8 @@
 name: nightly
+
+permissions:
+  contents: read
+
 on:
   schedule:
     - cron: '04 05 * * *'
@@ -13,7 +17,6 @@ jobs:
         with:
           inherit-toolchain: true
           bins: cargo-deny
-      - run: sudo apt-get install libpam0g-dev
       - run: cargo deny --all-features check
 
   postsubmit:
