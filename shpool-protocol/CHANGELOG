@@ -1,4 +1,16 @@
 
+shpool-protocol (0.4.3) unstable; urgency=low
+
+  Added
+
+  * add shell_pid to 'shpool list --json'
+
+  Other
+
+  * decouple protocol wire version from source
+
+ -- Shpool Authors <shpool-eng@google.com>  Wed, 02 Sep 2026 20:21:09 +0000
+
 shpool-protocol (0.4.2) unstable; urgency=low
 
   Added
