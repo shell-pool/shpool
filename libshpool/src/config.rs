@@ -230,11 +230,17 @@ pub struct Config {
     /// If it is '.', it will start wherever `shpool attach` is invoked.
     pub default_dir: Option<String>,
 
-    /// A list of environment variables to forward from the environment
+    /// Controls environment variables to forward from the environment
     /// of the initial shell that invoked `shpool attach` to the newly
-    /// launched shell. Note that this config option has no impact when
-    /// reattaching to an existing shell.
-    pub forward_env: Option<Vec<String>>,
+    /// launched shell. This can be a list of environment variable names
+    /// to forward, or a boolean (`true` to forward all environment
+    /// variables from the client environment, `false` to forward none at
+    /// all, not even the defaults). Note that this config
+    /// option has no impact when reattaching to an existing shell.
+    ///
+    /// By default the variables TERM, DISPLAY, LANG, and SSH_AUTH_SOCK
+    /// are forwarded.
+    pub forward_env: Option<ForwardEnv>,
 
     /// The initial path to spawn shell processes with. By default
     /// `/usr/bin:/bin:/usr/sbin:/sbin` (copying openssh). This
@@ -423,6 +429,25 @@ pub struct VarSetting {
     pub value: String,
 }
 
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum ForwardEnv {
+    All(bool),
+    List(Vec<String>),
+}
+
+impl From<Vec<String>> for ForwardEnv {
+    fn from(list: Vec<String>) -> Self {
+        ForwardEnv::List(list)
+    }
+}
+
+impl From<bool> for ForwardEnv {
+    fn from(all: bool) -> Self {
+        ForwardEnv::All(all)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -457,11 +482,35 @@ mod test {
             var = "foo"
             value = "bar"
             "#,
+            r#"
+            forward_env = true
+            "#,
+            r#"
+            forward_env = false
+            "#,
+            r#"
+            forward_env = ["abc", "efg"]
+            "#,
         ];
 
         for case in cases.into_iter() {
             let _: Config = toml::from_str(case)?;
         }
+
+        let c_true: Config = toml::from_str("forward_env = true")?;
+        assert_eq!(c_true.forward_env, Some(ForwardEnv::All(true)));
+
+        let c_false: Config = toml::from_str("forward_env = false")?;
+        assert_eq!(c_false.forward_env, Some(ForwardEnv::All(false)));
+
+        let c_list: Config = toml::from_str(r#"forward_env = ["abc", "efg"]"#)?;
+        assert_eq!(
+            c_list.forward_env,
+            Some(ForwardEnv::List(vec!["abc".to_string(), "efg".to_string()]))
+        );
+
+        let c_none: Config = toml::from_str("")?;
+        assert_eq!(c_none.forward_env, None);
 
         Ok(())
     }
@@ -504,7 +553,7 @@ mod test {
         #[timeout(30000)]
         fn vec_value() -> Result<()> {
             let higher = Config {
-                forward_env: Some(vec!["abc".to_string(), "efg".to_string()]),
+                forward_env: Some(ForwardEnv::List(vec!["abc".to_string(), "efg".to_string()])),
                 motd_args: None,
                 ..Default::default()
             };
@@ -515,8 +564,25 @@ mod test {
             };
 
             let actual = higher.merge(lower);
-            assert_eq!(actual.forward_env, Some(vec!["abc".to_string(), "efg".to_string()]));
+            assert_eq!(
+                actual.forward_env,
+                Some(ForwardEnv::List(vec!["abc".to_string(), "efg".to_string()]))
+            );
             assert_eq!(actual.motd_args, Some(vec!["hij".to_string(), "klm".to_string()]));
+            Ok(())
+        }
+
+        #[test]
+        #[timeout(30000)]
+        fn forward_env_bool_merge() -> Result<()> {
+            let higher = Config { forward_env: Some(ForwardEnv::All(true)), ..Default::default() };
+            let lower = Config {
+                forward_env: Some(ForwardEnv::List(vec!["abc".to_string()])),
+                ..Default::default()
+            };
+
+            let actual = higher.merge(lower);
+            assert_eq!(actual.forward_env, Some(ForwardEnv::All(true)));
             Ok(())
         }
 
