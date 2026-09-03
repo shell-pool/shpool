@@ -7,3 +7,4 @@ prompt_prefix="session_name=$SHPOOL_SESSION_NAME "
 [env]
 PS1 = "prompt> "
 TERM = ""
+PROMPT_COMMAND = 'echo "hook_status=$? hook_ps=${PIPESTATUS[*]}"'

@@ -16,7 +16,9 @@
 // config option into a user's prompt for known shells.
 
 use std::{
+    fs,
     io::{Read, Write},
+    path::Path,
     time,
 };
 
@@ -47,6 +49,11 @@ enum KnownShell {
     Fish,
 }
 
+const BASH_PROMPT_SCRIPT: &[u8] = include_bytes!("shell_inject/prompt.bash");
+const ZSH_PROMPT_SCRIPT: &[u8] = include_bytes!("shell_inject/prompt.zsh");
+const FISH_PROMPT_SCRIPT: &[u8] = include_bytes!("shell_inject/prompt.fish");
+const PROMPT_PREFIX_PLACEHOLDER: &str = "@@PROMPT_PREFIX@@";
+
 /// Inject the given prefix and startup cmdn into the given shell subprocess,
 /// using the shell path in `shell` to decide the right way to go about
 /// injecting the prefix.
@@ -59,6 +66,7 @@ pub fn maybe_setup(
     prompt_prefix: &str,
     start_cmd: &str,
     session_name: &str,
+    session_dir: &Path,
 ) -> anyhow::Result<()> {
     let shell_pid = pty_master.child_pid().ok_or(anyhow!("no child pid"))?;
     // scan for the startup sentinel so we know it is safe to sniff the shell
@@ -71,47 +79,43 @@ pub fn maybe_setup(
     // now actually inject the prompt
     let prompt_prefix = prompt_prefix.replace("$SHPOOL_SESSION_NAME", session_name);
 
-    let mut script = match (prompt_prefix.as_str(), shell_type) {
-        (_, Ok(KnownShell::Bash)) => format!(
-            r#"
-            if [[ -z "${{PROMPT_COMMAND+x}}" ]]; then
-               PS1="{prompt_prefix}${{PS1}}"
-            else
-               SHPOOL__OLD_PROMPT_COMMAND=("${{PROMPT_COMMAND[@]}}")
-               SHPOOL__OLD_PS1="${{PS1}}"
-               function __shpool__prompt_command() {{
-                  PS1="${{SHPOOL__OLD_PS1}}"
-                  for prompt_hook in "${{SHPOOL__OLD_PROMPT_COMMAND[@]}}"
-                  do
-                    eval "${{prompt_hook}}"
-                  done
-                  PS1="{prompt_prefix}${{PS1}}"
-               }}
-               PROMPT_COMMAND=__shpool__prompt_command
-            fi
-        "#
-        ),
-        (_, Ok(KnownShell::Zsh)) => format!(
-            r#"
-            typeset -a precmd_functions
-            SHPOOL__OLD_PROMPT="${{PROMPT}}"
-            function __shpool__reset_rprompt() {{
-                PROMPT="${{SHPOOL__OLD_PROMPT}}"
-            }}
-            precmd_functions[1,0]=(__shpool__reset_rprompt)
-            function __shpool__prompt_command() {{
-               PROMPT="{prompt_prefix}${{PROMPT}}"
-            }}
-            precmd_functions+=(__shpool__prompt_command)
-        "#
-        ),
-        (_, Ok(KnownShell::Fish)) => format!(
-            r#"
-            functions --copy fish_prompt shpool__old_prompt
-            function fish_prompt; echo -n "{prompt_prefix}"; shpool__old_prompt; end
-        "#
-        ),
-        (_, Err(e)) => {
+    fs::create_dir_all(session_dir).context("creating session dir for prompt script")?;
+
+    // We write the prompt setup script to a file in the session directory and
+    // source it from the shell, rather than writing the entire script directly
+    // into the PTY master. On BSD-derived systems like macOS, the kernel
+    // terminal line discipline enforces a TTY input queue buffer limit (TTYHOG,
+    // historically 1024 bytes). Squirting a multi-kilobyte script into the PTY
+    // in canonical mode causes the input queue to overflow and drop characters,
+    // truncating the trailing prompt sentinel command and causing hangs.
+    let mut script = match shell_type {
+        Ok(KnownShell::Bash) => {
+            let bash_script = std::str::from_utf8(BASH_PROMPT_SCRIPT)
+                .context("decoding bash script template")?
+                .replace(PROMPT_PREFIX_PLACEHOLDER, &prompt_prefix);
+            let script_file = session_dir.join("prompt.bash");
+            fs::write(&script_file, bash_script.as_bytes())
+                .context("writing bash prompt script")?;
+            format!("\n . \"{}\"\n", script_file.display())
+        }
+        Ok(KnownShell::Zsh) => {
+            let zsh_script = std::str::from_utf8(ZSH_PROMPT_SCRIPT)
+                .context("decoding zsh script template")?
+                .replace(PROMPT_PREFIX_PLACEHOLDER, &prompt_prefix);
+            let script_file = session_dir.join("prompt.zsh");
+            fs::write(&script_file, zsh_script.as_bytes()).context("writing zsh prompt script")?;
+            format!("\n . \"{}\"\n", script_file.display())
+        }
+        Ok(KnownShell::Fish) => {
+            let fish_script = std::str::from_utf8(FISH_PROMPT_SCRIPT)
+                .context("decoding fish script template")?
+                .replace(PROMPT_PREFIX_PLACEHOLDER, &prompt_prefix);
+            let script_file = session_dir.join("prompt.fish");
+            fs::write(&script_file, fish_script.as_bytes())
+                .context("writing fish prompt script")?;
+            format!("\n source \"{}\"\n", script_file.display())
+        }
+        Err(e) => {
             warn!("could not sniff shell: {}", e);
 
             // not the end of the world, we will just not inject a prompt prefix

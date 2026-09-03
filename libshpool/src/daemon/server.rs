@@ -16,7 +16,9 @@ use std::{
     collections::HashMap,
     env,
     ffi::OsString,
-    fs, io, net,
+    fs, io,
+    io::Write,
+    net,
     ops::Add,
     os,
     os::unix::{
@@ -618,16 +620,24 @@ impl Server {
     #[instrument(skip_all)]
     fn populate_session_env_file(&self, header: &AttachHeader) -> anyhow::Result<()> {
         let session_name = PathBuf::from(&header.name);
-        fs::create_dir_all(self.session_dir(session_name.clone()))
-            .context("creating session dir")?;
+        let session_dir = self.session_dir(session_name.clone());
+        fs::create_dir_all(&session_dir).context("creating session dir")?;
 
         let session_env_file = self.session_env_file(session_name);
         info!("populating {:?}", session_env_file);
-        fs::write(
-            session_env_file,
-            header.local_env.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("\n"),
-        )
-        .context("writing session env")?;
+        let mut tmp_env_file = tempfile::Builder::new()
+            .prefix("shpool_session_env")
+            .tempfile_in(&session_dir)
+            .context("creating tmp env file")?;
+        let content = format_forward_env(&header.local_env);
+        tmp_env_file.write_all(content.as_bytes()).context("writing tmp env file")?;
+        tmp_env_file.persist(&session_env_file).context("persisting env file")?;
+
+        // Remove the stamp file if present so shells with 1-second timestamp
+        // resolution (e.g. bash 3.2 on macOS) reload unconditionally on
+        // reattach without needing a full second to elapse.
+        let stamp_file = format!("{}.stamp", session_env_file.display());
+        let _ = fs::remove_file(stamp_file);
 
         Ok(())
     }
@@ -1151,11 +1161,13 @@ impl Server {
                 .prompt_prefix
                 .clone()
                 .unwrap_or(String::from(DEFAULT_PROMPT_PREFIX));
+            let session_dir = self.session_dir(&header.name);
             if let Err(err) = shell_inject::maybe_setup(
                 &mut fork,
                 &prompt_prefix,
                 header.start_cmd.as_ref().map(|c| c.as_ref()).unwrap_or(""),
                 &header.name,
+                &session_dir,
             ) {
                 warn!("issue injecting prefix: {:?}", err);
             }
@@ -1361,6 +1373,31 @@ impl Server {
     }
 }
 
+fn format_forward_env<'a, I>(env_vars: I) -> String
+where
+    I: IntoIterator<Item = &'a (String, String)>,
+{
+    let mut content = String::new();
+    for (k, v) in env_vars {
+        if is_valid_env_key(k) {
+            content.push_str(&format!("export {k}='{}'\n", v.replace('\'', "'\\''")));
+        } else {
+            warn!("skipping invalid environment variable key: {k}");
+        }
+    }
+    content
+}
+
+fn is_valid_env_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {
+            chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+        }
+        _ => false,
+    }
+}
+
 // HACK: this is not a good way to detect shells that don't support our
 // sentinel injection approach, but it is better than just hanging when a
 // user tries to start one.
@@ -1497,3 +1534,46 @@ impl std::fmt::Display for ShellSelectionError {
 }
 
 impl std::error::Error for ShellSelectionError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_forward_env_basic() {
+        let vars = vec![
+            (String::from("FOO"), String::from("bar")),
+            (String::from("SPACES"), String::from("hello world")),
+            (String::from("QUOTES"), String::from("don't stop")),
+            (String::from("SPECIAL"), String::from("$(evil) `evil` $VAR")),
+            (String::from("MULTILINE"), String::from("line1\nline2")),
+        ];
+        let res = format_forward_env(&vars);
+        assert_eq!(
+            res,
+            "export FOO='bar'\n\
+             export SPACES='hello world'\n\
+             export QUOTES='don'\\''t stop'\n\
+             export SPECIAL='$(evil) `evil` $VAR'\n\
+             export MULTILINE='line1\nline2'\n"
+        );
+    }
+
+    #[test]
+    fn test_format_forward_env_invalid_keys() {
+        let vars = vec![
+            (String::from("GOOD_KEY_1"), String::from("val")),
+            (String::from("_ALSO_GOOD"), String::from("val")),
+            (String::from("1BAD_KEY"), String::from("val")),
+            (String::from("BAD-DASH"), String::from("val")),
+            (String::from("BAD KEY"), String::from("val")),
+            (String::from(""), String::from("val")),
+        ];
+        let res = format_forward_env(&vars);
+        assert_eq!(
+            res,
+            "export GOOD_KEY_1='val'\n\
+             export _ALSO_GOOD='val'\n"
+        );
+    }
+}
