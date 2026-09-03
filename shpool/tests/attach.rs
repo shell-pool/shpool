@@ -5,6 +5,7 @@ use std::{
     fs,
     io::BufRead,
     io::{Read, Write},
+    path::PathBuf,
     process::{Command, Stdio},
     thread, time,
 };
@@ -177,6 +178,300 @@ fn forward_env() -> anyhow::Result<()> {
         attach_proc.run_cmd(r#"echo "$FOO:$BAR:$BAZ" "#)?;
         line_matcher.scan_until_re("foonew:bar:$")?;
     }
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
+fn forward_env_live_reload_bash() -> anyhow::Result<()> {
+    let mut daemon_proc =
+        support::daemon::Proc::new("forward_env_bash.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
+
+    let mut waiter = daemon_proc
+        .events
+        .take()
+        .unwrap()
+        .waiter(["daemon-wrote-s2c-chunk", "daemon-bidi-stream-done"]);
+    {
+        let mut attach_proc = daemon_proc
+            .attach(
+                "sh1",
+                AttachArgs {
+                    extra_env: vec![
+                        (String::from("FOO"), String::from("foo")),
+                        (String::from("BAR"), String::from("bar")),
+                    ],
+                    ..Default::default()
+                },
+            )
+            .context("starting attach proc")?;
+
+        let mut lm = attach_proc.line_matcher()?;
+        waiter.wait_event("daemon-wrote-s2c-chunk")?;
+        attach_proc.run_cmd(r#"echo "val=$FOO:$BAR" "#)?;
+        lm.scan_until_re("val=foo:bar$")?;
+    }
+
+    daemon_proc.events = Some(waiter.wait_final_event("daemon-bidi-stream-done")?);
+
+    // Reattach with updated environment variables
+    let bidi_done_w2 = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
+    {
+        let mut attach_proc = daemon_proc
+            .attach(
+                "sh1",
+                AttachArgs {
+                    extra_env: vec![
+                        (String::from("FOO"), String::from("foonew")),
+                        (String::from("BAR"), String::from("bar with 'quotes'")),
+                    ],
+                    ..Default::default()
+                },
+            )
+            .context("reattaching proc")?;
+
+        let mut lm = attach_proc.line_matcher()?;
+
+        // Give the reattach resize protocol (REATTACH_RESIZE_DELAY 50ms) time
+        // to complete so SIGWINCH handling doesn't interfere with command
+        // input.
+        thread::sleep(time::Duration::from_millis(500));
+
+        // Trigger a prompt cycle so PROMPT_COMMAND runs with the new
+        // forward.env
+        attach_proc.run_cmd("echo prompt_cycle_reattach")?;
+        lm.scan_until_re("prompt_cycle_reattach$")?;
+        attach_proc.run_cmd(r#"echo "val=$FOO:$BAR" "#)?;
+        lm.scan_until_re("val=foonew:bar with 'quotes'$")?;
+
+        // Test external modification of forward.env
+        attach_proc.run_cmd(r#"echo "session_dir=$SHPOOL_SESSION_DIR" "#)?;
+        let caps = lm.scan_until_re_captures(r#"session_dir=(/[^\s\r\n"]+)"#)?;
+        let session_dir = PathBuf::from(caps[1].as_ref().unwrap());
+        let forward_env_path = session_dir.join("forward.env");
+
+        // Sleep for at least 1.1s so that older shells with 1-second timestamp
+        // resolution on `test -nt` (like bash 3.2 on macOS) see a distinct
+        // mtime.
+        thread::sleep(time::Duration::from_millis(1100));
+        fs::write(&forward_env_path, "export FOO='external_foo'\nexport BAR='external_bar'\n")?;
+
+        attach_proc.run_cmd("echo prompt_cycle_external")?;
+        lm.scan_until_re("prompt_cycle_external$")?;
+        attach_proc.run_cmd(r#"echo "val=$FOO:$BAR" "#)?;
+        lm.scan_until_re("val=external_foo:external_bar$")?;
+
+        // Test deletion of forward.env: shell continues functioning normally
+        fs::remove_file(&forward_env_path)?;
+        attach_proc.run_cmd("echo prompt_cycle_deleted")?;
+        lm.scan_until_re("prompt_cycle_deleted$")?;
+        attach_proc.run_cmd(r#"echo "deleted_ok" "#)?;
+        lm.scan_until_re("deleted_ok$")?;
+
+        // Recreating forward.env reloads again
+        thread::sleep(time::Duration::from_millis(1100));
+        fs::write(&forward_env_path, "export FOO='recreated_foo'\nexport BAR='recreated_bar'\n")?;
+        attach_proc.run_cmd("echo prompt_cycle_recreated")?;
+        lm.scan_until_re("prompt_cycle_recreated$")?;
+        attach_proc.run_cmd(r#"echo "val=$FOO:$BAR" "#)?;
+        lm.scan_until_re("val=recreated_foo:recreated_bar$")?;
+    }
+
+    daemon_proc.events = Some(bidi_done_w2.wait_final_event("daemon-bidi-stream-done")?);
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
+#[cfg_attr(target_os = "macos", ignore)]
+fn forward_env_live_reload_zsh() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new("forward_env_zsh.toml", DaemonArgs::default())
+        .context("starting daemon proc")?;
+
+    let mut waiter = daemon_proc
+        .events
+        .take()
+        .unwrap()
+        .waiter(["daemon-wrote-s2c-chunk", "daemon-bidi-stream-done"]);
+    {
+        let mut attach_proc = daemon_proc
+            .attach(
+                "sh1",
+                AttachArgs {
+                    extra_env: vec![
+                        (String::from("FOO"), String::from("foo")),
+                        (String::from("BAR"), String::from("bar")),
+                    ],
+                    ..Default::default()
+                },
+            )
+            .context("starting attach proc")?;
+
+        let mut lm = attach_proc.line_matcher()?;
+        waiter.wait_event("daemon-wrote-s2c-chunk")?;
+        attach_proc.run_cmd(r#"echo "val=$FOO:$BAR" "#)?;
+        lm.scan_until_re("val=foo:bar$")?;
+    }
+
+    daemon_proc.events = Some(waiter.wait_final_event("daemon-bidi-stream-done")?);
+
+    // Reattach with updated environment variables
+    let bidi_done_w2 = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
+    {
+        let mut attach_proc = daemon_proc
+            .attach(
+                "sh1",
+                AttachArgs {
+                    extra_env: vec![
+                        (String::from("FOO"), String::from("foonew")),
+                        (String::from("BAR"), String::from("bar with 'quotes'")),
+                    ],
+                    ..Default::default()
+                },
+            )
+            .context("reattaching proc")?;
+
+        let mut lm = attach_proc.line_matcher()?;
+
+        // Give the reattach resize protocol (REATTACH_RESIZE_DELAY 50ms) time
+        // to complete so SIGWINCH handling doesn't interfere with command
+        // input.
+        thread::sleep(time::Duration::from_millis(500));
+
+        // Trigger a prompt cycle so precmd_functions runs with the new
+        // forward.env
+        attach_proc.run_cmd("echo prompt_cycle_reattach")?;
+        lm.scan_until_re("prompt_cycle_reattach$")?;
+        attach_proc.run_cmd(r#"echo "val=$FOO:$BAR" "#)?;
+        lm.scan_until_re("val=foonew:bar with 'quotes'$")?;
+
+        // Test external modification of forward.env
+        attach_proc.run_cmd(r#"echo "session_dir=$SHPOOL_SESSION_DIR" "#)?;
+        let caps = lm.scan_until_re_captures(r#"session_dir=(/[^\s\r\n"]+)"#)?;
+        let session_dir = PathBuf::from(caps[1].as_ref().unwrap());
+        let forward_env_path = session_dir.join("forward.env");
+
+        thread::sleep(time::Duration::from_millis(50));
+        fs::write(&forward_env_path, "export FOO='external_foo'\nexport BAR='external_bar'\n")?;
+
+        attach_proc.run_cmd("echo prompt_cycle_external")?;
+        lm.scan_until_re("prompt_cycle_external$")?;
+        attach_proc.run_cmd(r#"echo "val=$FOO:$BAR" "#)?;
+        lm.scan_until_re("val=external_foo:external_bar$")?;
+
+        // Test deletion of forward.env: shell continues functioning normally
+        fs::remove_file(&forward_env_path)?;
+        attach_proc.run_cmd("echo prompt_cycle_deleted")?;
+        lm.scan_until_re("prompt_cycle_deleted$")?;
+        attach_proc.run_cmd(r#"echo "deleted_ok" "#)?;
+        lm.scan_until_re("deleted_ok$")?;
+
+        // Recreating forward.env reloads again
+        thread::sleep(time::Duration::from_millis(50));
+        fs::write(&forward_env_path, "export FOO='recreated_foo'\nexport BAR='recreated_bar'\n")?;
+        attach_proc.run_cmd("echo prompt_cycle_recreated")?;
+        lm.scan_until_re("prompt_cycle_recreated$")?;
+        attach_proc.run_cmd(r#"echo "val=$FOO:$BAR" "#)?;
+        lm.scan_until_re("val=recreated_foo:recreated_bar$")?;
+    }
+
+    daemon_proc.events = Some(bidi_done_w2.wait_final_event("daemon-bidi-stream-done")?);
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
+#[cfg_attr(target_os = "macos", ignore)]
+fn forward_env_live_reload_fish() -> anyhow::Result<()> {
+    let mut daemon_proc =
+        support::daemon::Proc::new("forward_env_fish.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
+
+    let run_fish = |proc: &mut support::attach::Proc, cmd: &str| -> anyhow::Result<()> {
+        proc.run_raw(format!("{cmd}\r").into_bytes())
+    };
+
+    let bidi_done_w = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
+    {
+        let mut attach_proc = daemon_proc
+            .attach(
+                "sh1",
+                AttachArgs {
+                    extra_env: vec![
+                        (String::from("FOO"), String::from("foo")),
+                        (String::from("BAR"), String::from("bar")),
+                    ],
+                    ..Default::default()
+                },
+            )
+            .context("starting attach proc")?;
+
+        let mut lm = attach_proc.line_matcher()?;
+        thread::sleep(time::Duration::from_millis(800));
+        run_fish(&mut attach_proc, r#"echo "val=$FOO:$BAR" "#)?;
+        lm.scan_until_re("val=foo:bar$")?;
+    }
+
+    daemon_proc.events = Some(bidi_done_w.wait_final_event("daemon-bidi-stream-done")?);
+
+    // Reattach with updated environment variables
+    let bidi_done_w2 = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
+    {
+        let mut attach_proc = daemon_proc
+            .attach(
+                "sh1",
+                AttachArgs {
+                    extra_env: vec![
+                        (String::from("FOO"), String::from("foonew")),
+                        (String::from("BAR"), String::from("bar with 'quotes'")),
+                    ],
+                    ..Default::default()
+                },
+            )
+            .context("reattaching proc")?;
+
+        let mut lm = attach_proc.line_matcher()?;
+        thread::sleep(time::Duration::from_millis(500));
+
+        // Trigger a prompt cycle so fish_prompt runs with the new forward.env
+        run_fish(&mut attach_proc, "echo prompt_cycle_reattach")?;
+        lm.scan_until_re("prompt_cycle_reattach$")?;
+        run_fish(&mut attach_proc, r#"echo "val=$FOO:$BAR" "#)?;
+        lm.scan_until_re("val=foonew:bar with 'quotes'$")?;
+
+        // Test external modification of forward.env
+        run_fish(&mut attach_proc, r#"echo "session_dir=$SHPOOL_SESSION_DIR" "#)?;
+        let caps = lm.scan_until_re_captures(r#"session_dir=(/[^\s\r\n"]+)"#)?;
+        let session_dir = PathBuf::from(caps[1].as_ref().unwrap());
+        let forward_env_path = session_dir.join("forward.env");
+
+        thread::sleep(time::Duration::from_millis(50));
+        fs::write(&forward_env_path, "export FOO='external_foo'\nexport BAR='external_bar'\n")?;
+
+        run_fish(&mut attach_proc, "echo prompt_cycle_ext")?;
+        lm.scan_until_re("prompt_cycle_ext$")?;
+        run_fish(&mut attach_proc, r#"echo "val=$FOO:$BAR" "#)?;
+        lm.scan_until_re("val=external_foo:external_bar$")?;
+
+        // Test deletion of forward.env: shell continues functioning normally
+        fs::remove_file(&forward_env_path)?;
+        run_fish(&mut attach_proc, "echo deleted_ok")?;
+        lm.scan_until_re("deleted_ok$")?;
+
+        // Recreating forward.env reloads again
+        thread::sleep(time::Duration::from_millis(50));
+        fs::write(&forward_env_path, "export FOO='recreated_foo'\nexport BAR='recreated_bar'\n")?;
+        run_fish(&mut attach_proc, "echo prompt_cycle_recreate")?;
+        lm.scan_until_re("prompt_cycle_recreate$")?;
+        run_fish(&mut attach_proc, r#"echo "val=$FOO:$BAR" "#)?;
+        lm.scan_until_re("val=recreated_foo:recreated_bar$")?;
+    }
+
+    daemon_proc.events = Some(bidi_done_w2.wait_final_event("daemon-bidi-stream-done")?);
 
     Ok(())
 }
@@ -942,12 +1237,18 @@ fn has_right_default_path() -> anyhow::Result<()> {
 fn screen_restore() -> anyhow::Result<()> {
     let mut daemon_proc = support::daemon::Proc::new("restore_screen.toml", DaemonArgs::default())
         .context("starting daemon proc")?;
-    let bidi_done_w = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
+    let mut waiter = daemon_proc
+        .events
+        .take()
+        .unwrap()
+        .waiter(["daemon-wrote-s2c-chunk", "daemon-bidi-stream-done"]);
 
     {
         let mut attach_proc =
             daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
         let mut line_matcher = attach_proc.line_matcher()?;
+
+        waiter.wait_event("daemon-wrote-s2c-chunk")?;
 
         attach_proc.run_cmd("echo foo")?;
         line_matcher.scan_until_re("foo$")?;
@@ -955,7 +1256,7 @@ fn screen_restore() -> anyhow::Result<()> {
 
     // wait until the daemon has noticed that the connection
     // has dropped before we attempt to open the connection again
-    daemon_proc.events = Some(bidi_done_w.wait_final_event("daemon-bidi-stream-done")?);
+    daemon_proc.events = Some(waiter.wait_final_event("daemon-bidi-stream-done")?);
 
     {
         let mut attach_proc =
@@ -978,12 +1279,18 @@ fn screen_restore() -> anyhow::Result<()> {
 fn screen_wide_restore() -> anyhow::Result<()> {
     let mut daemon_proc = support::daemon::Proc::new("restore_screen.toml", DaemonArgs::default())
         .context("starting daemon proc")?;
-    let bidi_done_w = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
+    let mut waiter = daemon_proc
+        .events
+        .take()
+        .unwrap()
+        .waiter(["daemon-wrote-s2c-chunk", "daemon-bidi-stream-done"]);
 
     {
         let mut attach_proc =
             daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
         let mut line_matcher = attach_proc.line_matcher()?;
+
+        waiter.wait_event("daemon-wrote-s2c-chunk")?;
 
         attach_proc.run_cmd("echo ooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooy")?;
         line_matcher.scan_until_re("ooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooyooooxooooy$")?;
@@ -991,7 +1298,7 @@ fn screen_wide_restore() -> anyhow::Result<()> {
 
     // wait until the daemon has noticed that the connection
     // has dropped before we attempt to open the connection again
-    daemon_proc.events = Some(bidi_done_w.wait_final_event("daemon-bidi-stream-done")?);
+    daemon_proc.events = Some(waiter.wait_final_event("daemon-bidi-stream-done")?);
 
     {
         let mut attach_proc =
@@ -1051,12 +1358,18 @@ fn lines_restore() -> anyhow::Result<()> {
 fn screen_restore_input_modes() -> anyhow::Result<()> {
     let mut daemon_proc = support::daemon::Proc::new("restore_screen.toml", DaemonArgs::default())
         .context("starting daemon proc")?;
-    let bidi_done_w = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
+    let mut waiter = daemon_proc
+        .events
+        .take()
+        .unwrap()
+        .waiter(["daemon-wrote-s2c-chunk", "daemon-bidi-stream-done"]);
 
     {
         let mut attach_proc =
             daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
         let mut line_matcher = attach_proc.line_matcher()?;
+
+        waiter.wait_event("daemon-wrote-s2c-chunk")?;
 
         attach_proc.run_cmd("printf '\\033[?1000h'; echo modes-on")?;
         line_matcher.scan_until_re("modes-on$")?;
@@ -1064,12 +1377,17 @@ fn screen_restore_input_modes() -> anyhow::Result<()> {
 
     // wait until the daemon has noticed that the connection
     // has dropped before we attempt to open the connection again
-    daemon_proc.events = Some(bidi_done_w.wait_final_event("daemon-bidi-stream-done")?);
+    daemon_proc.events = Some(waiter.wait_final_event("daemon-bidi-stream-done")?);
 
     {
         let mut attach_proc =
             daemon_proc.attach("sh1", Default::default()).context("starting attach proc")?;
         let mut line_matcher = attach_proc.line_matcher()?;
+
+        // Give the reattach resize protocol (REATTACH_RESIZE_DELAY 50ms) time
+        // to complete so SIGWINCH handling doesn't interfere with command
+        // input.
+        thread::sleep(time::Duration::from_millis(500));
 
         // The restore buffer does not end in a newline, so give the line
         // matcher something that does before asserting on it. Nothing in the
@@ -1213,9 +1531,11 @@ fn prompt_prefix_bash() -> anyhow::Result<()> {
     let mut daemon_proc =
         support::daemon::Proc::new("prompt_prefix_bash.toml", DaemonArgs::default())
             .context("starting daemon proc")?;
+    let mut waiter = daemon_proc.events.take().unwrap().waiter(["daemon-wrote-s2c-chunk"]);
 
     let mut attach_proc = daemon_proc.attach("sh1", AttachArgs::default())?;
     let mut lm = attach_proc.line_matcher()?;
+    waiter.wait_event("daemon-wrote-s2c-chunk")?;
     attach_proc.run_cmd("echo")?;
     lm.scan_until_re(".*session_name=sh1 prompt>.*")?;
 
@@ -1229,9 +1549,11 @@ fn prompt_prefix_zsh() -> anyhow::Result<()> {
     let mut daemon_proc =
         support::daemon::Proc::new("prompt_prefix_zsh.toml", DaemonArgs::default())
             .context("starting daemon proc")?;
+    let mut waiter = daemon_proc.events.take().unwrap().waiter(["daemon-wrote-s2c-chunk"]);
 
     let mut attach_proc = daemon_proc.attach("sh1", AttachArgs::default())?;
     let mut lm = attach_proc.line_matcher()?;
+    waiter.wait_event("daemon-wrote-s2c-chunk")?;
     attach_proc.run_cmd("echo")?;
     lm.scan_until_re(".*session_name=sh1.*")?;
 
@@ -1892,6 +2214,7 @@ fn templated_session_name_no_switch_on_unrelated_var() -> anyhow::Result<()> {
 fn start_cmd() -> anyhow::Result<()> {
     let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
         .context("starting daemon proc")?;
+    let mut waiter = daemon_proc.events.take().unwrap().waiter(["daemon-wrote-s2c-chunk"]);
     let mut attach_proc = daemon_proc
         .attach(
             "sh1",
@@ -1903,6 +2226,7 @@ fn start_cmd() -> anyhow::Result<()> {
         .context("starting attach proc")?;
 
     let mut line_matcher = attach_proc.line_matcher()?;
+    waiter.wait_event("daemon-wrote-s2c-chunk")?;
 
     attach_proc.run_cmd("echo $STARTUP_CMD_RAN")?;
     line_matcher.scan_until_re("true$")?;
@@ -1915,6 +2239,7 @@ fn start_cmd() -> anyhow::Result<()> {
 fn start_cmd_template() -> anyhow::Result<()> {
     let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
         .context("starting daemon proc")?;
+    let mut waiter = daemon_proc.events.take().unwrap().waiter(["daemon-wrote-s2c-chunk"]);
 
     daemon_proc.var_set("myvar", "myval")?;
 
@@ -1929,6 +2254,7 @@ fn start_cmd_template() -> anyhow::Result<()> {
         .context("starting attach proc")?;
 
     let mut line_matcher = attach_proc.line_matcher()?;
+    waiter.wait_event("daemon-wrote-s2c-chunk")?;
 
     attach_proc.run_cmd("echo $STARTUP_CMD_VAR")?;
     line_matcher.scan_until_re("myval$")?;
