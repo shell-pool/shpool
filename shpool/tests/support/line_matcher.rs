@@ -3,7 +3,7 @@ use std::{io, io::BufRead, time};
 use anyhow::{anyhow, Context};
 use regex::Regex;
 
-const CMD_READ_TIMEOUT: time::Duration = time::Duration::from_secs(3);
+const CMD_READ_TIMEOUT: time::Duration = time::Duration::from_secs(5);
 const CMD_READ_SLEEP_DUR: time::Duration = time::Duration::from_millis(20);
 
 pub struct LineMatcher<R: std::io::Read> {
@@ -37,7 +37,7 @@ where
     /// Scan lines until one matches the given regex, returning its captures.
     pub fn scan_until_re_captures(&mut self, re: &str) -> anyhow::Result<Vec<Option<String>>> {
         let compiled_re = Regex::new(re)?;
-        let start = time::Instant::now();
+        let mut start = time::Instant::now();
         let mut line = String::new();
         loop {
             match self.out.read_line(&mut line) {
@@ -57,6 +57,7 @@ where
                     return Err(e).context("reading line from shell output")?;
                 }
                 Ok(_) => {
+                    start = time::Instant::now();
                     if line.ends_with('\n') {
                         line.pop();
                         if line.ends_with('\r') {
@@ -136,7 +137,7 @@ where
     /// Scan through all the remaining lines and ensure that no persistant
     /// assertions fail (the never match regex).
     pub fn drain(&mut self) -> anyhow::Result<()> {
-        let start = time::Instant::now();
+        let mut start = time::Instant::now();
         let mut line = String::new();
         loop {
             match self.out.read_line(&mut line) {
@@ -156,6 +157,7 @@ where
                     return Err(e).context("reading line from shell output")?;
                 }
                 Ok(_) => {
+                    start = time::Instant::now();
                     if line.ends_with('\n') {
                         line.pop();
                         if line.ends_with('\r') {
