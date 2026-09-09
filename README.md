@@ -51,10 +51,9 @@ with the `nodaemonize` config option and the `-d/-D` command line switches.
 
 ### Installing with Homebrew
 
-On macOS, `shpool` can be installed via the project's [Homebrew tap](https://github.com/shell-pool/homebrew-shpool):
+On macOS, `shpool` can be installed via [Homebrew](https://brew.sh):
 
 ```
-brew tap shell-pool/shpool
 brew install shpool
 ```
 
