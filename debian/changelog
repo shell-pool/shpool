@@ -1,4 +1,18 @@
 
+shpool (0.11.5) unstable; urgency=low
+
+  Added
+
+  * add automatic env var reload to prompt hooks
+  * add support for forwarding the entire env
+  * add shell_pid to 'shpool list --json'
+
+  Other
+
+  * Update README.md
+
+ -- Shpool Authors <shpool-eng@google.com>  Fri, 11 Sep 2026 03:37:55 +0000
+
 shpool (0.11.4) unstable; urgency=low
 
   Added
