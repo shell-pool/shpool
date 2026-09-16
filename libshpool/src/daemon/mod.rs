@@ -24,6 +24,7 @@ pub(crate) mod events;
 mod exit_notify;
 pub mod keybindings;
 mod pager;
+mod peer;
 mod server;
 mod shell;
 mod shell_inject;
