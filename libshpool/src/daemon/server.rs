@@ -66,6 +66,14 @@ const DEFAULT_PROMPT_PREFIX: &str = "shpool:$SHPOOL_SESSION_NAME ";
 // global session table lock held.
 const SESSION_MSG_TIMEOUT: time::Duration = time::Duration::from_millis(500);
 
+// The largest connect header we are willing to read. We have to parse the
+// connect header before we can check the peer's credentials, so the bytes
+// are untrusted and we need to make sure a hostile peer can't make us buffer
+// an unbounded amount of data. Real headers are only a few hundred bytes,
+// but they contain user controlled strings such as the session name and
+// the `--cmd` command line, so we leave lots of headroom.
+const MAX_CONNECT_HEADER_SIZE: u64 = 1024 * 1024;
+
 pub struct Server {
     config: config::Manager,
     /// A map from shell session names to session descriptors.
@@ -1407,8 +1415,19 @@ fn does_not_support_sentinels(shell: &str) -> bool {
 
 #[instrument(skip_all)]
 fn parse_connect_header(stream: &mut UnixStream) -> anyhow::Result<ConnectHeader> {
-    let header: ConnectHeader = protocol::decode_from(stream).context("parsing header")?;
-    Ok(header)
+    // Deliberately parse through a `Take` adapter so a malicious peer that
+    // just streams bytes at us hits an early EOF rather than making us
+    // allocate without bound.
+    let mut limited = io::Read::take(&mut *stream, MAX_CONNECT_HEADER_SIZE);
+    match protocol::decode_from(&mut limited) {
+        Ok(header) => Ok(header),
+        // We can only run out of budget if the peer sent us a header that
+        // is too big, so give a more actionable error than the EOF that
+        // the deserializer reports.
+        Err(err) if limited.limit() == 0 => Err(err)
+            .context(format!("connect header exceeded {MAX_CONNECT_HEADER_SIZE} byte limit")),
+        Err(err) => Err(err).context("parsing header"),
+    }
 }
 
 #[instrument(skip_all)]
@@ -1575,5 +1594,67 @@ mod tests {
             "export GOOD_KEY_1='val'\n\
              export _ALSO_GOOD='val'\n"
         );
+    }
+
+    #[test]
+    fn test_parse_connect_header_ok() -> anyhow::Result<()> {
+        let (mut client, mut server) = UnixStream::pair()?;
+
+        protocol::encode_to(
+            &ConnectHeader::Attach(AttachHeader {
+                name: String::from("sh1"),
+                ..Default::default()
+            }),
+            &mut client,
+        )?;
+        // Write a second message to make sure that bounding the header parse
+        // does not make us over-read and eat into the rest of the stream.
+        protocol::encode_to(&ConnectHeader::List, &mut client)?;
+
+        assert!(matches!(
+            parse_connect_header(&mut server)?,
+            ConnectHeader::Attach(h) if h.name == "sh1"
+        ));
+        assert!(matches!(parse_connect_header(&mut server)?, ConnectHeader::List));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_connect_header_too_big() -> anyhow::Result<()> {
+        let (mut client, mut server) = UnixStream::pair()?;
+
+        let writer = thread::spawn(move || {
+            // Claim a str of the largest length msgpack allows, then start
+            // streaming the body at the daemon. Without a cap the daemon
+            // would happily buffer all of it.
+            client.write_all(&[0xdb, 0xff, 0xff, 0xff, 0xff])?;
+
+            // Push a good deal more than the cap, but stop well short of the
+            // length we claimed so that the test can't spin forever if the
+            // cap ever regresses. Writes start failing as soon as the header
+            // parse bails out and drops its end of the socket.
+            let chunk = vec![b'A'; consts::BUF_SIZE];
+            let mut written = 0u64;
+            while written < MAX_CONNECT_HEADER_SIZE * 4 {
+                if client.write_all(&chunk).is_err() {
+                    return Ok::<_, io::Error>(written);
+                }
+                written += chunk.len() as u64;
+            }
+            Ok(written)
+        });
+
+        let err = parse_connect_header(&mut server).unwrap_err();
+        assert!(format!("{err:#}").contains("exceeded"), "expected a size limit error: {err:#}");
+        drop(server);
+
+        let written = writer.join().unwrap()?;
+        assert!(
+            written < MAX_CONNECT_HEADER_SIZE * 4,
+            "the daemon should have hung up on us, but it swallowed {written} bytes"
+        );
+
+        Ok(())
     }
 }
