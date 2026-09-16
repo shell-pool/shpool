@@ -43,6 +43,8 @@ use nix::{
 use serde_derive::Serialize;
 use tracing::{error, info, warn};
 
+use crate::daemon::peer;
+
 /// Per-subscriber outbound queue depth (events). Subscribers that fall this
 /// far behind are dropped and must reconnect.
 const SUBSCRIBER_QUEUE_DEPTH: usize = 64;
@@ -301,10 +303,17 @@ impl Sink {
             // immediately when the queue is empty).
             loop {
                 match listener.accept() {
-                    Ok((stream, _addr)) => match SubscriberWriter::new(stream) {
-                        Ok(sub) => subs.push(sub),
-                        Err(e) => warn!("registering events subscriber: {:?}", e),
-                    },
+                    Ok((stream, _addr)) => {
+                        if let Err(e) = peer::check(&stream) {
+                            warn!("invalid peer: {:?}", e);
+                            continue;
+                        }
+
+                        match SubscriberWriter::new(stream) {
+                            Ok(sub) => subs.push(sub),
+                            Err(e) => warn!("registering events subscriber: {:?}", e),
+                        }
+                    }
                     Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
                     Err(e) => {
                         error!("events listener accept: {:?}", e);

@@ -34,7 +34,6 @@ use std::{
 };
 
 use anyhow::{anyhow, Context};
-use nix::unistd;
 use parking_lot::{ArcMutexGuard, Mutex, RawMutex};
 use shpool_protocol::{
     AttachHeader, AttachReplyHeader, AttachStatus, Attachment, ConnectHeader, DetachReply,
@@ -50,8 +49,8 @@ use crate::{
     config::MotdDisplayMode,
     consts,
     daemon::{
-        etc_environment, events, exit_notify::ExitNotifier, hooks, pager, pager::PagerError, shell,
-        shell_inject, show_motd, ttl_reaper,
+        etc_environment, events, exit_notify::ExitNotifier, hooks, pager, pager::PagerError, peer,
+        shell, shell_inject, show_motd, ttl_reaper,
     },
     protocol, test_hooks, tty, user,
 };
@@ -216,7 +215,7 @@ impl Server {
 
         let header = parse_connect_header(&mut stream).context("parsing connect header")?;
 
-        let peer_pid = match check_peer(&stream) {
+        let peer_pid = match peer::check(&stream) {
             Ok(peer_pid) => peer_pid,
             Err(err) => {
                 if let ConnectHeader::Attach(_) = header {
@@ -1445,99 +1444,6 @@ where
     stream.set_write_timeout(None).context("unsetting write timout on inbound session")?;
 
     Ok(())
-}
-
-/// check_peer makes sure that a process dialing in on the shpool control socket
-/// has the same UID as the current user and that both have the same executable
-/// path. Returns the peer's pid, which the kernel captures at connect time and
-/// keeps fixed for the life of the connection.
-#[cfg(target_os = "linux")]
-fn check_peer(sock: &UnixStream) -> anyhow::Result<libc::pid_t> {
-    use nix::sys::socket;
-
-    let peer_creds = socket::getsockopt(sock, socket::sockopt::PeerCredentials)
-        .context("could not get peer creds from socket")?;
-    let peer_uid = unistd::Uid::from_raw(peer_creds.uid());
-    let self_uid = unistd::Uid::current();
-    if peer_uid != self_uid {
-        return Err(anyhow!("shpool prohibits connections across users"));
-    }
-
-    let peer_pid = unistd::Pid::from_raw(peer_creds.pid());
-    let self_pid = unistd::Pid::this();
-    let peer_exe = exe_for_pid(peer_pid).context("could not resolve exe from the pid")?;
-    let self_exe = exe_for_pid(self_pid).context("could not resolve our own exe")?;
-    if peer_exe != self_exe {
-        warn!("attach binary differs from daemon binary");
-    }
-
-    Ok(peer_creds.pid())
-}
-
-#[cfg(target_os = "macos")]
-fn check_peer(sock: &UnixStream) -> anyhow::Result<libc::pid_t> {
-    use std::os::unix::io::AsRawFd;
-
-    let mut peer_uid: libc::uid_t = 0;
-    let mut peer_gid: libc::gid_t = 0;
-    // Safety: getpeereid is standard BSD FFI, all pointers are valid
-    unsafe {
-        if libc::getpeereid(sock.as_raw_fd(), &mut peer_uid, &mut peer_gid) != 0 {
-            return Err(anyhow!(
-                "could not get peer uid from socket: {}",
-                io::Error::last_os_error()
-            ));
-        }
-    }
-    let peer_uid = unistd::Uid::from_raw(peer_uid);
-    let self_uid = unistd::Uid::current();
-    if peer_uid != self_uid {
-        return Err(anyhow!("shpool prohibits connections across users"));
-    }
-
-    let mut peer_pid: libc::pid_t = 0;
-    let mut len = std::mem::size_of::<libc::pid_t>() as libc::socklen_t;
-    // Safety: getsockopt is standard POSIX FFI, all pointers and sizes are
-    // valid
-    unsafe {
-        if libc::getsockopt(
-            sock.as_raw_fd(),
-            libc::SOL_LOCAL,
-            libc::LOCAL_PEERPID,
-            &mut peer_pid as *mut _ as *mut libc::c_void,
-            &mut len,
-        ) != 0
-        {
-            return Err(anyhow!(
-                "could not get peer pid from socket: {}",
-                io::Error::last_os_error()
-            ));
-        }
-    }
-
-    let self_pid = unistd::Pid::this();
-    let peer_exe = exe_for_pid(unistd::Pid::from_raw(peer_pid))
-        .context("could not resolve exe from the pid")?;
-    let self_exe = exe_for_pid(self_pid).context("could not resolve our own exe")?;
-    if peer_exe != self_exe {
-        warn!("attach binary differs from daemon binary");
-    }
-
-    Ok(peer_pid)
-}
-
-#[cfg(target_os = "linux")]
-fn exe_for_pid(pid: unistd::Pid) -> anyhow::Result<PathBuf> {
-    let path = std::fs::read_link(format!("/proc/{pid}/exe"))?;
-    Ok(path)
-}
-
-#[cfg(target_os = "macos")]
-fn exe_for_pid(pid: unistd::Pid) -> anyhow::Result<PathBuf> {
-    use libproc::proc_pid::pidpath;
-    let path = pidpath(pid.as_raw())
-        .map_err(|e| anyhow!("could not get exe path for pid {}: {:?}", pid, e))?;
-    Ok(PathBuf::from(path))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

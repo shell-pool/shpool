@@ -6,7 +6,10 @@ use serde_json::Value;
 
 mod support;
 
-use crate::support::daemon::{self, AttachArgs, DaemonArgs};
+use crate::support::{
+    daemon::{self, AttachArgs, DaemonArgs},
+    wait_until,
+};
 
 fn next_event(reader: &mut BufReader<UnixStream>) -> anyhow::Result<Value> {
     let mut line = String::new();
@@ -243,6 +246,51 @@ fn multiple_subscribers_each_get_independent_streams() -> anyhow::Result<()> {
         assert_eq!(next_event(sub)?["type"], "session.attached");
         assert_eq!(next_event(sub)?["type"], "session.detached");
     }
+
+    Ok(())
+}
+
+// Events subscribers go through the same peer check as clients dialing the
+// control socket. We can't produce a cross-user connection from a test, but a
+// mismatched exe is easy: this test binary is not the daemon binary, so
+// connecting logs the exe-mismatch warning. That warning only exists on the
+// peer-check path, so its arrival pins the check to the accept path, and the
+// events we go on to read pin the mismatch as a warning rather than a
+// rejection.
+#[test]
+#[timeout(30000)]
+fn events_subscriber_goes_through_the_peer_check() -> anyhow::Result<()> {
+    const EXE_MISMATCH_WARNING: &str = "attach binary differs from daemon binary";
+
+    let mut d = daemon::Proc::new(
+        "norc.toml",
+        DaemonArgs { listen_events: false, ..DaemonArgs::default() },
+    )
+    .context("starting daemon proc")?;
+
+    // Nothing has dialed either socket yet, so no peer check has run. Without
+    // this, a warning from some unrelated connection could masquerade as the
+    // one we are looking for below.
+    let log = std::fs::read_to_string(&d.log_file).context("reading daemon log")?;
+    assert!(
+        !log.contains(EXE_MISMATCH_WARNING),
+        "no peer check should have run before the first connection"
+    );
+
+    let mut sub = d.connect_events()?;
+
+    wait_until(|| {
+        let log = std::fs::read_to_string(&d.log_file).context("reading daemon log")?;
+        Ok(log.contains(EXE_MISMATCH_WARNING))
+    })
+    .context("waiting for the peer check to run on the events accept path")?;
+
+    // The subscriber was registered despite the exe mismatch, so it still sees
+    // the stream.
+    let _attach = d
+        .attach("s1", AttachArgs { background: true, null_stdin: true, ..AttachArgs::default() })
+        .context("starting attach proc")?;
+    assert_eq!(next_event(&mut sub)?["type"], "session.created");
 
     Ok(())
 }
