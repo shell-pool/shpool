@@ -63,6 +63,14 @@ const SHELL_TO_CLIENT_POLL_MS: u16 = 50;
 // shell->client thread.
 const SHELL_TO_CLIENT_CTL_TIMEOUT: time::Duration = time::Duration::from_millis(300);
 
+// How long a single write to an attached client may block before we
+// decide the client has stopped reading and drop it. A client that stays
+// connected but never drains its socket (an orphaned terminal emulator,
+// a stalled ssh window) would otherwise park the shell->client thread in
+// write() forever, freezing the shell once the pty fills up and keeping
+// the session attached so that neither detach nor attach -f can take it.
+const CLIENT_WRITE_TIMEOUT: time::Duration = time::Duration::from_secs(10);
+
 /// Lifecycle state tracking when sessions were last connected/disconnected and
 /// by whom. The fields update in lockstep, so they live behind a single private
 /// lock that only this type's methods take, exactly once per update or read.
@@ -231,6 +239,13 @@ fn shutdown_socket(
         }
         Err(e) => Err(e.into()),
     }
+}
+
+/// Reports whether a client write failed because it hit
+/// CLIENT_WRITE_TIMEOUT. Depending on the platform, an expired
+/// socket write timeout surfaces as either kind.
+fn is_client_write_timeout(err: &io::Error) -> bool {
+    matches!(err.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut)
 }
 
 /// Messages to the shell->client thread to add or remove a client connection.
@@ -432,6 +447,11 @@ impl SessionInner {
                                     trace!("client hangup: {:?}", e);
                                     false
                                 }
+                                Err(e) if is_client_write_timeout(&e) => {
+                                    warn!("client stopped reading, dropping it: {:?}", e);
+                                    Self::drop_client(conn);
+                                    false
+                                }
                                 Err(e) => {
                                     error!("unexpected IO error while writing heartbeat: {}", e);
                                     return Err(e).context("writing heartbeat")?;
@@ -475,6 +495,10 @@ impl SessionInner {
                             }
                             Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {
                                 trace!("writing MaybeSwitch: client hangup: {:?}", e);
+                            }
+                            Err(e) if is_client_write_timeout(&e) => {
+                                warn!("writing MaybeSwitch: client stopped reading, dropping it: {:?}", e);
+                                Self::drop_client(conn);
                             }
                             Err(e) => {
                                 error!("unexpected IO error while writing heartbeat: {}", e);
@@ -522,6 +546,11 @@ impl SessionInner {
 
                             if let Err(err) = chunk.write_to(&mut conn.sink) {
                                 warn!("err writing session-restore buf: {:?}", err);
+                                // Each further chunk could block for another
+                                // CLIENT_WRITE_TIMEOUT, so give up on the
+                                // client right away.
+                                Self::drop_client(conn);
+                                break;
                             }
                         }
                         if let Err(err) = conn.sink.flush() {
@@ -624,6 +653,7 @@ impl SessionInner {
                         chunk.write_to(&mut conn.sink).and_then(|_| conn.sink.flush());
                     if let Err(err) = write_result {
                         info!("client_stream write err, assuming hangup: {:?}", err);
+                        Self::drop_client(conn);
                         reset_client_conn = true;
                     } else {
                         test_hooks::emit("daemon-wrote-s2c-chunk");
@@ -638,6 +668,16 @@ impl SessionInner {
         Ok(thread::Builder::new()
             .name(format!("shell->client({})", self.name))
             .spawn(move || log_if_error("error in shell->client", closure()))?)
+    }
+
+    /// Gives up on a client we can no longer write to. The socket is shut
+    /// down rather than just dropped: the client may still be alive, just
+    /// not reading, and the client->shell thread and the attach process
+    /// only notice that the connection is over once they see EOF.
+    fn drop_client(conn: &ClientConnection) {
+        if let Err(e) = shutdown_socket(&conn.stream, net::Shutdown::Both) {
+            warn!("shutting down client stream: {:?}", e);
+        }
     }
 
     fn write_exit_chunk<W: io::Write>(mut sink: W, status: i32) {
@@ -676,6 +716,12 @@ impl SessionInner {
             Some(s) => s,
             None => return Err(anyhow!("no client stream to take for bidi streaming")),
         };
+
+        // The timeout belongs to the socket, so it also covers the clones
+        // below that the shell->client thread writes through.
+        client_stream
+            .set_write_timeout(Some(CLIENT_WRITE_TIMEOUT))
+            .context("setting client write timeout")?;
 
         let mut client_to_shell_client_stream =
             client_stream.try_clone().context("creating client->shell client stream")?;

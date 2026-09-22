@@ -925,6 +925,56 @@ fn force_attach() -> anyhow::Result<()> {
 
 #[test]
 #[timeout(30000)]
+fn force_attach_stalled_client() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new(
+        "norc.toml",
+        DaemonArgs { listen_events: false, ..DaemonArgs::default() },
+    )
+    .context("starting daemon proc")?;
+    let disconnected_re = Regex::new("sh1.*disconnected").expect("valid regex");
+
+    let mut tty1 = daemon_proc.attach("sh1", Default::default()).context("attaching from tty1")?;
+    let mut line_matcher1 = tty1.line_matcher()?;
+    tty1.run_cmd("export MYVAR='set_from_tty1'")?;
+    tty1.run_cmd("echo $MYVAR")?;
+    line_matcher1.scan_until_re("set_from_tty1$")?;
+
+    // Flood the session and never read tty1's stdout again, like a
+    // terminal that is still open but no longer drained (an orphaned
+    // IDE terminal or a stalled ssh window). tty1 blocks writing its
+    // stdout and stops reading from the daemon.
+    tty1.run_cmd("yes")?;
+
+    // The daemon has to give up on the stalled client on its own
+    // rather than letting it hold the session (and the shell's
+    // output) forever. That takes the daemon's client write timeout,
+    // and the exponential backoff in wait_until_list_matches polls too
+    // sparsely around that point, so poll at a fixed interval instead.
+    let deadline = time::Instant::now() + time::Duration::from_secs(20);
+    loop {
+        let list_out = daemon_proc.list()?;
+        if disconnected_re.is_match(&String::from_utf8_lossy(&list_out.stdout[..])) {
+            break;
+        }
+        if time::Instant::now() > deadline {
+            return Err(anyhow!("the stalled client was never dropped"));
+        }
+        thread::sleep(time::Duration::from_millis(500));
+    }
+
+    let mut tty2 = daemon_proc
+        .attach("sh1", AttachArgs { force: true, ..Default::default() })
+        .context("attaching from tty2")?;
+    let mut line_matcher2 = tty2.line_matcher()?;
+    tty2.run_raw(vec![3])?; // ^C the flood
+    tty2.run_cmd("echo $MYVAR")?;
+    line_matcher2.scan_until_re("set_from_tty1$")?;
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
 fn busy() -> anyhow::Result<()> {
     let mut daemon_proc = support::daemon::Proc::new(
         "norc.toml",
