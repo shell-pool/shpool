@@ -11,6 +11,68 @@ mod support;
 
 use crate::support::{daemon::DaemonArgs, tmpdir};
 
+fn client_write_reset_preserves_session(kind: &str) -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new(
+        "norc.toml",
+        DaemonArgs {
+            extra_env: vec![(String::from("SHPOOL_TEST__CLIENT_WRITE_RESET"), kind.to_owned())],
+            ..DaemonArgs::default()
+        },
+    )?;
+    let mut original_client = daemon_proc.attach("main", Default::default())?;
+    daemon_proc.await_event("daemon-bidi-stream-enter")?;
+
+    let sessions: serde_json::Value = serde_json::from_slice(&daemon_proc.list_json()?.stdout)?;
+    let shell_pid = sessions["sessions"][0]["shell_pid"].as_i64().unwrap();
+
+    if kind == "maybe-switch" {
+        assert!(daemon_proc.var_set("repro", "changed")?.status.success());
+    }
+    daemon_proc.await_event("daemon-injected-client-write-error")?;
+    daemon_proc.wait_until_list_matches(|out| out.contains("disconnected"))?;
+    // The peer did not close voluntarily. It must be released by the daemon.
+    original_client.proc.wait()?;
+    signal::kill(Pid::from_raw(shell_pid as i32), None)?;
+    assert!(
+        !fs::read_to_string(&daemon_proc.log_file)?.contains("error in shell->client:"),
+        "a client write reset must not terminate the session's output worker"
+    );
+
+    for _ in 0..3 {
+        let mut client = daemon_proc.attach("main", Default::default())?;
+        let mut output = client.line_matcher()?;
+        client.run_cmd("printf 'reset-%s\\n' recovered")?;
+        output.scan_until_re("reset-recovered$")?;
+
+        let sessions: serde_json::Value = serde_json::from_slice(&daemon_proc.list_json()?.stdout)?;
+        assert_eq!(sessions["sessions"][0]["shell_pid"].as_i64(), Some(shell_pid));
+        assert_eq!(sessions["sessions"][0]["status"], "Attached");
+
+        assert!(daemon_proc.detach(vec![String::from("main")])?.status.success());
+        client.proc.wait()?;
+        daemon_proc.wait_until_list_matches(|out| out.contains("disconnected"))?;
+    }
+    let sessions: serde_json::Value = serde_json::from_slice(&daemon_proc.list_json()?.stdout)?;
+    assert_eq!(sessions["sessions"][0]["attachments"], serde_json::json!([]));
+    assert!(daemon_proc.kill(vec![String::from("main")])?.status.success());
+    Ok(())
+}
+
+/// ECONNRESET on a heartbeat used to terminate the output worker while the
+/// shell stayed alive, permanently preventing subsequent attaches.
+#[test]
+#[timeout(15000)]
+fn heartbeat_write_reset_preserves_session() -> anyhow::Result<()> {
+    client_write_reset_preserves_session("heartbeat")
+}
+
+/// MaybeSwitch writes share the heartbeat's client-disconnect failure mode.
+#[test]
+#[timeout(15000)]
+fn maybe_switch_write_reset_preserves_session() -> anyhow::Result<()> {
+    client_write_reset_preserves_session("maybe-switch")
+}
+
 /// Regression test for a deadlock where the global `shells` mutex is held
 /// during `spawn_subshell` -> `wait_for_startup`. If `wait_for_startup`
 /// blocks (e.g. the shell never produces the startup sentinel), the mutex
