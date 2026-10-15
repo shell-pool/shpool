@@ -1026,11 +1026,12 @@ dependencies = [
 
 [[package]]
 name = "shpool-vterm"
-version = "0.2.2"
+version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe03f99c0b6f0479ed1464eee5af8a478b09f8a117e94c6112bcb92f4364b44d"
+checksum = "9b62c87971cb7c1986e215f18713f174550922197a95f0941cbe7e0e3b0d4582"
 dependencies = [
  "anyhow",
+ "bitflags",
  "bitvec",
  "itoa",
  "log",
