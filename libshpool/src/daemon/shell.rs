@@ -517,7 +517,7 @@ impl SessionInner {
                         // send the restore buffer, broken up into chunks so
                         // that we don't make the client
                         // allocate too much
-                        for block in restore_buf.as_slice().chunks(consts::BUF_SIZE) {
+                        for block in restore_buf.chunks(consts::BUF_SIZE) {
                             let chunk = Chunk { kind: ChunkKind::Data, buf: block };
 
                             if let Err(err) = chunk.write_to(&mut conn.sink) {
