@@ -45,6 +45,29 @@ pub fn emit(_event: &str) {
     // a no-op normally
 }
 
+/// Inject one client write reset per daemon for the regression tests. This
+/// leaves the peer open so the test also checks that shutdown wakes the input
+/// thread, rather than relying on the client to close its own socket.
+#[cfg(feature = "test_hooks")]
+pub fn client_write_error(kind: &str) -> Option<std::io::Error> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static INJECTED: AtomicBool = AtomicBool::new(false);
+    if std::env::var("SHPOOL_TEST__CLIENT_WRITE_RESET").as_deref() == Ok(kind)
+        && !INJECTED.swap(true, Ordering::Relaxed)
+    {
+        emit("daemon-injected-client-write-error");
+        Some(std::io::Error::from_raw_os_error(libc::ECONNRESET))
+    } else {
+        None
+    }
+}
+
+#[cfg(not(feature = "test_hooks"))]
+pub fn client_write_error(_kind: &str) -> Option<std::io::Error> {
+    None
+}
+
 #[cfg(feature = "test_hooks")]
 pub fn scoped(event: &str) -> ScopedEvent {
     ScopedEvent::new(event)

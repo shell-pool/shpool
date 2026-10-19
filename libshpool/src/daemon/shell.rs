@@ -423,23 +423,31 @@ impl SessionInner {
                     recv(args.heartbeat) -> request_id => {
                         let client_present = if let ClientConnectionMsg::New(conn) = &mut client_conn {
                             let chunk = Chunk { kind: ChunkKind::Heartbeat, buf: &[] };
-                            match chunk.write_to(&mut conn.sink).and_then(|_| conn.sink.flush()) {
+                            let write_result = test_hooks::client_write_error("heartbeat")
+                                .map_or_else(|| chunk.write_to(&mut conn.sink).and_then(|_| conn.sink.flush()), Err);
+                            match write_result {
                                 Ok(_) => {
                                     trace!("wrote heartbeat");
                                     true
                                 }
-                                Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {
-                                    trace!("client hangup: {:?}", e);
-                                    false
-                                }
                                 Err(e) => {
-                                    error!("unexpected IO error while writing heartbeat: {}", e);
-                                    return Err(e).context("writing heartbeat")?;
+                                    info!("heartbeat write err, assuming hangup: {:?}", e);
+                                    // A failed client write must not terminate the
+                                    // session's long-lived output worker. Shut down
+                                    // every clone so client->shell also wakes up.
+                                    if let Err(err) = shutdown_socket(&conn.stream, net::Shutdown::Both) {
+                                        warn!("shutting down client after heartbeat error: {:?}", err);
+                                    }
+                                    false
                                 }
                             }
                         } else {
                             false
                         };
+
+                        if !client_present {
+                            client_conn = ClientConnectionMsg::Disconnect;
+                        }
 
                         test_hooks::emit("daemon-wrote-heartbeat");
 
@@ -469,16 +477,18 @@ impl SessionInner {
                         }
 
                         let chunk = Chunk { kind: ChunkKind::MaybeSwitch, buf: &encoded[..] };
-                        match chunk.write_to(&mut conn.sink).and_then(|_| conn.sink.flush()) {
+                        let write_result = test_hooks::client_write_error("maybe-switch")
+                            .map_or_else(|| chunk.write_to(&mut conn.sink).and_then(|_| conn.sink.flush()), Err);
+                        match write_result {
                             Ok(_) => {
                                 trace!("wrote MaybeSwitch");
                             }
-                            Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {
-                                trace!("writing MaybeSwitch: client hangup: {:?}", e);
-                            }
                             Err(e) => {
-                                error!("unexpected IO error while writing heartbeat: {}", e);
-                                return Err(e).context("writing MaybeSwitch")?;
+                                info!("MaybeSwitch write err, assuming hangup: {:?}", e);
+                                if let Err(err) = shutdown_socket(&conn.stream, net::Shutdown::Both) {
+                                    warn!("shutting down client after MaybeSwitch error: {:?}", err);
+                                }
+                                client_conn = ClientConnectionMsg::Disconnect;
                             }
                         }
                     }
