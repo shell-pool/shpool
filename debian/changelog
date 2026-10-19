@@ -1,4 +1,13 @@
 
+shpool (0.11.6) unstable; urgency=low
+
+  Other
+
+  * update Cargo.lock dependencies
+  * bump shpool-vterm to 0.2.8
+
+ -- Shpool Authors <shpool-eng@google.com>  Mon, 19 Oct 2026 14:01:18 +0000
+
 shpool (0.11.5) unstable; urgency=low
 
   Added
