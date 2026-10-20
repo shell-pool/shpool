@@ -21,7 +21,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Context};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 pub use hooks::Hooks;
 use parking_lot::{Mutex, MutexGuard};
 use tracing::error;
@@ -116,6 +116,16 @@ the daemon is launched by systemd."
     pub __non_exhaustive: (),
 }
 
+/// Selects which operation determines the exit status of `shpool attach`.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, ValueEnum)]
+pub enum ErrorStatusMode {
+    /// Report whether the attach operation succeeded.
+    Attach,
+    /// Report the exit status of the attached shell.
+    #[default]
+    Shell,
+}
+
 /// The subcommds that shpool supports.
 #[derive(Subcommand, Debug, Default)]
 #[non_exhaustive]
@@ -138,6 +148,17 @@ pub enum Commands {
             help = "Create/attach the session and immediately detach (use with --force to detach any existing client first)"
         )]
         background: bool,
+        #[clap(
+            long,
+            value_enum,
+            default_value = "shell",
+            long_help = "Choose which operation determines the exit status
+
+In 'shell' mode, preserve the existing behavior: report the attached shell's
+exit status and treat a busy session as a successful no-op. In 'attach' mode,
+report whether the attach operation succeeded instead."
+        )]
+        error_status_mode: ErrorStatusMode,
         #[clap(
             long,
             long_help = "Automatically kill the session after the given time
@@ -468,9 +489,27 @@ pub unsafe fn run(
             log_level_handle,
             socket,
         ),
-        Commands::Attach { force, background, ttl, cmd, dir, start_cmd, name } => {
-            attach::run(socket, config_manager, name, force, background, ttl, cmd, dir, start_cmd)
-        }
+        Commands::Attach {
+            force,
+            background,
+            error_status_mode,
+            ttl,
+            cmd,
+            dir,
+            start_cmd,
+            name,
+        } => attach::run(
+            socket,
+            config_manager,
+            name,
+            force,
+            background,
+            error_status_mode,
+            ttl,
+            cmd,
+            dir,
+            start_cmd,
+        ),
         Commands::Detach { sessions } => detach::run(sessions, socket),
         Commands::Kill { sessions } => kill::run(sessions, socket),
         Commands::List { json } => list::run(socket, json),
