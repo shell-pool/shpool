@@ -839,41 +839,84 @@ impl Server {
 
     #[instrument(skip_all)]
     fn handle_list(&self, mut stream: UnixStream) -> anyhow::Result<()> {
-        let _s = span!(Level::INFO, "lock(shells)").entered();
-        let shells = self.shells.lock();
-        let sessions: anyhow::Result<Vec<Session>> = shells
-            .iter()
-            .map(|(session_name, session)| {
-                let status = match session.inner.try_lock() {
-                    Some(_) => SessionStatus::Disconnected,
-                    None => SessionStatus::Attached,
-                };
+        // None if the session's shell->client thread has exited.
+        type Reply = Option<crossbeam_channel::Receiver<shell::SessionMetadata>>;
 
-                let lifecycle_state = session.lifecycle.snapshot();
-                let last_connected_at_unix_ms = lifecycle_state
-                    .last_connected_at
-                    .map(|t| t.duration_since(time::UNIX_EPOCH).map(|d| d.as_millis() as i64))
-                    .transpose()?;
-                let last_disconnected_at_unix_ms = lifecycle_state
-                    .last_disconnected_at
-                    .map(|t| t.duration_since(time::UNIX_EPOCH).map(|d| d.as_millis() as i64))
-                    .transpose()?;
+        // Ask every session for its metadata up front, so the shell->client
+        // threads work on their answers in parallel. Asking never blocks, so it
+        // is safe under the shells lock.
+        let sessions: anyhow::Result<Vec<(Session, Reply)>> = {
+            let _s = span!(Level::INFO, "lock(shells)").entered();
+            let shells = self.shells.lock();
+            shells
+                .iter()
+                .map(|(session_name, session)| {
+                    let status = match session.inner.try_lock() {
+                        Some(_) => SessionStatus::Disconnected,
+                        None => SessionStatus::Attached,
+                    };
 
-                Ok(Session {
-                    name: session_name.to_string(),
-                    started_at_unix_ms: session
-                        .started_at
-                        .duration_since(time::UNIX_EPOCH)?
-                        .as_millis() as i64,
-                    last_connected_at_unix_ms,
-                    last_disconnected_at_unix_ms,
-                    status,
-                    shell_pid: session.child_pid,
-                    attachments: lifecycle_state.attachment.into_iter().collect(),
+                    let lifecycle_state = session.lifecycle.snapshot();
+                    let last_connected_at_unix_ms = lifecycle_state
+                        .last_connected_at
+                        .map(|t| t.duration_since(time::UNIX_EPOCH).map(|d| d.as_millis() as i64))
+                        .transpose()?;
+                    let last_disconnected_at_unix_ms = lifecycle_state
+                        .last_disconnected_at
+                        .map(|t| t.duration_since(time::UNIX_EPOCH).map(|d| d.as_millis() as i64))
+                        .transpose()?;
+
+                    let (reply_tx, reply_rx) = crossbeam_channel::bounded(1);
+                    let reply = session.fetch_metadata.send(reply_tx).ok().map(|()| reply_rx);
+
+                    Ok((
+                        Session {
+                            name: session_name.to_string(),
+                            started_at_unix_ms: session
+                                .started_at
+                                .duration_since(time::UNIX_EPOCH)?
+                                .as_millis() as i64,
+                            last_connected_at_unix_ms,
+                            last_disconnected_at_unix_ms,
+                            status,
+                            shell_pid: session.child_pid,
+                            attachments: lifecycle_state.attachment.into_iter().collect(),
+                            window_title: None,
+                        },
+                        reply,
+                    ))
                 })
+                .collect()
+        };
+        let sessions = sessions.context("collecting running session metadata")?;
+
+        // The lock is released by now, so we can wait. A busy shell->client
+        // thread (e.g. one building a large restore buffer for a reattach) may
+        // miss the deadline, in which case its session is listed without its
+        // metadata.
+        let deadline = Instant::now() + SESSION_MSG_TIMEOUT;
+        let sessions = sessions
+            .into_iter()
+            .map(|(mut session, reply)| {
+                match reply.map(|reply| reply.recv_deadline(deadline)) {
+                    Some(Ok(shell::SessionMetadata { window_title })) => {
+                        session.window_title = window_title
+                    }
+                    Some(Err(crossbeam_channel::RecvTimeoutError::Timeout)) => {
+                        info!(
+                            "listing {} without metadata, which it did not report in time",
+                            session.name
+                        )
+                    }
+                    None | Some(Err(crossbeam_channel::RecvTimeoutError::Disconnected)) => info!(
+                        "listing {} without metadata, since its shell->client thread has exited",
+                        session.name
+                    ),
+                }
+                session
             })
             .collect();
-        let sessions = sessions.context("collecting running session metadata")?;
+
         write_reply(&mut stream, ListReply { sessions })?;
         Ok(())
     }
@@ -1196,6 +1239,9 @@ impl Server {
         // no ack chan so we can afford to buffer a bit.
         let (maybe_switch_tx, maybe_switch_rx) = crossbeam_channel::bounded(10);
 
+        // Unbounded so that sending a metadata request never blocks.
+        let (fetch_metadata_tx, fetch_metadata_rx) = crossbeam_channel::unbounded();
+
         let shell_to_client_ctl = Arc::new(Mutex::new(shell::ShellToClientCtl {
             next_heartbeat_id: std::sync::atomic::AtomicU64::new(0),
             client_connection: client_connection_tx,
@@ -1240,6 +1286,7 @@ impl Server {
                 heartbeat_ack: heartbeat_ack_tx,
                 maybe_switch: maybe_switch_rx,
                 child_exit_notifier: shell_to_client_child_exit_notifier,
+                fetch_metadata: fetch_metadata_rx,
             })?);
 
         if let Some(ttl_secs) = header.ttl_secs {
@@ -1256,6 +1303,7 @@ impl Server {
             child_exit_notifier,
             started_at: time::SystemTime::now(),
             lifecycle: shell::SessionLifecycle::default(),
+            fetch_metadata: fetch_metadata_tx,
             inner: Arc::new(Mutex::new(session_inner)),
         })
     }

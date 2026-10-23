@@ -70,8 +70,8 @@ impl Default for Options {
             // Parent paths can change much more frequently than target watch
             // files, so if the target file doesn't exist, rather than watching
             // parent dirs directly, we instead wake up at least every poll dur
-            // and check if the target files do exist. If they do, we install proper
-            // watchers.
+            // and check if the target files do exist. If they do, we install
+            // proper watchers.
             poll_interval: Duration::from_secs(5),
         }
     }
