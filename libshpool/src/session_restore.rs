@@ -56,6 +56,10 @@ pub trait SessionSpool {
 
     /// Process bytes from pty master.
     fn process(&mut self, bytes: &[u8]);
+
+    /// The current window title, or None if it is unset or empty. The title is
+    /// not checked to be UTF-8.
+    fn window_title(&self) -> Option<&[u8]>;
 }
 
 /// A spool that doesn't do anything.
@@ -69,6 +73,10 @@ impl SessionSpool for NullSpool {
     }
 
     fn process(&mut self, _: &[u8]) {}
+
+    fn window_title(&self) -> Option<&[u8]> {
+        None
+    }
 }
 
 /// A spool that restores the last screenful of content using shpool_vt100.
@@ -100,6 +108,11 @@ impl SessionSpool for Vt100Screen {
     fn process(&mut self, bytes: &[u8]) {
         self.parser.process(bytes)
     }
+
+    fn window_title(&self) -> Option<&[u8]> {
+        Some(self.parser.screen().title().as_bytes())
+            .filter(|window_title| !window_title.is_empty())
+    }
 }
 
 /// A spool that restores the last n lines of content using shpool_vt100.
@@ -130,6 +143,11 @@ impl SessionSpool for Vt100Lines {
     fn process(&mut self, bytes: &[u8]) {
         self.parser.process(bytes)
     }
+
+    fn window_title(&self) -> Option<&[u8]> {
+        Some(self.parser.screen().title().as_bytes())
+            .filter(|window_title| !window_title.is_empty())
+    }
 }
 
 /// A spool that restores the last screenful of content using shpool-vterm.
@@ -156,6 +174,10 @@ impl SessionSpool for Vterm {
 
     fn process(&mut self, bytes: &[u8]) {
         self.term.process(bytes);
+    }
+
+    fn window_title(&self) -> Option<&[u8]> {
+        self.term.title()
     }
 }
 

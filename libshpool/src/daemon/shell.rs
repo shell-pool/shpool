@@ -114,6 +114,10 @@ pub struct Session {
     pub child_pid: libc::pid_t,
     pub child_exit_notifier: Arc<ExitNotifier>,
     pub shell_to_client_ctl: Arc<Mutex<ShellToClientCtl>>,
+    /// Asks the shell->client thread for the session's [`SessionMetadata`]. It
+    /// is kept here rather than in [`ShellToClientCtl`] so that requesters
+    /// don't wait for that lock.
+    pub fetch_metadata: crossbeam_channel::Sender<MetadataRequest>,
     pub pager_ctl: Arc<Mutex<Option<PagerCtl>>>,
     /// Mutable state with the lock held by the servicing handle_attach thread
     /// while a tty is attached to the session. Probing the mutex can be used
@@ -245,6 +249,29 @@ pub enum ClientConnectionMsg {
     Disconnect,
 }
 
+/// What the shell->client thread returns in response to a
+/// [`Session::fetch_metadata`] request.
+#[derive(Debug, Clone)]
+pub struct SessionMetadata {
+    /// The window title. Any non-UTF-8 bytes are replaced with U+FFFD.
+    pub window_title: Option<String>,
+}
+
+/// A request on [`Session::fetch_metadata`]. It is its own reply channel, so
+/// each requester gets a fresh private channel.
+pub type MetadataRequest = crossbeam_channel::Sender<SessionMetadata>;
+
+/// Reply to a [`Session::fetch_metadata`] request.
+fn handle_fetch_metadata(spool: &dyn session_restore::SessionSpool, request: MetadataRequest) {
+    let metadata = SessionMetadata {
+        window_title: spool
+            .window_title()
+            .map(|window_title| String::from_utf8_lossy(window_title).into_owned()),
+    };
+    // Nobody needs the reply if the requester has stopped waiting.
+    let _ = request.send(metadata);
+}
+
 pub struct ShellToClientArgs {
     pub conn_id: usize,
     pub tty_size: TtySize,
@@ -260,6 +287,9 @@ pub struct ShellToClientArgs {
     // true if the client is still live, false if it has hung up on us.
     pub heartbeat_ack: crossbeam_channel::Sender<(u64, bool)>,
     pub child_exit_notifier: Arc<ExitNotifier>,
+    // The only sending end is the Session's fetch_metadata field, so this
+    // closes when the Session is dropped.
+    pub fetch_metadata: crossbeam_channel::Receiver<MetadataRequest>,
 }
 
 impl SessionInner {
@@ -291,6 +321,12 @@ impl SessionInner {
 
             let mut output_spool =
                 session_restore::new(config, &args.tty_size, args.scrollback_lines, &name);
+            // Swapped for `never` once the Session is dropped. A closed channel
+            // is always selectable, so the wait for the initial `client_conn`
+            // below would spin, and the main loop's select would waste turns on
+            // it. The thread itself keeps running because its control channels
+            // can outlive the Session.
+            let mut fetch_metadata = args.fetch_metadata;
             let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
             let mut poll_fds = [poll::PollFd::new(
                 watchable_master.borrow_fd(),
@@ -300,8 +336,19 @@ impl SessionInner {
             // block until we get the first connection attached so that we don't
             // drop the initial prompt on the floor
             info!("waiting for initial client connection");
-            let mut client_conn: ClientConnectionMsg =
-                args.client_connection.recv().context("waiting for initial client connection")?;
+            let mut client_conn: ClientConnectionMsg = loop {
+                crossbeam_channel::select! {
+                    recv(args.client_connection) -> client_conn => {
+                        break client_conn.context("waiting for initial client connection")?;
+                    }
+                    // The session is already in `shells`, so metadata requests
+                    // can arrive before its first client.
+                    recv(fetch_metadata) -> request => match request {
+                        Ok(request) => handle_fetch_metadata(&*output_spool, request),
+                        Err(crossbeam_channel::RecvError) => fetch_metadata = crossbeam_channel::never(),
+                    },
+                }
+            };
             args.client_connection_ack
                 .send(ClientConnectionStatus::New)
                 .context("sending initial client connection ack")?;
@@ -482,6 +529,15 @@ impl SessionInner {
                             }
                         }
                     }
+                    recv(fetch_metadata) -> request => match request {
+                        Ok(request) => {
+                            handle_fetch_metadata(&*output_spool, request);
+                            // Skip the poll so a burst of requests is handled
+                            // without intervening polls.
+                            continue;
+                        }
+                        Err(crossbeam_channel::RecvError) => fetch_metadata = crossbeam_channel::never(),
+                    },
 
                     // make this select non-blocking so we spend most of our time parked
                     // in poll
@@ -1001,17 +1057,18 @@ impl SessionInner {
                             .heartbeat
                             .send_timeout(request_id, SHELL_TO_CLIENT_CTL_TIMEOUT)
                         {
-                            // If the channel is disconnected, it means that the shell exited and
-                            // the shell->client process exited cleanly. We should not raise a
-                            // ruckus.
+                            // If the channel is disconnected, it means that the
+                            // shell exited and the shell->client process exited
+                            // cleanly. We should not raise a ruckus.
                             Err(crossbeam_channel::SendTimeoutError::Disconnected(_)) => {
                                 return Ok(())
                             }
-                            // If we get a timeout it doesn't necessarily mean that the
-                            // shell->client thread is unhealthy. It might just be busy
-                            // doing other stuff. In particular, this comes up when the
-                            // shell->client thread is generating a particularly large
-                            // session restore buffer, which can take a minute.
+                            // If we get a timeout it doesn't necessarily mean
+                            // that the shell->client thread is unhealthy. It
+                            // might just be busy doing other stuff. In
+                            // particular, this comes up when the shell->client
+                            // thread is generating a particularly large session
+                            // restore buffer, which can take a minute.
                             Err(crossbeam_channel::SendTimeoutError::Timeout(_)) => {
                                 continue;
                             }
@@ -1022,16 +1079,17 @@ impl SessionInner {
                                 .heartbeat_ack
                                 .recv_timeout(SHELL_TO_CLIENT_CTL_TIMEOUT)
                             {
-                                // If the channel is disconnected, it means that the shell exited
-                                // and the shell->client process exited cleanly. We should not
-                                // raise a ruckus.
+                                // If the channel is disconnected, it means that
+                                // the shell exited and the shell->client
+                                // process exited cleanly. We should not raise a
+                                // ruckus.
                                 Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
                                     return Ok(())
                                 }
-                                // Like the send timeout above, a slow ack just means
-                                // the shell->client thread is busy, not that the
-                                // client is gone. A dead client still gets noticed
-                                // when the write to it fails.
+                                // Like the send timeout above, a slow ack just
+                                // means the shell->client thread is busy, not
+                                // that the client is gone. A dead client still
+                                // gets noticed when the write to it fails.
                                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
                                     continue 'heartbeat
                                 }
