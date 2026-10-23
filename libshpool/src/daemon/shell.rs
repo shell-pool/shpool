@@ -15,7 +15,7 @@
 use std::{
     io,
     io::{Read, Write},
-    net,
+    iter, net,
     ops::Add,
     os::unix::net::UnixStream,
     sync::{
@@ -114,6 +114,10 @@ pub struct Session {
     pub child_pid: libc::pid_t,
     pub child_exit_notifier: Arc<ExitNotifier>,
     pub shell_to_client_ctl: Arc<Mutex<ShellToClientCtl>>,
+    /// Asks the shell->client thread for the session's [`SessionMetadata`]. It
+    /// is kept here rather than in [`ShellToClientCtl`] so that requesters
+    /// don't wait for that lock.
+    pub fetch_metadata: crossbeam_channel::Sender<MetadataRequest>,
     pub pager_ctl: Arc<Mutex<Option<PagerCtl>>>,
     /// Mutable state with the lock held by the servicing handle_attach thread
     /// while a tty is attached to the session. Probing the mutex can be used
@@ -245,6 +249,46 @@ pub enum ClientConnectionMsg {
     Disconnect,
 }
 
+/// What the shell->client thread returns in response to a
+/// [`Session::fetch_metadata`] request.
+#[derive(Debug, Clone)]
+pub struct SessionMetadata {
+    /// The window title. Any non-UTF-8 bytes are replaced with U+FFFD.
+    pub window_title: Option<String>,
+}
+
+/// A request on [`Session::fetch_metadata`]. It is its own reply channel, so
+/// each requester gets a fresh private channel.
+pub type MetadataRequest = crossbeam_channel::Sender<SessionMetadata>;
+
+/// Handle `request`, received from `requests`, the shell->client thread's
+/// [`Session::fetch_metadata`] channel. Replies to it and to every request
+/// already queued behind it, so concurrent requests get answered as a single
+/// batch. If the channel has closed because the [`Session`] is gone, `requests`
+/// is replaced with [`crossbeam_channel::never`].
+fn handle_fetch_metadata(
+    spool: &dyn session_restore::SessionSpool,
+    request: Result<MetadataRequest, crossbeam_channel::RecvError>,
+    requests: &mut crossbeam_channel::Receiver<MetadataRequest>,
+) {
+    let Ok(request) = request else {
+        // A closed channel is always ready, so leaving it in place would make the
+        // select that produced `request` pick it on every pass. The thread runs on
+        // until the shell exits or its control channels close.
+        *requests = crossbeam_channel::never();
+        return;
+    };
+    let metadata = SessionMetadata {
+        window_title: spool
+            .window_title()
+            .map(|window_title| String::from_utf8_lossy(window_title).into_owned()),
+    };
+    for reply in iter::once(request).chain(requests.try_iter()) {
+        // Nobody needs the reply if the requester has stopped waiting.
+        let _ = reply.send(metadata.clone());
+    }
+}
+
 pub struct ShellToClientArgs {
     pub conn_id: usize,
     pub tty_size: TtySize,
@@ -260,6 +304,9 @@ pub struct ShellToClientArgs {
     // true if the client is still live, false if it has hung up on us.
     pub heartbeat_ack: crossbeam_channel::Sender<(u64, bool)>,
     pub child_exit_notifier: Arc<ExitNotifier>,
+    // The only sending end is the Session's fetch_metadata field, so this closes when the Session
+    // is dropped.
+    pub fetch_metadata: crossbeam_channel::Receiver<MetadataRequest>,
 }
 
 impl SessionInner {
@@ -291,6 +338,7 @@ impl SessionInner {
 
             let mut output_spool =
                 session_restore::new(config, &args.tty_size, args.scrollback_lines, &name);
+            let mut fetch_metadata = args.fetch_metadata;
             let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
             let mut poll_fds = [poll::PollFd::new(
                 watchable_master.borrow_fd(),
@@ -300,8 +348,18 @@ impl SessionInner {
             // block until we get the first connection attached so that we don't
             // drop the initial prompt on the floor
             info!("waiting for initial client connection");
-            let mut client_conn: ClientConnectionMsg =
-                args.client_connection.recv().context("waiting for initial client connection")?;
+            let mut client_conn: ClientConnectionMsg = loop {
+                crossbeam_channel::select! {
+                    recv(args.client_connection) -> client_conn => {
+                        break client_conn.context("waiting for initial client connection")?;
+                    }
+                    // The session is already in `shells`, so metadata requests can arrive before
+                    // its first client.
+                    recv(fetch_metadata) -> request => {
+                        handle_fetch_metadata(&*output_spool, request, &mut fetch_metadata);
+                    }
+                }
+            };
             args.client_connection_ack
                 .send(ClientConnectionStatus::New)
                 .context("sending initial client connection ack")?;
@@ -481,6 +539,9 @@ impl SessionInner {
                                 return Err(e).context("writing MaybeSwitch")?;
                             }
                         }
+                    }
+                    recv(fetch_metadata) -> request => {
+                        handle_fetch_metadata(&*output_spool, request, &mut fetch_metadata);
                     }
 
                     // make this select non-blocking so we spend most of our time parked
