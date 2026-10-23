@@ -1,4 +1,4 @@
-use std::process::Command;
+use std::process::{Child, Command, Stdio};
 
 use anyhow::{anyhow, Context};
 use ntest::timeout;
@@ -538,6 +538,152 @@ fn json_attachment_kill_removes_session() -> anyhow::Result<()> {
         Ok(!sessions.iter().any(|s| s["name"] == "sh1"))
     })
     .context("killed session should disappear from list --json")?;
+
+    Ok(())
+}
+
+/// Attach a session named `name` and wait for the daemon to start streaming it.
+fn attach_session(
+    daemon_proc: &mut support::daemon::Proc,
+    name: &str,
+) -> anyhow::Result<support::attach::Proc> {
+    let bidi_enter_w = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-enter"]);
+    let sess = daemon_proc.attach(name, Default::default())?;
+    daemon_proc.events = Some(bidi_enter_w.wait_final_event("daemon-bidi-stream-enter")?);
+    Ok(sess)
+}
+
+/// Start a daemon with `config` and attach a session named sh1 to it.
+fn attach_sh1(config: &str) -> anyhow::Result<(support::daemon::Proc, support::attach::Proc)> {
+    let mut daemon_proc = support::daemon::Proc::new(config, DaemonArgs::default())
+        .context("starting daemon proc")?;
+    let sess1 = attach_session(&mut daemon_proc, "sh1")?;
+    Ok((daemon_proc, sess1))
+}
+
+/// The window title `shpool list --json` reports for the session named `name`.
+fn window_title(daemon_proc: &mut support::daemon::Proc, name: &str) -> anyhow::Result<Value> {
+    let sessions = list_sessions(daemon_proc)?;
+    let session =
+        sessions.iter().find(|s| s["name"] == name).ok_or_else(|| anyhow!("{name} not found"))?;
+    Ok(session["window_title"].clone())
+}
+
+/// Have sh1's shell print `printf_arg`, and wait for `shpool list --json` to
+/// report `want` as its window title.
+fn assert_window_title_reported(config: &str, printf_arg: &str, want: &str) -> anyhow::Result<()> {
+    let (mut daemon_proc, mut sess1) = attach_sh1(config)?;
+    assert!(
+        window_title(&mut daemon_proc, "sh1")?.is_null(),
+        "expected no window title before one is set"
+    );
+
+    sess1.run_cmd(&format!("printf '{printf_arg}'"))?;
+    support::wait_until(|| Ok(window_title(&mut daemon_proc, "sh1")? == want))
+        .with_context(|| format!("window title should be reported as {want:?}"))?;
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
+fn json_window_title_vt100() -> anyhow::Result<()> {
+    assert_window_title_reported("restore_screen.toml", r"\033]2;hello\007", "hello")
+}
+
+#[test]
+#[timeout(30000)]
+fn json_window_title_vterm() -> anyhow::Result<()> {
+    assert_window_title_reported("vterm_screen.toml", r"\033]2;hello\007", "hello")
+}
+
+#[test]
+#[timeout(30000)]
+fn json_window_title_invalid_utf8_replaced() -> anyhow::Result<()> {
+    // vterm keeps a window title that is not UTF-8, where vt100 ignores it, so this
+    // shows the replacement.
+    assert_window_title_reported("vterm_screen.toml", r"\033]2;caf\351\007", "caf\u{fffd}")
+}
+
+#[test]
+#[timeout(30000)]
+fn json_window_title_null_in_simple_restore_mode() -> anyhow::Result<()> {
+    let (mut daemon_proc, mut sess1) = attach_sh1("norc.toml")?;
+    let mut lm1 = sess1.line_matcher()?;
+
+    sess1.run_cmd(r"printf '\033]2;hello\007'; echo done")?;
+    // The daemon handles output in order, so once `done` arrives it has also seen
+    // the window title.
+    lm1.scan_until_re("done$")?;
+    assert!(
+        window_title(&mut daemon_proc, "sh1")?.is_null(),
+        "simple restore mode keeps no window title"
+    );
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
+fn json_window_title_concurrent_lists() -> anyhow::Result<()> {
+    let (mut daemon_proc, mut sess1) = attach_sh1("vterm_screen.toml")?;
+    sess1.run_cmd(r"printf '\033]2;hello\007'")?;
+    support::wait_until(|| Ok(window_title(&mut daemon_proc, "sh1")? == "hello"))?;
+
+    // Each list asks every session for its window title, so a burst of them must
+    // all be answered before the deadline.
+    let lists: anyhow::Result<Vec<Child>> = (0..20)
+        .map(|_| {
+            Command::new(support::shpool_bin()?)
+                .arg("--socket")
+                .arg(&daemon_proc.socket_path)
+                .args(["list", "--json"])
+                .stdout(Stdio::piped())
+                .spawn()
+                .context("spawning list --json proc")
+        })
+        .collect();
+    for list in lists? {
+        let out = list.wait_with_output().context("waiting for list --json proc")?;
+        let parsed: Value = serde_json::from_slice(&out.stdout).context("parsing JSON output")?;
+        assert_eq!(parsed["sessions"][0]["window_title"], "hello");
+    }
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
+fn json_window_title_null_when_session_does_not_answer() -> anyhow::Result<()> {
+    let mut daemon_proc = support::daemon::Proc::new("vterm_screen.toml", DaemonArgs::default())
+        .context("starting daemon proc")?;
+    let mut sess2 = attach_session(&mut daemon_proc, "sh2")?;
+    sess2.run_cmd(r"printf '\033]2;two\007'")?;
+    support::wait_until(|| Ok(window_title(&mut daemon_proc, "sh2")? == "two"))?;
+    daemon_proc.detach(vec![String::from("sh2")])?;
+    let mut sess1 = attach_session(&mut daemon_proc, "sh1")?;
+    sess1.run_cmd(r"printf '\033]2;one\007'")?;
+    support::wait_until(|| Ok(window_title(&mut daemon_proc, "sh1")? == "one"))?;
+
+    // Only sh1 is attached, so only its shell->client thread writes heartbeats, and
+    // pausing it there keeps it from answering.
+    daemon_proc.send_event_command("pause-at daemon-wrote-heartbeat")?;
+    daemon_proc.await_event("paused-at daemon-wrote-heartbeat")?;
+    let sessions = list_sessions(&mut daemon_proc)?;
+    daemon_proc.send_event_command("release daemon-wrote-heartbeat")?;
+
+    let title =
+        |name: &str| sessions.iter().find(|s| s["name"] == name).map(|s| s["window_title"].clone());
+    assert_eq!(
+        title("sh1"),
+        Some(Value::Null),
+        "sh1 cannot answer, so it is listed without a window title"
+    );
+    assert_eq!(
+        title("sh2"),
+        Some(Value::from("two")),
+        "sh2 answers, so its window title is listed"
+    );
 
     Ok(())
 }
