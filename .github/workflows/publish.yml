@@ -17,13 +17,13 @@ jobs:
       # Generating a GitHub token, so that PRs and tags created by
       # the release-plz-action can trigger actions workflows.
       - name: Generate GitHub token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510
         id: generate-token
         with:
           app-id: ${{ secrets.RELEASE_PLZ_APP_ID }} # <-- GitHub App ID secret name
           private-key: ${{ secrets.RELEASE_PLZ_APP_PRIVATE_KEY }} # <-- GitHub App private key secret name
       - name: Checkout repository
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
       - name: Install Rust toolchain
@@ -31,7 +31,7 @@ jobs:
         with:
           bins: cross
       - name: Run release-plz
-        uses: MarcoIeni/release-plz-action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7
+        uses: MarcoIeni/release-plz-action@7ef5e4d4b0420630cfcaeb182c01e13651d4c577
         env:
           GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
