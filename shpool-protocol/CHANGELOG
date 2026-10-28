@@ -1,4 +1,12 @@
 
+shpool-protocol (0.4.4) unstable; urgency=low
+
+  Added
+
+  * add `window_title` to `shpool list --json`
+
+ -- Shpool Authors <shpool-eng@google.com>  Wed, 28 Oct 2026 21:39:13 +0000
+
 shpool-protocol (0.4.3) unstable; urgency=low
 
   Added
