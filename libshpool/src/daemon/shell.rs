@@ -35,7 +35,8 @@ use tracing::{debug, error, info, instrument, span, trace, warn, Level};
 use crate::{
     common, consts,
     daemon::{
-        config, exit_notify::ExitNotifier, keybindings, pager::PagerCtl, shell_inject, show_motd,
+        config, events, exit_notify::ExitNotifier, keybindings, pager::PagerCtl, shell_inject,
+        show_motd,
     },
     protocol,
     protocol::ChunkExt as _,
@@ -290,6 +291,7 @@ pub struct ShellToClientArgs {
     // The only sending end is the Session's fetch_metadata field, so this
     // closes when the Session is dropped.
     pub fetch_metadata: crossbeam_channel::Receiver<MetadataRequest>,
+    pub events_bus: Arc<events::EventBus>,
 }
 
 impl SessionInner {
@@ -327,6 +329,10 @@ impl SessionInner {
             // it. The thread itself keeps running because its control channels
             // can outlive the Session.
             let mut fetch_metadata = args.fetch_metadata;
+            // The window title as of the last session.window_title_changed
+            // event, so that we can detect (and only fire a new event) when the
+            // output actually changes the title.
+            let mut published_window_title: Option<Vec<u8>> = None;
             let mut buf: Vec<u8> = vec![0; consts::BUF_SIZE];
             let mut poll_fds = [poll::PollFd::new(
                 watchable_master.borrow_fd(),
@@ -657,6 +663,13 @@ impl SessionInner {
 
                 if has_seen_prompt_sentinel {
                     output_spool.process(buf);
+
+                    // If the window title has changed, publish an event.
+                    let window_title = output_spool.window_title();
+                    if window_title != published_window_title.as_deref() {
+                        published_window_title = window_title.map(<[u8]>::to_vec);
+                        args.events_bus.publish(&events::Event::SessionWindowTitleChanged);
+                    }
                 }
 
                 let mut reset_client_conn = false;

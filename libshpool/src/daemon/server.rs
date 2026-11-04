@@ -1287,6 +1287,7 @@ impl Server {
                 maybe_switch: maybe_switch_rx,
                 child_exit_notifier: shell_to_client_child_exit_notifier,
                 fetch_metadata: fetch_metadata_rx,
+                events_bus: Arc::clone(&self.events_bus),
             })?);
 
         if let Some(ttl_secs) = header.ttl_secs {
