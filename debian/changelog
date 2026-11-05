@@ -12,6 +12,24 @@ shpool (0.11.6) unstable; urgency=low
 
   Other
 
+  * release ([#435](https://github.com/shell-pool/shpool/pull/435))
+  * bump shpool-vterm to 0.2.8
+
+ -- Shpool Authors <shpool-eng@google.com>  Thu, 05 Nov 2026 19:43:23 +0000
+
+shpool (0.11.6) unstable; urgency=low
+
+  Added
+
+  * add `session.window_title_changed` event ([#448](https://github.com/shell-pool/shpool/pull/448))
+  * add `window_title` to `shpool list --json`
+
+  Fixed
+
+  * respect quotes/backslashes in prompt hooks ([#449](https://github.com/shell-pool/shpool/pull/449))
+
+  Other
+
   * bump shpool-vterm to 0.2.8
 
  -- Shpool Authors <shpool-eng@google.com>  Thu, 05 Nov 2026 19:19:29 +0000
