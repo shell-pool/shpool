@@ -19,12 +19,13 @@ A subscriber connects to `events.socket` and reads events. The daemon ignores an
 
 ## Event types
 
-| `type`             | Meaning                                                  |
-| ------------------ | -------------------------------------------------------- |
-| `session.created`  | A new session was added to the table.                    |
-| `session.attached` | A client attached or reattached to a session.            |
-| `session.detached` | A client disconnected from a still-running session.      |
-| `session.removed`  | A session was removed (shell exited, killed, or reaped). |
+| `type`                         | Meaning                                                  |
+| ------------------------------ | -------------------------------------------------------- |
+| `session.created`              | A new session was added to the table.                    |
+| `session.attached`             | A client attached or reattached to a session.            |
+| `session.detached`             | A client disconnected from a still-running session.      |
+| `session.removed`              | A session was removed (shell exited, killed, or reaped). |
+| `session.window_title_changed` | A session's `window_title` changed.                      |
 
 Subscribers should ignore unknown `type` values so that future event types do
 not break older consumers.

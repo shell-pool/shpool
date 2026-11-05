@@ -294,3 +294,102 @@ fn events_subscriber_goes_through_the_peer_check() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+// Constants used by the window title tests.
+const SESSION_NAME: &str = "djt-miner";
+const WINDOW_TITLE: &str = "Coins mined: 23.203 ($0.00032). Level: patriot";
+
+/// A shell command that sets the window title to `title`.
+fn set_window_title_cmd(title: &str) -> String {
+    format!(r"printf '\033]2;%s\007' '{}'", title.replace('\'', r"'\''"))
+}
+
+/// The window title `shpool list --json` reports for the session named `name`.
+fn listed_window_title(d: &mut daemon::Proc, name: &str) -> anyhow::Result<Value> {
+    let out = d.list_json()?;
+    assert!(out.status.success(), "list --json failed: {:?}", out);
+    let parsed: Value = serde_json::from_slice(&out.stdout).context("parsing list JSON")?;
+    let sessions = parsed["sessions"].as_array().ok_or_else(|| anyhow!("missing sessions"))?;
+    let session =
+        sessions.iter().find(|s| s["name"] == name).ok_or_else(|| anyhow!("{name} not listed"))?;
+    Ok(session["window_title"].clone())
+}
+
+// Each window title change publishes one `session.window_title_changed`, and a
+// `shpool list --json` made in response sees the new title. Output that doesn't
+// change the title publishes nothing.
+#[test]
+#[timeout(30000)]
+fn window_title_change_publishes_one_event() -> anyhow::Result<()> {
+    let mut d = daemon::Proc::new(
+        "vterm_screen.toml",
+        DaemonArgs { listen_events: false, ..DaemonArgs::default() },
+    )
+    .context("starting daemon proc")?;
+    let mut sub = d.connect_events()?;
+
+    let mut attach =
+        d.attach(SESSION_NAME, AttachArgs::default()).context("starting attach proc")?;
+    let mut lm = attach.line_matcher()?;
+    assert_eq!(next_event(&mut sub)?["type"], "session.created");
+    assert_eq!(next_event(&mut sub)?["type"], "session.attached");
+
+    attach.run_cmd(&set_window_title_cmd(WINDOW_TITLE))?;
+    assert_eq!(next_event(&mut sub)?["type"], "session.window_title_changed");
+    assert_eq!(listed_window_title(&mut d, SESSION_NAME)?, WINDOW_TITLE, "listed after the event");
+
+    attach.run_cmd(&set_window_title_cmd(""))?;
+    assert_eq!(next_event(&mut sub)?["type"], "session.window_title_changed");
+    assert!(
+        listed_window_title(&mut d, SESSION_NAME)?.is_null(),
+        "an emptied title is listed as none"
+    );
+
+    attach.run_cmd(&set_window_title_cmd(WINDOW_TITLE))?;
+    assert_eq!(next_event(&mut sub)?["type"], "session.window_title_changed");
+    // The daemon handles output in order, so by the time `done` arrives, any
+    // event the repeated title published is already queued.
+    attach.run_cmd(&format!("{}; echo done", set_window_title_cmd(WINDOW_TITLE)))?;
+    lm.scan_until_re("done$")?;
+
+    // Events arrive in order, so receiving `session.removed` next proves that
+    // the repeated title published nothing.
+    let kill_out = d.kill(vec![SESSION_NAME.into()]).context("running kill")?;
+    assert!(kill_out.status.success(), "kill failed: {:?}", kill_out);
+    let next = next_event(&mut sub)?;
+    assert_eq!(
+        next["type"], "session.removed",
+        "expected removed, got {next} -- an unchanged title published an event"
+    );
+
+    Ok(())
+}
+
+// The simple restore mode doesn't track the window title, so setting it
+// publishes nothing.
+#[test]
+#[timeout(30000)]
+fn window_title_publishes_nothing_in_simple_restore_mode() -> anyhow::Result<()> {
+    let mut d = daemon::Proc::new(
+        "norc.toml",
+        DaemonArgs { listen_events: false, ..DaemonArgs::default() },
+    )
+    .context("starting daemon proc")?;
+    let mut sub = d.connect_events()?;
+
+    let mut attach =
+        d.attach(SESSION_NAME, AttachArgs::default()).context("starting attach proc")?;
+    let mut lm = attach.line_matcher()?;
+    assert_eq!(next_event(&mut sub)?["type"], "session.created");
+    assert_eq!(next_event(&mut sub)?["type"], "session.attached");
+
+    attach.run_cmd(&format!("{}; echo done", set_window_title_cmd(WINDOW_TITLE)))?;
+    lm.scan_until_re("done$")?;
+
+    let kill_out = d.kill(vec![SESSION_NAME.into()]).context("running kill")?;
+    assert!(kill_out.status.success(), "kill failed: {:?}", kill_out);
+    let next = next_event(&mut sub)?;
+    assert_eq!(next["type"], "session.removed", "expected removed, got {next}");
+
+    Ok(())
+}
