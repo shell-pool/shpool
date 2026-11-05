@@ -30,7 +30,7 @@ tempfile = "3" # keeping tests hermetic
 regex = "1" # test assertions
 serde_json = "1" # json parsing
 ntest = "0.9" # test timeouts
-rand = "0.8" # tmp files for tests
+rand = "0.10" # tmp files for tests
 parking_lot = "0.12" # faster more featureful sync primitives
 
 # rusty wrapper for unix apis
