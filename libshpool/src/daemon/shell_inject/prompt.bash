@@ -48,7 +48,8 @@ function __shpool__prompt_command() {
   fi
   for prompt_hook in "${SHPOOL__OLD_PROMPT_COMMAND[@]}"
   do
-    eval "$restore_cmd; eval \"${prompt_hook}\""
+    # The inner eval expands $prompt_hook itself, so quotes/backslashes in the hook reach the shell.
+    eval "$restore_cmd; eval \"\${prompt_hook}\""
   done
   PS1="@@PROMPT_PREFIX@@${PS1}"
   return $ret
