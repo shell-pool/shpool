@@ -45,6 +45,36 @@ pub fn emit(_event: &str) {
     // a no-op normally
 }
 
+/// Consume a named failure point at most once per process. Configure points
+/// with a comma-separated SHPOOL_TEST__FAILURE_POINTS environment variable.
+#[cfg(feature = "test_hooks")]
+pub fn fail_once(point: &str) -> bool {
+    use std::sync::OnceLock;
+
+    static FAILURE_POINTS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let points = FAILURE_POINTS.get_or_init(|| {
+        Mutex::new(
+            std::env::var("SHPOOL_TEST__FAILURE_POINTS")
+                .unwrap_or_default()
+                .split(',')
+                .map(str::trim)
+                .filter(|point| !point.is_empty())
+                .map(String::from)
+                .collect(),
+        )
+    });
+    let injected = points.lock().remove(point);
+    if injected {
+        emit(&format!("injected-failure-{point}"));
+    }
+    injected
+}
+
+#[cfg(not(feature = "test_hooks"))]
+pub fn fail_once(_point: &str) -> bool {
+    false
+}
+
 #[cfg(feature = "test_hooks")]
 pub fn scoped(event: &str) -> ScopedEvent {
     ScopedEvent::new(event)
@@ -221,5 +251,37 @@ impl TestHookServer {
             }
             info!("resuming from '{}'", event);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn failure_points_from_environment() {
+        // Use a subprocess to isolate the environment and process-wide state
+        // from other tests, without changing the environment of running
+        // threads.
+        if std::env::var_os("SHPOOL_TEST__FAILURE_POINTS_CHILD").is_none() {
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "test_hooks::tests::failure_points_from_environment"])
+                .env("SHPOOL_TEST__FAILURE_POINTS_CHILD", "1")
+                .env("SHPOOL_TEST__FAILURE_POINTS", "first, second,,first")
+                .status()
+                .unwrap();
+            assert!(status.success());
+            return;
+        }
+
+        assert!(!super::fail_once("unknown"));
+        assert!(!super::fail_once(""));
+        let workers: Vec<_> = (0..8)
+            .map(|_| std::thread::spawn(|| (super::fail_once("first"), super::fail_once("second"))))
+            .collect();
+        let results: Vec<_> = workers.into_iter().map(|worker| worker.join().unwrap()).collect();
+        let expected = usize::from(cfg!(feature = "test_hooks"));
+        assert_eq!(results.iter().filter(|(first, _)| *first).count(), expected);
+        assert_eq!(results.iter().filter(|(_, second)| *second).count(), expected);
+        assert!(!super::fail_once("first"));
+        assert!(!super::fail_once("second"));
     }
 }
