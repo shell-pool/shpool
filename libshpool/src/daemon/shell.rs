@@ -476,7 +476,7 @@ impl SessionInner {
                     recv(args.heartbeat) -> request_id => {
                         let client_present = if let ClientConnectionMsg::New(conn) = &mut client_conn {
                             let chunk = Chunk { kind: ChunkKind::Heartbeat, buf: &[] };
-                            let write_result = if test_hooks::fail_once("heartbeat-write") {
+                            let write_result = if test_hooks::maybe_fail("heartbeat-write") {
                                 Err(io::Error::from_raw_os_error(libc::ECONNRESET))
                             } else {
                                 chunk.write_to(&mut conn.sink).and_then(|_| conn.sink.flush())
@@ -533,7 +533,7 @@ impl SessionInner {
                         }
 
                         let chunk = Chunk { kind: ChunkKind::MaybeSwitch, buf: &encoded[..] };
-                        let write_result = if test_hooks::fail_once("maybe-switch-write") {
+                        let write_result = if test_hooks::maybe_fail("maybe-switch-write") {
                             Err(io::Error::from_raw_os_error(libc::ECONNRESET))
                         } else {
                             chunk.write_to(&mut conn.sink).and_then(|_| conn.sink.flush())

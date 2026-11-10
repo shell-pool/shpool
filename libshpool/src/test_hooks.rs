@@ -45,25 +45,54 @@ pub fn emit(_event: &str) {
     // a no-op normally
 }
 
-/// Consume a named failure point at most once per process. Configure points
-/// with a comma-separated SHPOOL_TEST__FAILURE_POINTS environment variable.
+/// Inject failures on selected calls to a named failure point. Configure
+/// SHPOOL_TEST__FAILURE_POINTS with comma-separated `name:n_1:n_2:...` entries.
+/// Calls are counted from 1, independently for each point, across the process.
+/// For example, `heartbeat-write:2:4` fails on the second and fourth calls.
 #[cfg(feature = "test_hooks")]
-pub fn fail_once(point: &str) -> bool {
-    use std::sync::OnceLock;
+pub fn maybe_fail(point: &str) -> bool {
+    use std::{collections::HashMap, sync::OnceLock};
 
-    static FAILURE_POINTS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    #[derive(Default)]
+    struct FailurePoint {
+        calls: usize,
+        fail_on: HashSet<usize>,
+    }
+
+    static FAILURE_POINTS: OnceLock<Mutex<HashMap<String, FailurePoint>>> = OnceLock::new();
     let points = FAILURE_POINTS.get_or_init(|| {
-        Mutex::new(
-            std::env::var("SHPOOL_TEST__FAILURE_POINTS")
-                .unwrap_or_default()
-                .split(',')
-                .map(str::trim)
-                .filter(|point| !point.is_empty())
-                .map(String::from)
-                .collect(),
-        )
+        let mut points = HashMap::new();
+        for spec in std::env::var("SHPOOL_TEST__FAILURE_POINTS")
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|spec| !spec.is_empty())
+        {
+            let (name, calls) =
+                spec.split_once(':').expect("failure points must use name:call[:call...]");
+            let name = name.trim();
+            assert!(!name.is_empty(), "failure point names must not be empty");
+            let failure = points.entry(name.to_owned()).or_insert_with(FailurePoint::default);
+            for call in calls.split(':') {
+                let call = call
+                    .trim()
+                    .parse::<usize>()
+                    .expect("failure point calls must be positive integers");
+                assert!(call > 0, "failure point calls are counted from 1");
+                failure.fail_on.insert(call);
+            }
+        }
+        Mutex::new(points)
     });
-    let injected = points.lock().remove(point);
+    let injected = {
+        let mut points = points.lock();
+        if let Some(failure) = points.get_mut(point) {
+            failure.calls += 1;
+            failure.fail_on.remove(&failure.calls)
+        } else {
+            false
+        }
+    };
     if injected {
         emit(&format!("injected-failure-{point}"));
     }
@@ -71,7 +100,7 @@ pub fn fail_once(point: &str) -> bool {
 }
 
 #[cfg(not(feature = "test_hooks"))]
-pub fn fail_once(_point: &str) -> bool {
+pub fn maybe_fail(_point: &str) -> bool {
     false
 }
 
@@ -265,23 +294,56 @@ mod tests {
             let status = std::process::Command::new(std::env::current_exe().unwrap())
                 .args(["--exact", "test_hooks::tests::failure_points_from_environment"])
                 .env("SHPOOL_TEST__FAILURE_POINTS_CHILD", "1")
-                .env("SHPOOL_TEST__FAILURE_POINTS", "first, second,,first")
+                .env(
+                    "SHPOOL_TEST__FAILURE_POINTS",
+                    "first:4:2:4, second:1:3,,concurrent:2:4:7,other-concurrent:1:8",
+                )
                 .status()
                 .unwrap();
             assert!(status.success());
             return;
         }
 
-        assert!(!super::fail_once("unknown"));
-        assert!(!super::fail_once(""));
+        assert!(!super::maybe_fail("unknown"));
+        assert!(!super::maybe_fail(""));
+        let enabled = cfg!(feature = "test_hooks");
+        for call in 1..=6 {
+            assert_eq!(super::maybe_fail("first"), enabled && [2, 4].contains(&call));
+            assert_eq!(super::maybe_fail("second"), enabled && [1, 3].contains(&call));
+        }
+
         let workers: Vec<_> = (0..8)
-            .map(|_| std::thread::spawn(|| (super::fail_once("first"), super::fail_once("second"))))
+            .map(|_| {
+                std::thread::spawn(|| {
+                    (super::maybe_fail("concurrent"), super::maybe_fail("other-concurrent"))
+                })
+            })
             .collect();
         let results: Vec<_> = workers.into_iter().map(|worker| worker.join().unwrap()).collect();
-        let expected = usize::from(cfg!(feature = "test_hooks"));
-        assert_eq!(results.iter().filter(|(first, _)| *first).count(), expected);
-        assert_eq!(results.iter().filter(|(_, second)| *second).count(), expected);
-        assert!(!super::fail_once("first"));
-        assert!(!super::fail_once("second"));
+        assert_eq!(results.iter().filter(|(first, _)| *first).count(), if enabled { 3 } else { 0 });
+        assert_eq!(
+            results.iter().filter(|(_, second)| *second).count(),
+            if enabled { 2 } else { 0 }
+        );
+        assert!(!super::maybe_fail("concurrent"));
+        assert!(!super::maybe_fail("other-concurrent"));
+    }
+
+    #[test]
+    fn failure_points_disabled_by_default() {
+        if std::env::var_os("SHPOOL_TEST__FAILURE_POINTS_CHILD").is_none() {
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "test_hooks::tests::failure_points_disabled_by_default"])
+                .env("SHPOOL_TEST__FAILURE_POINTS_CHILD", "1")
+                .env_remove("SHPOOL_TEST__FAILURE_POINTS")
+                .status()
+                .unwrap();
+            assert!(status.success());
+            return;
+        }
+
+        for _ in 0..3 {
+            assert!(!super::maybe_fail("heartbeat-write"));
+        }
     }
 }

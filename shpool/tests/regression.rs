@@ -21,7 +21,7 @@ fn client_write_reset_preserves_session() -> anyhow::Result<()> {
         DaemonArgs {
             extra_env: vec![(
                 String::from("SHPOOL_TEST__FAILURE_POINTS"),
-                String::from("maybe-switch-write"),
+                String::from("maybe-switch-write:1"),
             )],
             ..DaemonArgs::default()
         },
