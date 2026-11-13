@@ -636,7 +636,13 @@ impl Server {
             .prefix("shpool_session_env")
             .tempfile_in(&session_dir)
             .context("creating tmp env file")?;
-        let content = format_forward_env(&header.local_env);
+        // When SSH_AUTH_SOCK symlinking is active (the default), the shell's
+        // SSH_AUTH_SOCK points at the stable per-session symlink updated on
+        // each attach; exporting the client's raw socket path into forward.env
+        // would overwrite that symlink on the next prompt and leave a stale
+        // path after a subsequent reattach.
+        let skip_ssh_auth_sock = !self.config.get().nosymlink_ssh_auth_sock.unwrap_or(false);
+        let content = format_forward_env(&header.local_env, skip_ssh_auth_sock);
         tmp_env_file.write_all(content.as_bytes()).context("writing tmp env file")?;
         tmp_env_file.persist(&session_env_file).context("persisting env file")?;
 
@@ -1429,12 +1435,15 @@ impl Server {
     }
 }
 
-fn format_forward_env<'a, I>(env_vars: I) -> String
+fn format_forward_env<'a, I>(env_vars: I, skip_ssh_auth_sock: bool) -> String
 where
     I: IntoIterator<Item = &'a (String, String)>,
 {
     let mut content = String::new();
     for (k, v) in env_vars {
+        if skip_ssh_auth_sock && k == "SSH_AUTH_SOCK" {
+            continue;
+        }
         if is_valid_env_key(k) {
             content.push_str(&format!("export {k}='{}'\n", v.replace('\'', "'\\''")));
         } else {
@@ -1522,7 +1531,7 @@ mod tests {
             (String::from("SPECIAL"), String::from("$(evil) `evil` $VAR")),
             (String::from("MULTILINE"), String::from("line1\nline2")),
         ];
-        let res = format_forward_env(&vars);
+        let res = format_forward_env(&vars, true);
         assert_eq!(
             res,
             "export FOO='bar'\n\
@@ -1543,11 +1552,24 @@ mod tests {
             (String::from("BAD KEY"), String::from("val")),
             (String::from(""), String::from("val")),
         ];
-        let res = format_forward_env(&vars);
+        let res = format_forward_env(&vars, true);
         assert_eq!(
             res,
             "export GOOD_KEY_1='val'\n\
              export _ALSO_GOOD='val'\n"
+        );
+    }
+
+    #[test]
+    fn test_format_forward_env_ssh_auth_sock() {
+        let vars = vec![
+            (String::from("FOO"), String::from("bar")),
+            (String::from("SSH_AUTH_SOCK"), String::from("/tmp/agent.sock")),
+        ];
+        assert_eq!(format_forward_env(&vars, true), "export FOO='bar'\n");
+        assert_eq!(
+            format_forward_env(&vars, false),
+            "export FOO='bar'\nexport SSH_AUTH_SOCK='/tmp/agent.sock'\n"
         );
     }
 

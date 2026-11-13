@@ -647,6 +647,79 @@ fn symlink_ssh_auth_sock() -> anyhow::Result<()> {
 
 #[test]
 #[timeout(30000)]
+fn symlink_ssh_auth_sock_preserved_across_forward_env_reattach() -> anyhow::Result<()> {
+    let mut daemon_proc =
+        support::daemon::Proc::new("forward_env_bash.toml", DaemonArgs::default())
+            .context("starting daemon proc")?;
+
+    let fake_auth_sock_1 = daemon_proc.tmp_dir.path().join("ssh-auth-sock-1.fake");
+    let fake_auth_sock_2 = daemon_proc.tmp_dir.path().join("ssh-auth-sock-2.fake");
+    fs::File::create(&fake_auth_sock_1)?;
+    fs::File::create(&fake_auth_sock_2)?;
+
+    let mut waiter = daemon_proc
+        .events
+        .take()
+        .unwrap()
+        .waiter(["daemon-wrote-s2c-chunk", "daemon-bidi-stream-done"]);
+    {
+        let mut attach_proc = daemon_proc
+            .attach(
+                "sh1",
+                AttachArgs {
+                    extra_env: vec![(
+                        String::from("SSH_AUTH_SOCK"),
+                        String::from(fake_auth_sock_1.to_str().unwrap()),
+                    )],
+                    ..Default::default()
+                },
+            )
+            .context("starting attach proc")?;
+
+        let mut lm = attach_proc.line_matcher()?;
+        waiter.wait_event("daemon-wrote-s2c-chunk")?;
+
+        // Trigger a prompt cycle so PROMPT_COMMAND sources forward.env, then
+        // verify SSH_AUTH_SOCK still points at the per-session symlink.
+        attach_proc.run_cmd("echo prompt_cycle_1")?;
+        lm.scan_until_re("prompt_cycle_1$")?;
+        attach_proc.run_cmd("ls -l $SSH_AUTH_SOCK")?;
+        lm.scan_until_re(r#".*sh1/ssh-auth-sock.socket ->.*ssh-auth-sock-1.fake$"#)?;
+    }
+
+    daemon_proc.events = Some(waiter.wait_final_event("daemon-bidi-stream-done")?);
+
+    // Reattach with a new SSH_AUTH_SOCK and verify the very first command sees
+    // the updated symlink target without forward.env clobbering SSH_AUTH_SOCK.
+    let bidi_done_w2 = daemon_proc.events.take().unwrap().waiter(["daemon-bidi-stream-done"]);
+    {
+        let mut attach_proc = daemon_proc
+            .attach(
+                "sh1",
+                AttachArgs {
+                    extra_env: vec![(
+                        String::from("SSH_AUTH_SOCK"),
+                        String::from(fake_auth_sock_2.to_str().unwrap()),
+                    )],
+                    ..Default::default()
+                },
+            )
+            .context("reattaching proc")?;
+
+        let mut lm = attach_proc.line_matcher()?;
+        thread::sleep(time::Duration::from_millis(500));
+
+        attach_proc.run_cmd("ls -l $SSH_AUTH_SOCK")?;
+        lm.scan_until_re(r#".*sh1/ssh-auth-sock.socket ->.*ssh-auth-sock-2.fake$"#)?;
+    }
+
+    daemon_proc.events = Some(bidi_done_w2.wait_final_event("daemon-bidi-stream-done")?);
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
 fn missing_ssh_auth_sock() -> anyhow::Result<()> {
     let mut daemon_proc = support::daemon::Proc::new("norc.toml", DaemonArgs::default())
         .context("starting daemon proc")?;
