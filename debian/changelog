@@ -1,4 +1,17 @@
 
+shpool (0.11.7) unstable; urgency=low
+
+  Fixed
+
+  * omit SSH_AUTH_SOCK from forward.env when symlinking ([#453](https://github.com/shell-pool/shpool/pull/453))
+  * preserve sessions after client write resets ([#444](https://github.com/shell-pool/shpool/pull/444))
+
+  Other
+
+  * bump libproc from 0.14.11 to 0.15.0 ([#452](https://github.com/shell-pool/shpool/pull/452))
+
+ -- Shpool Authors <shpool-eng@google.com>  Fri, 13 Nov 2026 16:34:09 +0000
+
 shpool (0.11.6) unstable; urgency=low
 
   Added
