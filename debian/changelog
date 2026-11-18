@@ -1,4 +1,12 @@
 
+shpool (0.11.8) unstable; urgency=low
+
+  Fixed
+
+  * stop resetting umask during daemonization ([#458](https://github.com/shell-pool/shpool/pull/458))
+
+ -- Shpool Authors <shpool-eng@google.com>  Wed, 18 Nov 2026 21:07:44 +0000
+
 shpool (0.11.7) unstable; urgency=low
 
   Fixed
