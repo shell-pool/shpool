@@ -2,6 +2,7 @@ use std::{
     fmt::Write,
     io::Read,
     os::unix::{
+        fs::PermissionsExt as _,
         net::{UnixListener, UnixStream},
         process::CommandExt as _,
     },
@@ -360,14 +361,15 @@ fn autodaemonize() -> anyhow::Result<()> {
 
     // we have to manually spawn the child because the whole point is that there
     // isn't a daemon yet so we can't use the attach method.
-    let mut child = Command::new(support::shpool_bin()?)
+    let child = Command::new(support::shpool_bin()?)
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .arg("--daemonize")
         .arg("--socket")
-        .arg(socket_path)
+        .arg(&socket_path)
         .arg("--log-file")
-        .arg(log_file)
+        .arg(&log_file)
         .arg("--config-file")
         .arg(support::testdata_file("norc.toml"))
         .arg("attach")
@@ -375,22 +377,15 @@ fn autodaemonize() -> anyhow::Result<()> {
         .spawn()
         .context("spawning attach process")?;
 
-    // After half a second, the daemon should have spanwed
-    std::thread::sleep(time::Duration::from_millis(500));
-    child.kill().context("killing child")?;
+    let mut attach_proc = support::attach::Proc { proc: child, log_file, events: None };
+    let mut line_matcher = attach_proc.line_matcher()?;
+    attach_proc.run_cmd("echo hi")?;
+    let match_res = line_matcher.scan_until_re("hi$");
 
-    let mut stdout = child.stdout.take().context("missing stdout")?;
-    let mut stdout_str = String::from("");
-    stdout.read_to_string(&mut stdout_str).context("slurping stdout")?;
-    let stdout_re = Regex::new(".*prompt>.*")?;
-    assert!(stdout_re.is_match(&stdout_str));
+    drop(attach_proc);
+    Command::new("pkill").arg("-f").arg(socket_path.to_string_lossy().as_ref()).output().ok();
 
-    // best effort attempt to clean up after ourselves
-    Command::new("pkill")
-        .arg("-f")
-        .arg("shpool-test-autodaemonize")
-        .output()
-        .context("running cleanup process")?;
+    match_res?;
 
     Ok(())
 }
@@ -467,6 +462,60 @@ fn daemonize_pid_file_exists() -> anyhow::Result<()> {
     Command::new("pkill").arg("-f").arg(socket_path.to_string_lossy().as_ref()).output().ok();
 
     assert!(pid_exists, "pid file should exist while daemon is running");
+
+    Ok(())
+}
+
+#[test]
+#[timeout(30000)]
+fn daemonize_preserves_umask() -> anyhow::Result<()> {
+    for (mask, expected_str, expected_mode) in
+        [(0o077, "0077", 0o600), (0o027, "0027", 0o640), (0o022, "0022", 0o644)]
+    {
+        let tmp_dir = tmpdir::Dir::new("/tmp/shpool-test")?;
+        let socket_path = tmp_dir.path().join("shpool.socket");
+        let log_file = tmp_dir.path().join("shpool.log");
+        let pid_file = tmp_dir.path().join("daemonized-shpool.pid");
+
+        let mut cmd = Command::new(support::shpool_bin()?);
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .arg("--daemonize")
+            .arg("--socket")
+            .arg(&socket_path)
+            .arg("--log-file")
+            .arg(&log_file)
+            .arg("--config-file")
+            .arg(support::testdata_file("norc.toml"))
+            .arg("attach")
+            .arg("sh1");
+        // Safety: umask is async-signal-safe.
+        unsafe {
+            cmd.pre_exec(move || {
+                nix::sys::stat::umask(nix::sys::stat::Mode::from_bits_truncate(mask));
+                Ok(())
+            });
+        }
+
+        let mut attach_proc = support::attach::Proc {
+            proc: cmd.spawn().context("spawning attach process")?,
+            log_file,
+            events: None,
+        };
+        let mut line_matcher = attach_proc.line_matcher()?;
+        attach_proc.run_cmd("umask")?;
+        let match_res = line_matcher.scan_until_re(&format!("{expected_str}$"));
+        let pid_mode = std::fs::metadata(&pid_file)
+            .map(|m| m.permissions().mode() & 0o777)
+            .context("stating pid file");
+
+        drop(attach_proc);
+        Command::new("pkill").arg("-f").arg(socket_path.to_string_lossy().as_ref()).output().ok();
+
+        match_res?;
+        assert_eq!(pid_mode?, expected_mode);
+    }
 
     Ok(())
 }

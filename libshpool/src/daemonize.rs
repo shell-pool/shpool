@@ -147,9 +147,6 @@ impl std::ops::Drop for PidFileGuard {
 ///
 /// Safety: see nix::unistd::fork for preconditions.
 pub unsafe fn daemonize(pid_path: PathBuf) -> anyhow::Result<PidFileGuard> {
-    let old_mask = nix::sys::stat::umask(nix::sys::stat::Mode::empty());
-    info!("set empty umask (old mask: {:?})", old_mask);
-
     // `cd /` in order to avoid holding open the directory the user
     // happened to launch `shpool attach` in so that we don't block
     // deletes of that directory the whole time that the daemon
