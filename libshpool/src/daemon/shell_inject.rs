@@ -65,7 +65,6 @@ pub fn maybe_setup(
     pty_master: &mut shpool_pty::fork::Fork,
     prompt_prefix: &str,
     start_cmd: &str,
-    session_name: &str,
     session_dir: &Path,
 ) -> anyhow::Result<()> {
     let shell_pid = pty_master.child_pid().ok_or(anyhow!("no child pid"))?;
@@ -77,7 +76,11 @@ pub fn maybe_setup(
     debug!("sniffed shell type: {:?}", shell_type);
 
     // now actually inject the prompt
-    let prompt_prefix = prompt_prefix.replace("$SHPOOL_SESSION_NAME", session_name);
+    //
+    // We leave $SHPOOL_SESSION_NAME in the prefix for the shell to expand
+    // each time it draws the prompt rather than substituting it here. The
+    // prompt hook sources forward.env, which exports the current session
+    // name, just before it expands the prefix, so the prompt follows renames.
 
     fs::create_dir_all(session_dir).context("creating session dir for prompt script")?;
 
@@ -92,7 +95,7 @@ pub fn maybe_setup(
         Ok(KnownShell::Bash) => {
             let bash_script = std::str::from_utf8(BASH_PROMPT_SCRIPT)
                 .context("decoding bash script template")?
-                .replace(PROMPT_PREFIX_PLACEHOLDER, &prompt_prefix);
+                .replace(PROMPT_PREFIX_PLACEHOLDER, prompt_prefix);
             let script_file = session_dir.join("prompt.bash");
             fs::write(&script_file, bash_script.as_bytes())
                 .context("writing bash prompt script")?;
@@ -101,7 +104,7 @@ pub fn maybe_setup(
         Ok(KnownShell::Zsh) => {
             let zsh_script = std::str::from_utf8(ZSH_PROMPT_SCRIPT)
                 .context("decoding zsh script template")?
-                .replace(PROMPT_PREFIX_PLACEHOLDER, &prompt_prefix);
+                .replace(PROMPT_PREFIX_PLACEHOLDER, prompt_prefix);
             let script_file = session_dir.join("prompt.zsh");
             fs::write(&script_file, zsh_script.as_bytes()).context("writing zsh prompt script")?;
             format!("\n . \"{}\"\n", script_file.display())
@@ -109,7 +112,7 @@ pub fn maybe_setup(
         Ok(KnownShell::Fish) => {
             let fish_script = std::str::from_utf8(FISH_PROMPT_SCRIPT)
                 .context("decoding fish script template")?
-                .replace(PROMPT_PREFIX_PLACEHOLDER, &prompt_prefix);
+                .replace(PROMPT_PREFIX_PLACEHOLDER, prompt_prefix);
             let script_file = session_dir.join("prompt.fish");
             fs::write(&script_file, fish_script.as_bytes())
                 .context("writing fish prompt script")?;

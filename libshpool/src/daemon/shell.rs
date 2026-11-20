@@ -110,6 +110,15 @@ pub struct SessionLifecycleState {
 /// Session represent a shell session
 #[derive(Debug)]
 pub struct Session {
+    /// A daemon-assigned id that never changes, even when the session is
+    /// renamed. The session table is keyed by name, so threads that outlive
+    /// a single request (the attach thread, the ttl reaper) find their
+    /// session by id instead.
+    pub id: u64,
+    /// What gets written to the session's forward.env file. Guarded by its
+    /// own lock so that renames and reattaches, which both rewrite the file,
+    /// are serialized and the last write always reflects the latest state.
+    pub forward_env: Arc<Mutex<ForwardEnv>>,
     pub started_at: time::SystemTime,
     pub lifecycle: SessionLifecycle,
     pub child_pid: libc::pid_t,
@@ -154,6 +163,17 @@ impl Session {
 
         Ok(())
     }
+}
+
+/// The contents of a session's forward.env file, which the prompt hook
+/// sources into the shell before each prompt.
+#[derive(Debug, Default)]
+pub struct ForwardEnv {
+    /// The session's current name, exported as SHPOOL_SESSION_NAME so that
+    /// the shell picks up renames.
+    pub session_name: String,
+    /// The variables forwarded from the most recent attach.
+    pub local_env: Vec<(String, String)>,
 }
 
 /// ShellSessionInner contains values that the pipe thread needs to be

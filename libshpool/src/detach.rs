@@ -23,7 +23,7 @@ pub fn run<P>(mut sessions: Vec<String>, socket: P) -> anyhow::Result<()>
 where
     P: AsRef<Path>,
 {
-    let mut client = match protocol::Client::new(socket) {
+    let mut client = match protocol::Client::new(&socket) {
         Ok(ClientResult::JustClient(c)) => c,
         Ok(ClientResult::VersionMismatch { warning, client }) => {
             eprintln!("warning: {warning}, try restarting your daemon");
@@ -38,7 +38,7 @@ where
         }
     };
 
-    common::resolve_sessions(&mut sessions, "detach")?;
+    common::resolve_sessions(&mut sessions, "detach", &socket)?;
 
     client
         .write_connect_header(ConnectHeader::Detach(DetachRequest { sessions }))

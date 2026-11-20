@@ -14,9 +14,12 @@
 
 //! The common module is a grab bag of shared utility functions.
 
-use std::{env, thread, time};
+use std::{env, path::Path, thread, time};
 
 use anyhow::anyhow;
+use shpool_protocol::{ConnectHeader, ListReply};
+
+use crate::protocol;
 
 /// Controls how often `sleep_unless` re-checks its stop predicate.
 #[derive(Clone, Copy, Debug)]
@@ -74,9 +77,47 @@ where
     }
 }
 
-pub fn resolve_sessions(sessions: &mut Vec<String>, action: &str) -> anyhow::Result<()> {
+/// The name of the session we are running in, if any.
+///
+/// $SHPOOL_SESSION_NAME is only refreshed when the shell draws a prompt,
+/// so it can be stale right after a rename. $SHPOOL_SESSION_ID never
+/// changes, so we prefer to ask the daemon for the name of the session
+/// with that id, and only fall back to $SHPOOL_SESSION_NAME if we can't.
+pub fn current_session_name<P>(socket: P) -> Option<String>
+where
+    P: AsRef<Path>,
+{
+    let by_id = env::var("SHPOOL_SESSION_ID")
+        .ok()
+        .and_then(|id| id.parse::<u64>().ok())
+        .and_then(|id| session_name_for_id(socket, id).ok().flatten());
+    by_id.or_else(|| env::var("SHPOOL_SESSION_NAME").ok())
+}
+
+fn session_name_for_id<P>(socket: P, id: u64) -> anyhow::Result<Option<String>>
+where
+    P: AsRef<Path>,
+{
+    let mut client = match protocol::Client::new(socket)? {
+        protocol::ClientResult::JustClient(c) => c,
+        // The caller will dial the daemon again and warn about this then.
+        protocol::ClientResult::VersionMismatch { client, .. } => client,
+    };
+    client.write_connect_header(ConnectHeader::List)?;
+    let reply: ListReply = client.read_reply()?;
+    Ok(reply.sessions.into_iter().find(|s| s.id == id).map(|s| s.name))
+}
+
+pub fn resolve_sessions<P>(
+    sessions: &mut Vec<String>,
+    action: &str,
+    socket: P,
+) -> anyhow::Result<()>
+where
+    P: AsRef<Path>,
+{
     if sessions.is_empty() {
-        if let Ok(current_session) = env::var("SHPOOL_SESSION_NAME") {
+        if let Some(current_session) = current_session_name(socket) {
             sessions.push(current_session);
         }
     }

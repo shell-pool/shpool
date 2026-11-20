@@ -38,6 +38,14 @@ this allows you to write a custom prompt hook in your .rc files
 that examines the `$SHPOOL_SESSION_NAME` environment variable
 directly, or eschew a `shpool` prompt customization entirely.
 
+`$SHPOOL_SESSION_NAME` in the prompt prefix is expanded by the
+shell each time it draws a prompt, so the prompt follows
+`shpool rename`. The injected prompt hook is also what refreshes
+the `$SHPOOL_SESSION_NAME` variable itself after a rename, so if no
+hook is injected (for example because `prompt_prefix` is blank) the
+variable keeps the name the session started with. `$SHPOOL_SESSION_ID` never changes, and
+`shpool list --json` maps it to the session's current name.
+
 ## Session Restore Mode
 
 `shpool` can do a few different things when you re-attach to an existing

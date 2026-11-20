@@ -68,6 +68,8 @@ pub enum Event {
     SessionRemoved,
     #[serde(rename = "session.window_title_changed")]
     SessionWindowTitleChanged,
+    #[serde(rename = "session.renamed")]
+    SessionRenamed,
 }
 
 /// The publish surface of the events system: fans out events to all
@@ -502,12 +504,14 @@ fn serialize_line(event: &Event) -> Arc<str> {
     static REMOVED: LazyLock<Arc<str>> = LazyLock::new(|| build(Event::SessionRemoved));
     static WINDOW_TITLE_CHANGED: LazyLock<Arc<str>> =
         LazyLock::new(|| build(Event::SessionWindowTitleChanged));
+    static RENAMED: LazyLock<Arc<str>> = LazyLock::new(|| build(Event::SessionRenamed));
     match event {
         Event::SessionCreated => Arc::clone(&CREATED),
         Event::SessionAttached => Arc::clone(&ATTACHED),
         Event::SessionDetached => Arc::clone(&DETACHED),
         Event::SessionRemoved => Arc::clone(&REMOVED),
         Event::SessionWindowTitleChanged => Arc::clone(&WINDOW_TITLE_CHANGED),
+        Event::SessionRenamed => Arc::clone(&RENAMED),
     }
 }
 
@@ -632,6 +636,7 @@ mod tests {
             (Event::SessionDetached, r#"{"type":"session.detached"}"#),
             (Event::SessionRemoved, r#"{"type":"session.removed"}"#),
             (Event::SessionWindowTitleChanged, r#"{"type":"session.window_title_changed"}"#),
+            (Event::SessionRenamed, r#"{"type":"session.renamed"}"#),
         ];
         for (event, expected) in &cases {
             assert_eq!(json(event), *expected, "variant {event:?}");
