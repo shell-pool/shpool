@@ -195,6 +195,15 @@ session with no session name arguments.
 
 Kills a named shell session.
 
+#### shpool rename
+
+Gives a session a new name, as in `shpool rename old-name new-name`.
+Will rename the current session if run from inside a `shpool` session
+with just a new name. The session keeps running, and stays attached if
+it is attached. Its shell picks up the new name in `$SHPOOL_SESSION_NAME`
+and its prompt prefix the next time it draws a prompt. A session also
+has a `$SHPOOL_SESSION_ID`, which never changes.
+
 #### shpool var
 
 Manipulate shpool variables. Variables can be used in shpool session names using

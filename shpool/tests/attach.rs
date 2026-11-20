@@ -640,7 +640,9 @@ fn symlink_ssh_auth_sock() -> anyhow::Result<()> {
 
     waiter.wait_event("daemon-wrote-s2c-chunk")?; // resize prompt redraw
     attach_proc.run_cmd("ls -l $SSH_AUTH_SOCK")?;
-    line_matcher.scan_until_re(r#".*sh1/ssh-auth-sock.socket ->.*ssh-auth-sock-target.fake$"#)?;
+    line_matcher.scan_until_re(
+        r#".*sessions/[0-9]+/ssh-auth-sock.socket ->.*ssh-auth-sock-target.fake$"#,
+    )?;
 
     Ok(())
 }
@@ -684,7 +686,7 @@ fn symlink_ssh_auth_sock_preserved_across_forward_env_reattach() -> anyhow::Resu
         attach_proc.run_cmd("echo prompt_cycle_1")?;
         lm.scan_until_re("prompt_cycle_1$")?;
         attach_proc.run_cmd("ls -l $SSH_AUTH_SOCK")?;
-        lm.scan_until_re(r#".*sh1/ssh-auth-sock.socket ->.*ssh-auth-sock-1.fake$"#)?;
+        lm.scan_until_re(r#".*sessions/[0-9]+/ssh-auth-sock.socket ->.*ssh-auth-sock-1.fake$"#)?;
     }
 
     daemon_proc.events = Some(waiter.wait_final_event("daemon-bidi-stream-done")?);
@@ -710,7 +712,7 @@ fn symlink_ssh_auth_sock_preserved_across_forward_env_reattach() -> anyhow::Resu
         thread::sleep(time::Duration::from_millis(500));
 
         attach_proc.run_cmd("ls -l $SSH_AUTH_SOCK")?;
-        lm.scan_until_re(r#".*sh1/ssh-auth-sock.socket ->.*ssh-auth-sock-2.fake$"#)?;
+        lm.scan_until_re(r#".*sessions/[0-9]+/ssh-auth-sock.socket ->.*ssh-auth-sock-2.fake$"#)?;
     }
 
     daemon_proc.events = Some(bidi_done_w2.wait_final_event("daemon-bidi-stream-done")?);

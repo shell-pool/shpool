@@ -83,7 +83,15 @@ pub fn run(
         None => None,
     };
 
-    let attach = Attach { config_manager, force, background, ttl, tmpls, socket };
+    let attach = Attach {
+        config_manager,
+        force,
+        background,
+        ttl,
+        tmpls,
+        socket,
+        session_id: Arc::new(Mutex::new(None)),
+    };
 
     attach.run()
 }
@@ -95,6 +103,10 @@ struct Attach {
     ttl: Option<time::Duration>,
     tmpls: Templates,
     socket: PathBuf,
+    /// The id of the session we are attached to, as reported by the daemon.
+    /// Shared with the signal handler so that resizes still reach the
+    /// session if it gets renamed.
+    session_id: Arc<Mutex<Option<u64>>>,
 }
 
 impl Attach {
@@ -111,7 +123,14 @@ impl Attach {
         let mut resolved = self.tmpls.apply(&var_map);
 
         let sig_handler_session_name_slot = if !self.background {
-            Some(SignalHandler::new(resolved.session_name.clone(), self.socket.clone()).spawn()?)
+            Some(
+                SignalHandler::new(
+                    resolved.session_name.clone(),
+                    Arc::clone(&self.session_id),
+                    self.socket.clone(),
+                )
+                .spawn()?,
+            )
         } else {
             None
         };
@@ -305,6 +324,7 @@ impl Attach {
 
         let attach_resp: AttachReplyHeader = client.read_reply().context("reading attach reply")?;
         info!("attach_resp.status={:?}", attach_resp.status);
+        *self.session_id.lock().unwrap() = attach_resp.session_id;
 
         {
             use shpool_protocol::AttachStatus::*;
@@ -433,12 +453,13 @@ enum AttachResult {
 
 struct SignalHandler {
     session_name: Arc<Mutex<String>>,
+    session_id: Arc<Mutex<Option<u64>>>,
     socket: PathBuf,
 }
 
 impl SignalHandler {
-    fn new(session_name: String, socket: PathBuf) -> Self {
-        SignalHandler { session_name: Arc::new(Mutex::new(session_name)), socket }
+    fn new(session_name: String, session_id: Arc<Mutex<Option<u64>>>, socket: PathBuf) -> Self {
+        SignalHandler { session_name: Arc::new(Mutex::new(session_name)), session_id, socket }
     }
 
     fn spawn(self) -> anyhow::Result<Arc<Mutex<String>>> {
@@ -484,6 +505,7 @@ impl SignalHandler {
         client
             .write_connect_header(ConnectHeader::SessionMessage(SessionMessageRequest {
                 session_name: self.get_session_name(),
+                session_id: *self.session_id.lock().unwrap(),
                 payload: SessionMessageRequestPayload::Resize(ResizeRequest {
                     tty_size: tty_size.clone(),
                 }),

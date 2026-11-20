@@ -26,6 +26,7 @@ A subscriber connects to `events.socket` and reads events. The daemon ignores an
 | `session.detached`             | A client disconnected from a still-running session.      |
 | `session.removed`              | A session was removed (shell exited, killed, or reaped). |
 | `session.window_title_changed` | A session's `window_title` changed.                      |
+| `session.renamed`              | A session was given a new name (see `shpool rename`).    |
 
 Subscribers should ignore unknown `type` values so that future event types do
 not break older consumers.

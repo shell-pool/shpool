@@ -42,6 +42,7 @@ mod hooks;
 mod kill;
 mod list;
 mod protocol;
+mod rename;
 mod session_restore;
 mod set_log_level;
 mod template;
@@ -225,6 +226,27 @@ will be used if it is present in the environment.")]
     Kill {
         #[clap(help = "sessions to kill")]
         sessions: Vec<String>,
+    },
+
+    #[clap(about = "Give a session a new name
+
+The session keeps running and stays attached, if it is attached.
+Its shell picks up the new name in $SHPOOL_SESSION_NAME and in its
+prompt the next time it draws a prompt. $SHPOOL_SESSION_ID stays the
+same for the life of the session.
+
+If only a new name is given, the session this command is run from is
+renamed. It is an error to rename a session to a name that another
+session already has.")]
+    #[non_exhaustive]
+    Rename {
+        #[clap(
+            required = true,
+            num_args = 1..=2,
+            value_names = ["OLD_NAME", "NEW_NAME"],
+            help = "the session to rename (default: the current session) and its new name"
+        )]
+        names: Vec<String>,
     },
 
     #[clap(about = "lists all the running shell sessions")]
@@ -473,6 +495,7 @@ pub unsafe fn run(
         }
         Commands::Detach { sessions } => detach::run(sessions, socket),
         Commands::Kill { sessions } => kill::run(sessions, socket),
+        Commands::Rename { names } => rename::run(names, socket),
         Commands::List { json } => list::run(socket, json),
         Commands::SetLogLevel { level } => set_log_level::run(level, socket),
         Commands::Var { command } => var::run(socket, command),

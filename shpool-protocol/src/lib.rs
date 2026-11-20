@@ -21,7 +21,7 @@ use serde_derive::{Deserialize, Serialize};
 // We hardcode the version string to be able to track wire protocol
 // compatibility seperately from rust API compat. For example, adding
 // a new field is wire compatible, but not rust compatible.
-pub const VERSION: &str = "0.4.3";
+pub const VERSION: &str = "0.4.4";
 
 /// The header used to advertize daemon version.
 ///
@@ -70,6 +70,30 @@ pub enum ConnectHeader {
     GetVars,
     /// A request to modify the variable environment.
     ModifyVar(ModifyVarRequest),
+    /// A request to give a running session a new name.
+    Rename(RenameRequest),
+}
+
+/// RenameRequest represents a request to rename the session
+/// `old_name` to `new_name`.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct RenameRequest {
+    #[serde(default)]
+    pub old_name: String,
+    #[serde(default)]
+    pub new_name: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub enum RenameReply {
+    /// The session was renamed.
+    Ok,
+    /// There is no session named `old_name`.
+    NotFound,
+    /// There is already a session named `new_name`.
+    AlreadyExists,
+    /// `new_name` is not a valid session name.
+    InvalidName(String),
 }
 
 /// KillRequest represents a request to kill
@@ -148,6 +172,10 @@ pub struct SessionMessageRequest {
     /// The session to route this request to.
     #[serde(default)]
     pub session_name: String,
+    /// If set, route by session id rather than by name. The id never
+    /// changes, so this keeps working after the session is renamed.
+    #[serde(default)]
+    pub session_id: Option<u64>,
     /// The actual message to send to the session.
     #[serde(default)]
     pub payload: SessionMessageRequestPayload,
@@ -265,6 +293,10 @@ impl AttachHeader {
 pub struct AttachReplyHeader {
     #[serde(default)]
     pub status: AttachStatus,
+    /// The id of the session that was attached to or created. Unlike the
+    /// name, it never changes for the life of the session.
+    #[serde(default)]
+    pub session_id: Option<u64>,
 }
 
 /// ListReply is contains a list of active sessions to be displayed to the user.
@@ -279,6 +311,10 @@ pub struct ListReply {
 pub struct Session {
     #[serde(default)]
     pub name: String,
+    /// A daemon-assigned id that stays the same when the session is
+    /// renamed. It is also exported into the shell as SHPOOL_SESSION_ID.
+    #[serde(default)]
+    pub id: u64,
     #[serde(default)]
     pub started_at_unix_ms: i64,
     #[serde(default)]

@@ -424,6 +424,25 @@ impl Proc {
         cmd.output().context("spawning kill proc")
     }
 
+    pub fn rename(&mut self, names: &[&str]) -> anyhow::Result<process::Output> {
+        let log_file = self.tmp_dir.path().join(format!("rename_{}.log", self.subproc_counter));
+        eprintln!("spawning rename proc with log {:?}", log_file);
+        self.subproc_counter += 1;
+
+        let mut cmd = Command::new(&self.bin_path);
+        cmd.arg("-vv")
+            .arg("--log-file")
+            .arg(&log_file)
+            .arg("--socket")
+            .arg(&self.socket_path)
+            .arg("rename");
+        for name in names.iter() {
+            cmd.arg(name);
+        }
+
+        cmd.output().context("spawning rename proc")
+    }
+
     pub fn wait_until_list_matches<F>(&mut self, pred: F) -> anyhow::Result<()>
     where
         F: Fn(&str) -> bool,
