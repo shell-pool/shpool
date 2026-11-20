@@ -57,5 +57,5 @@ default-features = false
 features = ["std", "fmt", "tracing-log", "smallvec"]
 
 [dev-dependencies]
-ntest = "0.9" # test timeouts
+ntest = "0.10" # test timeouts
 assert_matches = "1.5" # assert_matches macro
