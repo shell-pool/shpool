@@ -89,6 +89,22 @@ session_restore_mode = { lines = n }
 
 where n is a number to your `~/.config/shpool/config.toml`.
 
+### Terminal settings
+
+With `"screen"` and `{ lines = n }` (and the default `vt100` restore
+engine), a reattach also restores the terminal settings programs in the
+session changed: the alternate screen, input modes, mouse and focus
+reports, kitty keyboard flags, modifyOtherKeys, the cursor style and other
+DEC private modes. While a program is on the alternate screen, only that
+screen is redrawn.
+
+Whatever the restore mode, a client that detaches (or whose session is
+taken over by another client, or ends) turns off the alternate screen,
+kitty keyboard flags, mouse and focus reports, bracketed paste,
+application cursor keys and keypad and modifyOtherKeys in its terminal,
+and shows the cursor. A reattach turns the same settings off before it
+restores the session's.
+
 ## Detach Keybinding
 
 You may wish to configure your detach keybinding.

@@ -14,7 +14,8 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    env, fmt, io,
+    env, fmt,
+    io::{self, Write as _},
     os::fd::AsFd,
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -31,7 +32,7 @@ use shpool_protocol::{
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    config, duration, protocol,
+    config, duration, mode_tracker, protocol,
     protocol::{ClientResult, PipeBytesResult},
     template, test_hooks,
     tty::TtySizeExt as _,
@@ -229,10 +230,19 @@ impl Attach {
 
         info!("entering bidi streaming mode");
         let session_name_tmpl = self.tmpls.session_name.clone();
-        match attach_client.pipe_bytes(move |maybe_switch: &MaybeSwitch| {
+        let result = attach_client.pipe_bytes(move |maybe_switch: &MaybeSwitch| {
             let var_map: HashMap<String, String> = maybe_switch.vars.iter().cloned().collect();
             session_name_tmpl.apply(&var_map) != resolved.session_name
-        }) {
+        });
+        // Detached, replaced or the shell exited: turn off what the session's
+        // programs left on in this terminal (alternate screen, keyboard
+        // protocol, mouse and focus reports), as a reattach will restore it.
+        let mut stdout = io::stdout();
+        if let Err(e) = stdout.write_all(mode_tracker::TERMINAL_RESET).and_then(|_| stdout.flush())
+        {
+            debug!("resetting the terminal: {e}");
+        }
+        match result {
             Ok(PipeBytesResult::Exit(exit_status)) => std::process::exit(exit_status),
             Ok(PipeBytesResult::MaybeSwitch(s)) => Ok(AttachResult::Switch(s)),
             Err(e) => Err(e),
