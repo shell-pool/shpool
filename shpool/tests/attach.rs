@@ -1188,6 +1188,8 @@ fn default_keybinding_detach() -> anyhow::Result<()> {
     let exit_status = a1.proc.wait()?;
     dbg!(exit_status);
     assert!(exit_status.success());
+    // the client turned off what programs may have left on in the terminal
+    lm1.scan_until_re("\\x1b\\[\\?1004l\\x1b\\[\\?2004l")?;
 
     waiter.wait_event("daemon-bidi-stream-done")?;
 
@@ -1557,7 +1559,10 @@ fn screen_restore_input_modes() -> anyhow::Result<()> {
 
         waiter.wait_event("daemon-wrote-s2c-chunk")?;
 
-        attach_proc.run_cmd("printf '\\033[?1000h'; echo modes-on")?;
+        // `""` keeps the echoed command line from matching modes-on$
+        attach_proc.run_cmd(
+            "printf '\\033[>1u\\033[?1049h\\033[>5u\\033[?1000h\\033[?1004h\\033[>4;2m\\033[5 q'; echo modes-\"\"on",
+        )?;
         line_matcher.scan_until_re("modes-on$")?;
     }
 
@@ -1580,7 +1585,9 @@ fn screen_restore_input_modes() -> anyhow::Result<()> {
         // shell emits mouse reporting, so a match can only come from the
         // restore buffer we are testing.
         attach_proc.run_cmd("echo flushed")?;
-        line_matcher.scan_until_re("\\x1b\\[\\?1000h")?;
+        // the screen and keyboard flags before the contents, the rest after
+        line_matcher.scan_until_re("\\x1b\\[>1u\\x1b\\[\\?1049h\\x1b\\[>5u")?;
+        line_matcher.scan_until_re("\\x1b\\[\\?1000h.*\\x1b\\[>4;2m\\x1b\\[\\?1004h\\x1b\\[5 q")?;
     }
 
     Ok(())

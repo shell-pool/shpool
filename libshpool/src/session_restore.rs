@@ -15,7 +15,10 @@
 use shpool_protocol::TtySize;
 use tracing::info;
 
-use crate::config::{self, SessionRestoreEngine, SessionRestoreMode};
+use crate::{
+    config::{self, SessionRestoreEngine, SessionRestoreMode},
+    mode_tracker::ModeTracker,
+};
 
 // To prevent data getting dropped, we set this to be large, but we don't want
 // to use u16::MAX, since the vt100 crate eagerly fills in its rows, and doing
@@ -82,6 +85,7 @@ impl SessionSpool for NullSpool {
 /// A spool that restores the last screenful of content using shpool_vt100.
 pub struct Vt100Screen {
     parser: shpool_vt100::Parser,
+    modes: ModeTracker,
     /// Other options will be read dynamically from config.
     config: config::Manager,
 }
@@ -99,14 +103,15 @@ impl SessionSpool for Vt100Screen {
         // application cursor/keypad, mouse protocol). Without them a paste
         // into a reattached session arrives unbracketed: terminals flag it
         // as unsafe and every newline submits early. Replay the tracked
-        // input modes after the contents.
-        let mut buf = self.parser.screen().contents_formatted();
-        buf.extend(self.parser.screen().input_mode_formatted());
-        buf
+        // input modes after the contents, and the other settings around
+        // them (see mode_tracker).
+        let screen = self.parser.screen();
+        vt100_restore_buffer(screen, &self.modes, screen.contents_formatted())
     }
 
     fn process(&mut self, bytes: &[u8]) {
-        self.parser.process(bytes)
+        self.parser.process(bytes);
+        self.modes.process(bytes);
     }
 
     fn window_title(&self) -> Option<&[u8]> {
@@ -118,6 +123,7 @@ impl SessionSpool for Vt100Screen {
 /// A spool that restores the last n lines of content using shpool_vt100.
 pub struct Vt100Lines {
     parser: shpool_vt100::Parser,
+    modes: ModeTracker,
     /// How many lines to restore
     nlines: u16,
     /// Other options will be read dynamically from config.
@@ -135,19 +141,37 @@ impl SessionSpool for Vt100Lines {
         // See Vt100Screen::restore_buffer: input modes must ride along with
         // the restored contents or the attached terminal loses bracketed
         // paste (and friends) across a reattach.
-        let mut buf = self.parser.screen().last_n_rows_contents_formatted(self.nlines);
-        buf.extend(self.parser.screen().input_mode_formatted());
-        buf
+        let screen = self.parser.screen();
+        vt100_restore_buffer(
+            screen,
+            &self.modes,
+            screen.last_n_rows_contents_formatted(self.nlines),
+        )
     }
 
     fn process(&mut self, bytes: &[u8]) {
-        self.parser.process(bytes)
+        self.parser.process(bytes);
+        self.modes.process(bytes);
     }
 
     fn window_title(&self) -> Option<&[u8]> {
         Some(self.parser.screen().title().as_bytes())
             .filter(|window_title| !window_title.is_empty())
     }
+}
+
+/// `contents` drawn from a vt100 screen, with the input modes and the other
+/// terminal settings in the order the restore needs (see mode_tracker).
+fn vt100_restore_buffer(
+    screen: &shpool_vt100::Screen,
+    modes: &ModeTracker,
+    contents: Vec<u8>,
+) -> Vec<u8> {
+    let mut buf = modes.screen_and_keys_formatted(screen.alternate_screen());
+    buf.extend(contents);
+    buf.extend(screen.input_mode_formatted());
+    buf.extend(modes.modes_formatted());
+    buf
 }
 
 /// A spool that restores the last screenful of content using shpool-vterm.
@@ -195,10 +219,12 @@ pub fn new(
         (SessionRestoreMode::Simple, _) => Box::new(NullSpool),
         (SessionRestoreMode::Screen, SessionRestoreEngine::Vt100) => Box::new(Vt100Screen {
             parser: shpool_vt100::Parser::new(size.rows, vterm_width, scrollback_lines),
+            modes: ModeTracker::default(),
             config,
         }),
         (SessionRestoreMode::Lines(nlines), SessionRestoreEngine::Vt100) => Box::new(Vt100Lines {
             parser: shpool_vt100::Parser::new(size.rows, vterm_width, scrollback_lines),
+            modes: ModeTracker::default(),
             nlines,
             config,
         }),

@@ -41,6 +41,7 @@ mod exe;
 mod hooks;
 mod kill;
 mod list;
+mod mode_tracker;
 mod protocol;
 mod session_restore;
 mod set_log_level;

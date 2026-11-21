@@ -508,6 +508,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "vte 0.15.0",
 ]
 
 [[package]]
