@@ -8,6 +8,7 @@ ExecStart=/usr/bin/shpool daemon
 KillMode=mixed
 TimeoutStopSec=2s
 SendSIGHUP=yes
+OOMPolicy=continue
 
 [Install]
 WantedBy=default.target
