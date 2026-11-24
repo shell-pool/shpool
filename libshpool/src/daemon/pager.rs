@@ -53,6 +53,8 @@ use tracing::{error, info, instrument, span, trace, warn, Level};
 
 use crate::{consts, protocol::ChunkExt as _, tty::TtySizeExt as _};
 
+use super::shell::TtySizeChangeMsg;
+
 // poll relatively quickly to pick up pager exits reasonably fast,
 // but still slow enough to spend most of the time parked.
 const POLL_MS: u16 = 100;
@@ -63,9 +65,7 @@ const POLL_MS: u16 = 100;
 pub struct PagerCtl {
     /// Used to signal size changes so we can correctly trigger
     /// a SIGWINCH on the pty.
-    pub tty_size_change: crossbeam_channel::Sender<TtySize>,
-    /// Acks the completion of a resize/SIGWINCH.
-    pub tty_size_change_ack: crossbeam_channel::Receiver<()>,
+    pub tty_size_change: crossbeam_channel::Sender<TtySizeChangeMsg>,
 }
 
 /// Pager is capable of displaying a message to the user via
@@ -110,7 +110,6 @@ impl Pager {
         shell_env: &[(OsString, OsString)],
     ) -> anyhow::Result<TtySize> {
         let (tty_size_change_tx, tty_size_change_rx) = crossbeam_channel::bounded(0);
-        let (tty_size_change_ack_tx, tty_size_change_ack_rx) = crossbeam_channel::bounded(0);
         {
             let mut ctl_handle = ctl_slot.lock();
             if ctl_handle.is_some() {
@@ -118,10 +117,7 @@ impl Pager {
             }
 
             trace!("registering PagerCtl");
-            *ctl_handle = Some(PagerCtl {
-                tty_size_change: tty_size_change_tx,
-                tty_size_change_ack: tty_size_change_ack_rx,
-            });
+            *ctl_handle = Some(PagerCtl { tty_size_change: tty_size_change_tx });
         }
         // make sure we reset the control handles
         let _ctl_guard = PagerCltGuard { ctl_slot };
@@ -191,20 +187,19 @@ impl Pager {
             // since pagers don't stick around when the client hangs up
             // it is not really that importaint. Let's KISS.
             while let Ok(size) = tty_size_change_rx.recv() {
-                info!("recvd new size: {:?}", size);
-                if let Err(e) = size.set_fd(pty_master_fd) {
+                info!("recvd new size: {:?}", size.req);
+                if let Err(e) = size.req.set_fd(pty_master_fd) {
                     warn!("setting pager size: {:?}", e);
                 }
 
                 {
                     // register the new size so it will get returned
                     let mut tty_size = tty_size_ref.lock();
-                    *tty_size = size;
+                    *tty_size = size.req;
                 }
 
-                if let Err(e) = tty_size_change_ack_tx.send(()) {
-                    error!("could not send size change ack: {:?}", e);
-                    break;
+                if let Err(e) = size.reply.send(()) {
+                    warn!("could not send size change ack: {:?}", e);
                 }
             }
             info!("pager size change loop done");

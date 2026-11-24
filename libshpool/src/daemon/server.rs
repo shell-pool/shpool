@@ -691,23 +691,26 @@ impl Server {
         for (session, shell_to_client_ctl) in targets.into_iter() {
             let _s = span!(Level::INFO, "lock(shell_to_client_ctl)", s = session).entered();
             let shell_to_client_ctl = shell_to_client_ctl.lock();
-            if let Err(err) = shell_to_client_ctl
-                .client_connection
-                .send_timeout(shell::ClientConnectionMsg::Disconnect, SESSION_MSG_TIMEOUT)
-            {
+            let (client_conn_reply_tx, client_conn_reply_rx) = crossbeam_channel::bounded(1);
+            if let Err(err) = shell_to_client_ctl.client_connection.send_timeout(
+                shell::ClientConnMsg {
+                    req: shell::ClientConnReq::Disconnect,
+                    reply: client_conn_reply_tx,
+                },
+                SESSION_MSG_TIMEOUT,
+            ) {
                 error!("sending client detach to shell->client for {}: {:?}", session, err);
                 not_attached_sessions.push(session);
                 continue;
             }
-            let status =
-                match shell_to_client_ctl.client_connection_ack.recv_timeout(SESSION_MSG_TIMEOUT) {
-                    Ok(status) => status,
-                    Err(err) => {
-                        error!("getting client conn ack for {}: {:?}", session, err);
-                        not_attached_sessions.push(session);
-                        continue;
-                    }
-                };
+            let status = match client_conn_reply_rx.recv_timeout(SESSION_MSG_TIMEOUT) {
+                Ok(status) => status,
+                Err(err) => {
+                    error!("getting client conn ack for {}: {:?}", session, err);
+                    not_attached_sessions.push(session);
+                    continue;
+                }
+            };
             info!("detached session({}), status = {:?}", session, status);
             if let shell::ClientConnectionStatus::DetachNone = status {
                 not_attached_sessions.push(session);
@@ -956,16 +959,22 @@ impl Server {
                     }
                 };
                 let _s = span!(Level::INFO, "lock(pager_ctl)").entered();
+                let (size_change_reply_tx, size_change_reply_rx) = crossbeam_channel::bounded(1);
                 let pager_ctl = pager_ctl.lock();
 
                 if let Some(pager_ctl) = pager_ctl.as_ref() {
                     info!("resizing pager");
                     pager_ctl
                         .tty_size_change
-                        .send_timeout(resize_request.tty_size.clone(), SESSION_MSG_TIMEOUT)
+                        .send_timeout(
+                            shell::TtySizeChangeMsg {
+                                req: resize_request.tty_size.clone(),
+                                reply: size_change_reply_tx,
+                            },
+                            SESSION_MSG_TIMEOUT,
+                        )
                         .context("sending tty size change to pager")?;
-                    pager_ctl
-                        .tty_size_change_ack
+                    size_change_reply_rx
                         .recv_timeout(SESSION_MSG_TIMEOUT)
                         .context("recving tty size change ack from pager")?;
                 } else {
@@ -983,10 +992,15 @@ impl Server {
 
                     shell_to_client_ctl
                         .tty_size_change
-                        .send_timeout(resize_request.tty_size, SESSION_MSG_TIMEOUT)
+                        .send_timeout(
+                            shell::TtySizeChangeMsg {
+                                req: resize_request.tty_size,
+                                reply: size_change_reply_tx,
+                            },
+                            SESSION_MSG_TIMEOUT,
+                        )
                         .context("sending tty size change to shell->client")?;
-                    shell_to_client_ctl
-                        .tty_size_change_ack
+                    size_change_reply_rx
                         .recv_timeout(SESSION_MSG_TIMEOUT)
                         .context("recving tty size ack")?;
                 }
@@ -1004,14 +1018,20 @@ impl Server {
                     }
                 };
                 let _s = span!(Level::INFO, "lock(shell_to_client_ctl)").entered();
+                let (client_conn_reply_tx, client_conn_reply_rx) = crossbeam_channel::bounded(1);
                 let shell_to_client_ctl = shell_to_client_ctl.lock();
 
                 shell_to_client_ctl
                     .client_connection
-                    .send_timeout(shell::ClientConnectionMsg::Disconnect, SESSION_MSG_TIMEOUT)
+                    .send_timeout(
+                        shell::ClientConnMsg {
+                            req: shell::ClientConnReq::Disconnect,
+                            reply: client_conn_reply_tx,
+                        },
+                        SESSION_MSG_TIMEOUT,
+                    )
                     .context("sending client detach to shell->client")?;
-                let status = shell_to_client_ctl
-                    .client_connection_ack
+                let status = client_conn_reply_rx
                     .recv_timeout(SESSION_MSG_TIMEOUT)
                     .context("getting client conn ack")?;
                 info!("detached session({}), status = {:?}", header.session_name, status);
@@ -1229,17 +1249,13 @@ impl Server {
             }
         }
 
+        // It would be safe to buffer these channels because reply chans are
+        // stapled to requests, but there is no point, because we always
+        // do syncronous RPC style calls so it would not actually
+        // increase parallelism.
         let (client_connection_tx, client_connection_rx) = crossbeam_channel::bounded(0);
-        let (client_connection_ack_tx, client_connection_ack_rx) = crossbeam_channel::bounded(0);
         let (tty_size_change_tx, tty_size_change_rx) = crossbeam_channel::bounded(0);
-        let (tty_size_change_ack_tx, tty_size_change_ack_rx) = crossbeam_channel::bounded(0);
-
         let (heartbeat_tx, heartbeat_rx) = crossbeam_channel::bounded(0);
-        // One slot rather than a rendezvous, so the shell->client thread can
-        // always deposit an ack and get back to its select loop. If the
-        // heartbeat thread gave up waiting, the ack it abandoned sits here and
-        // is discarded by request id on the next pass.
-        let (heartbeat_ack_tx, heartbeat_ack_rx) = crossbeam_channel::bounded(1);
 
         // We make this buffered to avoid blocking during a broadcast. There is
         // no ack chan so we can afford to buffer a bit.
@@ -1251,11 +1267,8 @@ impl Server {
         let shell_to_client_ctl = Arc::new(Mutex::new(shell::ShellToClientCtl {
             next_heartbeat_id: std::sync::atomic::AtomicU64::new(0),
             client_connection: client_connection_tx,
-            client_connection_ack: client_connection_ack_rx,
             tty_size_change: tty_size_change_tx,
-            tty_size_change_ack: tty_size_change_ack_rx,
             heartbeat: heartbeat_tx,
-            heartbeat_ack: heartbeat_ack_rx,
             maybe_switch: maybe_switch_tx,
         }));
 
@@ -1285,11 +1298,8 @@ impl Server {
                     (None, _) => DEFAULT_OUTPUT_SPOOL_LINES,
                 },
                 client_connection: client_connection_rx,
-                client_connection_ack: client_connection_ack_tx,
                 tty_size_change: tty_size_change_rx,
-                tty_size_change_ack: tty_size_change_ack_tx,
                 heartbeat: heartbeat_rx,
-                heartbeat_ack: heartbeat_ack_tx,
                 maybe_switch: maybe_switch_rx,
                 child_exit_notifier: shell_to_client_child_exit_notifier,
                 fetch_metadata: fetch_metadata_rx,

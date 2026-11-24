@@ -239,7 +239,12 @@ fn shutdown_socket(
 }
 
 /// Messages to the shell->client thread to add or remove a client connection.
-pub enum ClientConnectionMsg {
+pub(crate) struct ClientConnMsg {
+    pub req: ClientConnReq,
+    pub reply: crossbeam_channel::Sender<ClientConnectionStatus>,
+}
+
+pub(crate) enum ClientConnReq {
     /// Accept a newly connected client
     New(ClientConnection),
     /// Disconnect the client and exit the shell->client loop since
@@ -248,6 +253,16 @@ pub enum ClientConnectionMsg {
     /// Disconnect the client, but stay around and be ready for
     /// reconnects.
     Disconnect,
+}
+
+pub(crate) struct TtySizeChangeMsg {
+    pub req: TtySize,
+    pub reply: crossbeam_channel::Sender<()>,
+}
+
+pub(crate) struct HeartbeatMsg {
+    pub req: u64,
+    pub reply: crossbeam_channel::Sender<(u64, bool)>,
 }
 
 /// What the shell->client thread returns in response to a
@@ -277,16 +292,11 @@ pub struct ShellToClientArgs {
     pub conn_id: usize,
     pub tty_size: TtySize,
     pub scrollback_lines: usize,
-    pub client_connection: crossbeam_channel::Receiver<ClientConnectionMsg>,
-    pub client_connection_ack: crossbeam_channel::Sender<ClientConnectionStatus>,
-    pub tty_size_change: crossbeam_channel::Receiver<TtySize>,
-    pub tty_size_change_ack: crossbeam_channel::Sender<()>,
+    pub client_connection: crossbeam_channel::Receiver<ClientConnMsg>,
+    pub tty_size_change: crossbeam_channel::Receiver<TtySizeChangeMsg>,
     // Carries the request id that the ack must echo back.
-    pub heartbeat: crossbeam_channel::Receiver<u64>,
+    pub heartbeat: crossbeam_channel::Receiver<HeartbeatMsg>,
     pub maybe_switch: crossbeam_channel::Receiver<MaybeSwitch>,
-    // The request id of the heartbeat this ack answers, and a flag that is
-    // true if the client is still live, false if it has hung up on us.
-    pub heartbeat_ack: crossbeam_channel::Sender<(u64, bool)>,
     pub child_exit_notifier: Arc<ExitNotifier>,
     // The only sending end is the Session's fetch_metadata field, so this
     // closes when the Session is dropped.
@@ -342,7 +352,7 @@ impl SessionInner {
             // block until we get the first connection attached so that we don't
             // drop the initial prompt on the floor
             info!("waiting for initial client connection");
-            let mut client_conn: ClientConnectionMsg = loop {
+            let init_client_conn: ClientConnMsg = loop {
                 crossbeam_channel::select! {
                     recv(args.client_connection) -> client_conn => {
                         break client_conn.context("waiting for initial client connection")?;
@@ -355,12 +365,13 @@ impl SessionInner {
                     },
                 }
             };
-            args.client_connection_ack
-                .send(ClientConnectionStatus::New)
-                .context("sending initial client connection ack")?;
+            if let Err(e) = init_client_conn.reply.send(ClientConnectionStatus::New) {
+                warn!("sending initial client connection ack: {:?}", e);
+            }
+            let mut client_conn = init_client_conn.req;
             info!("got initial client connection");
 
-            let mut resize_cmd = if let ClientConnectionMsg::New(conn) = &client_conn {
+            let mut resize_cmd = if let ClientConnReq::New(conn) = &client_conn {
                 Some(ResizeCmd { size: conn.size.clone(), when: time::Instant::now() })
             } else {
                 None
@@ -370,11 +381,18 @@ impl SessionInner {
                 let mut do_reattach = false;
                 crossbeam_channel::select! {
                     recv(args.client_connection) -> new_connection => {
-                        match new_connection {
-                            Ok(ClientConnectionMsg::New(conn)) => {
+                        let new_conn = match new_connection {
+                            Ok(c) => c,
+                            Err(crossbeam_channel::RecvError) => {
+                                info!("client conn: bailing due to RecvError");
+                                return Ok(())
+                            },
+                        };
+                        match new_conn.req {
+                            ClientConnReq::New(conn) => {
                                 info!("got new connection (rows={}, cols={})", conn.size.rows, conn.size.cols);
                                 do_reattach = true;
-                                let ack = if let ClientConnectionMsg::New(mut old_conn) = client_conn {
+                                let ack = if let ClientConnReq::New(mut old_conn) = client_conn {
                                     Self::write_exit_chunk(&mut old_conn.sink, 0);
                                     shutdown_socket(&old_conn.stream, net::Shutdown::Both)?;
                                     ClientConnectionStatus::Replaced
@@ -403,13 +421,14 @@ impl SessionInner {
                                     size: conn.size.clone(),
                                     when: time::Instant::now().add(REATTACH_RESIZE_DELAY),
                                 });
-                                client_conn = ClientConnectionMsg::New(conn);
+                                client_conn = ClientConnReq::New(conn);
 
-                                args.client_connection_ack.send(ack)
-                                    .context("sending client connection ack")?;
+                                if let Err(e) = new_conn.reply.send(ack) {
+                                    warn!("sending client connection ack: {:?}", e);
+                                }
                             }
-                            Ok(ClientConnectionMsg::Disconnect) => {
-                                let ack = if let ClientConnectionMsg::New(mut old_conn) = client_conn {
+                            ClientConnReq::Disconnect => {
+                                let ack = if let ClientConnReq::New(mut old_conn) = client_conn {
                                     info!("disconnect, shutting down client stream");
                                     Self::write_exit_chunk(&mut old_conn.sink, 0);
                                     shutdown_socket(&old_conn.stream, net::Shutdown::Both)?;
@@ -418,13 +437,14 @@ impl SessionInner {
                                     info!("disconnect, no client stream to shut down");
                                     ClientConnectionStatus::DetachNone
                                 };
-                                client_conn = ClientConnectionMsg::Disconnect;
+                                client_conn = ClientConnReq::Disconnect;
 
-                                args.client_connection_ack.send(ack)
-                                    .context("sending client disconnect ack")?;
+                                if let Err(e) = new_conn.reply.send(ack) {
+                                    warn!("sending client disconnect ack: {:?}", e);
+                                }
                             }
-                            Ok(ClientConnectionMsg::DisconnectExit(exit_status)) => {
-                                let ack = if let ClientConnectionMsg::New(mut old_conn) = client_conn {
+                            ClientConnReq::DisconnectExit(exit_status) => {
+                                let ack = if let ClientConnReq::New(mut old_conn) = client_conn {
                                     info!("disconnectexit({}), shutting down client stream",
                                            exit_status);
 
@@ -440,41 +460,43 @@ impl SessionInner {
                                           exit_status);
                                     ClientConnectionStatus::DetachNone
                                 };
-                                args.client_connection_ack.send(ack)
-                                    .context("sending client disconnect exit ack")?;
+                                if let Err(e) = new_conn.reply.send(ack) {
+                                    warn!("sending client disconnect exit ack: {:?}", e);
+                                }
 
                                 return Ok(());
                             }
-
-                            // SessionInner getting dropped, so this thread should go away.
-                            Err(crossbeam_channel::RecvError) => {
-                                info!("client conn: bailing due to RecvError");
-                                return Ok(())
-                            },
                         }
                     }
-                    recv(args.tty_size_change) -> new_size => {
-                        match new_size {
-                            Ok(size) => {
-                                info!("resize size={:?}", size);
-                                output_spool.resize(size.clone());
-                                resize_cmd = Some(ResizeCmd {
-                                    size,
-                                    // No delay needed for ordinary resizes, just
-                                    // for reconnects.
-                                    when: time::Instant::now(),
-                                });
-                                args.tty_size_change_ack.send(())
-                                    .context("sending size change ack")?;
-                            }
+                    recv(args.tty_size_change) -> size => {
+                        let size = match size {
+                            Ok(s) => s,
                             Err(err) => {
                                 warn!("size change: bailing due to: {:?}", err);
                                 return Ok(());
-                            }
+                            },
+                        };
+                        info!("resize size={:?}", size.req);
+                        output_spool.resize(size.req.clone());
+                        resize_cmd = Some(ResizeCmd {
+                            size: size.req,
+                            // No delay needed for ordinary resizes, just
+                            // for reconnects.
+                            when: time::Instant::now(),
+                        });
+                        if let Err(e) = size.reply.send(()) {
+                            warn!("sending resize ack: {:?}", e);
                         }
                     }
-                    recv(args.heartbeat) -> request_id => {
-                        let client_present = if let ClientConnectionMsg::New(conn) = &mut client_conn {
+                    recv(args.heartbeat) -> heartbeat => {
+                        let heartbeat = match heartbeat {
+                            Ok(h) => h,
+                            Err(err) => {
+                                warn!("err recving heartbeat msg: {:?}", err);
+                                return Ok(());
+                            }
+                        };
+                        let client_present = if let ClientConnReq::New(conn) = &mut client_conn {
                             let chunk = Chunk { kind: ChunkKind::Heartbeat, buf: &[] };
                             let write_result = if test_hooks::maybe_fail("heartbeat-write") {
                                 Err(io::Error::from_raw_os_error(libc::ECONNRESET))
@@ -502,13 +524,14 @@ impl SessionInner {
                         };
 
                         if !client_present {
-                            client_conn = ClientConnectionMsg::Disconnect;
+                            client_conn = ClientConnReq::Disconnect;
                         }
 
                         test_hooks::emit("daemon-wrote-heartbeat");
 
-                        args.heartbeat_ack.send((request_id.unwrap_or(0), client_present))
-                            .context("sending heartbeat ack")?;
+                        if let Err(e) = heartbeat.reply.send((heartbeat.req, client_present)) {
+                            warn!("sending heartbeat ack: {:?}", e);
+                        }
                     }
                     recv(args.maybe_switch) -> maybe_switch => {
                         let maybe_switch = match maybe_switch {
@@ -519,7 +542,7 @@ impl SessionInner {
                             },
                         };
 
-                        let conn = if let ClientConnectionMsg::New(c) = &mut client_conn {
+                        let conn = if let ClientConnReq::New(c) = &mut client_conn {
                             c
                         } else {
                             info!("got MaybeSwitch, but no attached client, dropping");
@@ -547,7 +570,7 @@ impl SessionInner {
                                 if let Err(err) = shutdown_socket(&conn.stream, net::Shutdown::Both) {
                                     warn!("shutting down client after MaybeSwitch error: {:?}", err);
                                 }
-                                client_conn = ClientConnectionMsg::Disconnect;
+                                client_conn = ClientConnReq::Disconnect;
                             }
                         }
                     }
@@ -588,7 +611,7 @@ impl SessionInner {
                 if do_reattach {
                     info!("executing reattach protocol");
                     let restore_buf = output_spool.restore_buffer();
-                    if let (true, ClientConnectionMsg::New(conn)) =
+                    if let (true, ClientConnReq::New(conn)) =
                         (!restore_buf.is_empty(), &mut client_conn)
                     {
                         trace!("restore chunk='{}'", String::from_utf8_lossy(&restore_buf[..]));
@@ -639,7 +662,7 @@ impl SessionInner {
 
                     // If we have an attached client conn, make a best effort
                     // attempt to forward the exit status.
-                    if let ClientConnectionMsg::New(mut conn) = client_conn {
+                    if let ClientConnReq::New(mut conn) = client_conn {
                         if let Some(exit_status) =
                             args.child_exit_notifier.wait(Some(SHELL_EXIT_WAIT_DUR))
                         {
@@ -689,7 +712,7 @@ impl SessionInner {
                 }
 
                 let mut reset_client_conn = false;
-                if let (ClientConnectionMsg::New(conn), true) =
+                if let (ClientConnReq::New(conn), true) =
                     (&mut client_conn, has_seen_prompt_sentinel)
                 {
                     let chunk = Chunk { kind: ChunkKind::Data, buf };
@@ -715,7 +738,7 @@ impl SessionInner {
                     }
                 }
                 if reset_client_conn {
-                    client_conn = ClientConnectionMsg::Disconnect;
+                    client_conn = ClientConnReq::Disconnect;
                 }
             }
         };
@@ -771,20 +794,23 @@ impl SessionInner {
 
         {
             let _s = span!(Level::INFO, "initial_attach_lock(shell_to_client_ctl)").entered();
+            let (client_conn_reply_tx, client_conn_reply_rx) = crossbeam_channel::bounded(1);
             let shell_to_client_ctl = self.shell_to_client_ctl.lock();
             shell_to_client_ctl
                 .client_connection
                 .send_timeout(
-                    ClientConnectionMsg::New(ClientConnection {
-                        sink: output_sink,
-                        size: init_tty_size,
-                        stream: shell_to_client_client_stream,
-                    }),
+                    ClientConnMsg {
+                        req: ClientConnReq::New(ClientConnection {
+                            sink: output_sink,
+                            size: init_tty_size,
+                            stream: shell_to_client_client_stream,
+                        }),
+                        reply: client_conn_reply_tx,
+                    },
                     SHELL_TO_CLIENT_CTL_TIMEOUT,
                 )
                 .context("attaching new client stream to shell->client thread")?;
-            let status = shell_to_client_ctl
-                .client_connection_ack
+            let status = client_conn_reply_rx
                 .recv_timeout(SHELL_TO_CLIENT_CTL_TIMEOUT)
                 .context("waiting for client connection ack (1)")?;
             info!("client connection status={:?}", status);
@@ -837,16 +863,22 @@ impl SessionInner {
             let c_done = child_done.load(Ordering::Acquire);
             {
                 let _s = span!(Level::INFO, "disconnect_lock(shell_to_client_ctl)").entered();
-                let shell_to_client_ctl = self.shell_to_client_ctl.lock();
-                let send_res = shell_to_client_ctl.client_connection.send_timeout(if c_done {
+                let (client_conn_reply_tx, client_conn_reply_rx) = crossbeam_channel::bounded(1);
+                let conn_req = if c_done {
                     let exit_status = child_exit_notifier
                         .wait(Some(Duration::from_secs(0)))
                         .unwrap_or(1);
                     info!("telling shell->client to disconnect with exit status {}", exit_status);
-                    ClientConnectionMsg::DisconnectExit(exit_status)
+                    ClientConnReq::DisconnectExit(exit_status)
                 } else {
                     info!("telling shell->client to disconnect without reaping");
-                    ClientConnectionMsg::Disconnect
+                    ClientConnReq::Disconnect
+                };
+
+                let shell_to_client_ctl = self.shell_to_client_ctl.lock();
+                let send_res = shell_to_client_ctl.client_connection.send_timeout(ClientConnMsg {
+                    req: conn_req,
+                    reply: client_conn_reply_tx,
                 }, SHELL_TO_CLIENT_CTL_TIMEOUT);
 
                 if let Err(send_timeout_err) = send_res {
@@ -856,7 +888,7 @@ impl SessionInner {
                     // to handle that ourselves
                     shutdown_socket(&client_stream, net::Shutdown::Both)?;
                 } else {
-                    let status = shell_to_client_ctl.client_connection_ack.recv_timeout(SHELL_TO_CLIENT_CTL_TIMEOUT)
+                    let status = client_conn_reply_rx.recv_timeout(SHELL_TO_CLIENT_CTL_TIMEOUT)
                         .context("waiting for client connection ack (2)")?;
                     info!("detached from shell->client, status = {:?}", status);
                 }
@@ -1077,15 +1109,17 @@ impl SessionInner {
                         return Ok(());
                     }
                     {
+                        let (heartbeat_reply_tx, heartbeat_reply_rx) =
+                            crossbeam_channel::bounded(1);
                         let shell_to_client_ctl = self.shell_to_client_ctl.lock();
 
                         let request_id =
                             shell_to_client_ctl.next_heartbeat_id.fetch_add(1, Ordering::Relaxed);
 
-                        match shell_to_client_ctl
-                            .heartbeat
-                            .send_timeout(request_id, SHELL_TO_CLIENT_CTL_TIMEOUT)
-                        {
+                        match shell_to_client_ctl.heartbeat.send_timeout(
+                            HeartbeatMsg { req: request_id, reply: heartbeat_reply_tx },
+                            SHELL_TO_CLIENT_CTL_TIMEOUT,
+                        ) {
                             // If the channel is disconnected, it means that the
                             // shell exited and the shell->client process exited
                             // cleanly. We should not raise a ruckus.
@@ -1104,10 +1138,7 @@ impl SessionInner {
                             _ => {}
                         }
                         let client_present = loop {
-                            match shell_to_client_ctl
-                                .heartbeat_ack
-                                .recv_timeout(SHELL_TO_CLIENT_CTL_TIMEOUT)
-                            {
+                            match heartbeat_reply_rx.recv_timeout(SHELL_TO_CLIENT_CTL_TIMEOUT) {
                                 // If the channel is disconnected, it means that
                                 // the shell exited and the shell->client
                                 // process exited cleanly. We should not raise a
@@ -1188,13 +1219,16 @@ impl SessionInner {
 
     #[instrument(skip_all)]
     fn action_detach(&self) -> anyhow::Result<()> {
+        let (client_conn_reply_tx, client_conn_reply_rx) = crossbeam_channel::bounded(1);
         let shell_to_client_ctl = self.shell_to_client_ctl.lock();
         shell_to_client_ctl
             .client_connection
-            .send_timeout(ClientConnectionMsg::Disconnect, SHELL_TO_CLIENT_CTL_TIMEOUT)
+            .send_timeout(
+                ClientConnMsg { req: ClientConnReq::Disconnect, reply: client_conn_reply_tx },
+                SHELL_TO_CLIENT_CTL_TIMEOUT,
+            )
             .context("signaling client detach to shell->client thread")?;
-        let status = shell_to_client_ctl
-            .client_connection_ack
+        let status = client_conn_reply_rx
             .recv_timeout(SHELL_TO_CLIENT_CTL_TIMEOUT)
             .context("waiting for client connection ack (3)")?;
 
@@ -1213,30 +1247,17 @@ pub struct ShellToClientCtl {
     /// shell->client thread by sending it down this channel. A disconnect
     /// is signaled by sending None down this channel. Dropping the channel
     /// entirely causes the shell->client thread to exit.
-    pub client_connection: crossbeam_channel::Sender<ClientConnectionMsg>,
-    /// A control channel for the shell->client thread. Acks the addition of a
-    /// fresh client connection.
-    pub client_connection_ack: crossbeam_channel::Receiver<ClientConnectionStatus>,
+    pub client_connection: crossbeam_channel::Sender<ClientConnMsg>,
 
     /// A control channel for the shell->client thread. Used to signal size
     /// changes so that the output spool will correctly reflect the size of
     /// the user's tty.
-    pub tty_size_change: crossbeam_channel::Sender<TtySize>,
-    /// A control channel for the shell->client thread. Acks the completion of a
-    /// spool resize.
-    pub tty_size_change_ack: crossbeam_channel::Receiver<()>,
+    pub tty_size_change: crossbeam_channel::Sender<TtySizeChangeMsg>,
 
     // A control channel telling the shell->client thread to issue
     // a heartbeat to check if the client is still listening. The payload
     // is a request id, which the ack echoes back.
-    pub heartbeat: crossbeam_channel::Sender<u64>,
-    // The request id of the heartbeat this ack answers, and a flag that is
-    // true if the client is still listening, false if it has hung up on us.
-    //
-    // The heartbeat thread gives up waiting for an ack that takes too long,
-    // so a late ack can still turn up afterwards. The id is what lets the
-    // next read tell that ack apart from its own and discard it.
-    pub heartbeat_ack: crossbeam_channel::Receiver<(u64, bool)>,
+    pub heartbeat: crossbeam_channel::Sender<HeartbeatMsg>,
 
     /// The id to give the next heartbeat request.
     pub next_heartbeat_id: std::sync::atomic::AtomicU64,
